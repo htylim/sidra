@@ -1,0 +1,205 @@
+:root {
+  color: #17201f;
+  background: #f6f8f7;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+.panel {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  min-height: 100vh;
+  background: #f6f8f7;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid #dce3e0;
+  background: #ffffff;
+}
+
+.brand-mark {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 6px;
+  background: #087c71;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.header h1 {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+}
+
+.toolbar-button,
+.options-button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #cfd9d5;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.page-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 12px;
+  padding: 10px;
+  border: 1px solid #d8e1dd;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.page-icon {
+  color: #087c71;
+}
+
+.page-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.page-title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-status {
+  color: #62716d;
+  font-size: 12px;
+}
+
+.chevron {
+  color: #62716d;
+  font-size: 20px;
+}
+
+.chat {
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 12px;
+}
+
+.empty-state {
+  display: grid;
+  min-height: 100%;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.empty-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid #c7dbd5;
+  border-radius: 8px;
+  color: #087c71;
+  background: #eef8f5;
+}
+
+.empty-state h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.empty-state p {
+  max-width: 240px;
+  margin: 0;
+  color: #62716d;
+  font-size: 13px;
+}
+
+.empty-state button,
+.send-button {
+  border: 1px solid #087c71;
+  border-radius: 6px;
+  background: #087c71;
+  color: #ffffff;
+  font-weight: 650;
+}
+
+.empty-state button {
+  padding: 8px 10px;
+}
+
+.message {
+  width: fit-content;
+  max-width: 88%;
+  margin-bottom: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.message.user {
+  margin-left: auto;
+  background: #087c71;
+  color: #ffffff;
+}
+
+.message.assistant {
+  border: 1px solid #d8e1dd;
+  background: #ffffff;
+}
+
+.message.status {
+  margin-inline: auto;
+  border: 1px solid #d8e1dd;
+  color: #62716d;
+  background: #ffffff;
+}
+
+.composer {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid #dce3e0;
+  background: #ffffff;
+}
+
+.composer textarea {
+  min-height: 86px;
+  resize: vertical;
+  border: 1px solid #cfd9d5;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.composer-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.send-button {
+  min-height: 32px;
+  padding: 0 12px;
+}

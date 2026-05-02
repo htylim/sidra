@@ -3,6 +3,10 @@ node_modules/
 dist/
 build/
 coverage/
+.local/
+.playwright-mcp/
+playwright-report/
+test-results/
 .env
 .env.*
 !.env.example
