@@ -1,4 +1,4 @@
-- Read [ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Read [ENGINEERING-GUIDELINES.md](docs/ENGINEERING-GUIDELINES.md)
+- Read [ARCHITECTURE.md](docs/ARCHITECTURE.md). Treat it as the source of truth for Sidra-specific ownership boundaries.
 - Keep docs current when code ownership or product behavior changes.
 - Prefer concise current-state docs over long history logs.
