@@ -72,6 +72,35 @@ export function parseExtensionToBridge(input: unknown): ParseResult<ExtensionToB
   }
 }
 
+export function parseBridgeToExtension(input: unknown): ParseResult<BridgeToExtension> {
+  if (!isRecord(input)) return invalid("Message must be an object");
+  if (input.version !== PROTOCOL_VERSION) return invalid("Unsupported protocol version");
+
+  switch (input.type) {
+    case "bridge.ready":
+      return { ok: true, value: input as BridgeToExtension };
+    case "session.started":
+      if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
+      if (!isNonEmptyString(input.bridgeSessionId)) return invalid("bridgeSessionId is required");
+      return { ok: true, value: input as BridgeToExtension };
+    case "agent.event":
+      if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
+      if (!isAgentEvent(input.event)) return invalid("event is invalid");
+      return { ok: true, value: input as BridgeToExtension };
+    case "session.error":
+      if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
+      if (!isNonEmptyString(input.message)) return invalid("message is required");
+      if (!optionalString(input.code)) return invalid("code is invalid");
+      return { ok: true, value: input as BridgeToExtension };
+    case "bridge.error":
+      if (!isNonEmptyString(input.message)) return invalid("message is required");
+      if (!optionalString(input.code)) return invalid("code is invalid");
+      return { ok: true, value: input as BridgeToExtension };
+    default:
+      return invalid("Unknown message");
+  }
+}
+
 function invalid(error: string): ParseResult<never> {
   return { ok: false, error };
 }
@@ -85,6 +114,19 @@ function isPageContext(value: unknown): value is PageContext {
     optionalString(value.title) &&
     optionalString(value.text)
   );
+}
+
+function isAgentEvent(value: unknown): value is AgentEvent {
+  if (!isRecord(value)) return false;
+
+  switch (value.type) {
+    case "assistant.text.delta":
+      return typeof value.text === "string";
+    case "assistant.done":
+      return true;
+    default:
+      return false;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

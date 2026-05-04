@@ -104,6 +104,69 @@ describe("mock bridge chat path", () => {
       { type: "bridge.error", version: 1, message: "Invalid JSON", code: "invalid_message" }
     ]);
   });
+
+  it("dispatches a later client session while an earlier session is still pending", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const handled: unknown[] = [];
+    let resolveFirstMessage: (() => void) | undefined;
+    let secondMessageDispatched: (() => void) | undefined;
+    const sawSecondMessage = new Promise<void>((resolve) => {
+      secondMessageDispatched = resolve;
+    });
+
+    runNativeMessagingBridge(input, output, {
+      bridge: {
+        async handleMessage(message: unknown) {
+          handled.push(message);
+          if (isMessageForClientSession(message, "page-1")) {
+            await new Promise<void>((resolve) => {
+              resolveFirstMessage = resolve;
+            });
+            return;
+          }
+          if (isMessageForClientSession(message, "page-2")) {
+            secondMessageDispatched?.();
+          }
+        }
+      }
+    });
+
+    input.write(
+      Buffer.concat([
+        encodeNativeMessage({
+          type: "session.send",
+          version: 1,
+          clientSessionId: "page-1",
+          prompt: "Long prompt"
+        }),
+        encodeNativeMessage({
+          type: "session.send",
+          version: 1,
+          clientSessionId: "page-2",
+          prompt: "Independent prompt"
+        })
+      ])
+    );
+
+    await sawSecondMessage;
+    resolveFirstMessage?.();
+
+    expect(handled).toEqual([
+      {
+        type: "session.send",
+        version: 1,
+        clientSessionId: "page-1",
+        prompt: "Long prompt"
+      },
+      {
+        type: "session.send",
+        version: 1,
+        clientSessionId: "page-2",
+        prompt: "Independent prompt"
+      }
+    ]);
+  });
 });
 
 function encodeNativeMessage(message: unknown) {
@@ -143,4 +206,13 @@ function collectNativeMessages(output: PassThrough, expectedCount: number) {
       }
     });
   });
+}
+
+function isMessageForClientSession(message: unknown, clientSessionId: string) {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    "clientSessionId" in message &&
+    message.clientSessionId === clientSessionId
+  );
 }
