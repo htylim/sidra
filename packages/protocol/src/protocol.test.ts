@@ -39,6 +39,37 @@ describe("extension-to-bridge protocol validation", () => {
   });
 });
 
+describe("session.cancel protocol validation", () => {
+  it("accepts session.cancel with a clientSessionId", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.cancel",
+        version: 1,
+        clientSessionId: "page-1"
+      })
+    ).toMatchObject({ ok: true });
+  });
+
+  it("rejects session.cancel without a clientSessionId", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.cancel",
+        version: 1
+      })
+    ).toEqual({ ok: false, error: "clientSessionId is required" });
+  });
+
+  it("keeps rejecting unknown commands", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.abort",
+        version: 1,
+        clientSessionId: "page-1"
+      })
+    ).toEqual({ ok: false, error: "Unknown command" });
+  });
+});
+
 describe("bridge-to-extension protocol validation", () => {
   it("accepts valid bridge messages and rejects malformed assistant deltas", () => {
     expect(parseBridgeToExtension({ type: "bridge.ready", version: 1 })).toMatchObject({ ok: true });
@@ -84,6 +115,14 @@ describe("bridge-to-extension protocol validation", () => {
       })
     ).toMatchObject({ ok: true });
 
+    expect(
+      parseBridgeToExtension({
+        type: "agent.event",
+        version: 1,
+        clientSessionId: "page-1",
+        event: { type: "assistant.cancelled" }
+      })
+    ).toMatchObject({ ok: true });
     expect(
       parseBridgeToExtension({
         type: "agent.event",

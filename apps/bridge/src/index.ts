@@ -1,27 +1,16 @@
 import {
-  type AgentEvent,
   type BridgeToExtension,
   type ExtensionToBridge,
   parseExtensionToBridge
 } from "@sidra/protocol";
+import { BridgeSessionManager, type AgentProvider, type AgentSendInput, type AgentSession } from "./session-manager.js";
 
 export type BridgeRuntime = {
   emit(message: BridgeToExtension): void;
 };
 
-export type AgentSession = {
-  send(prompt: string, signal: AbortSignal): AsyncIterable<AgentEvent>;
-  close(): Promise<void>;
-};
-
-export type AgentProvider = {
-  id: "codex";
-  createSession(): Promise<AgentSession>;
-};
-
 export function createBridge(runtime: BridgeRuntime, provider: AgentProvider = createMockProvider()) {
-  const sessions = new Map<string, AgentSession>();
-  let nextBridgeSessionId = 1;
+  const sessions = new BridgeSessionManager({ provider, emit: (message) => runtime.emit(message) });
 
   async function handleMessage(input: unknown): Promise<void> {
     const parsed = parseExtensionToBridge(input);
@@ -35,39 +24,18 @@ export function createBridge(runtime: BridgeRuntime, provider: AgentProvider = c
 
   async function handleValidatedMessage(message: ExtensionToBridge): Promise<void> {
     switch (message.type) {
-      case "session.start": {
-        const existing = sessions.get(message.clientSessionId);
-        if (existing) await existing.close();
-
-        const session = await provider.createSession();
-        sessions.set(message.clientSessionId, session);
-        runtime.emit({
-          type: "session.started",
-          version: 1,
-          clientSessionId: message.clientSessionId,
-          bridgeSessionId: `mock-${nextBridgeSessionId++}`
+      case "session.start":
+        await sessions.startSession(message.clientSessionId, message.providerId);
+        return;
+      case "session.send":
+        await sessions.sendPrompt(message.clientSessionId, {
+          prompt: message.prompt,
+          pageContext: message.pageContext
         });
         return;
-      }
-      case "session.send": {
-        const session = sessions.get(message.clientSessionId);
-        if (!session) {
-          runtime.emit({
-            type: "session.error",
-            version: 1,
-            clientSessionId: message.clientSessionId,
-            message: "Session has not been started",
-            code: "session_not_started"
-          });
-          return;
-        }
-
-        const controller = new AbortController();
-        for await (const event of session.send(message.prompt, controller.signal)) {
-          runtime.emit({ type: "agent.event", version: 1, clientSessionId: message.clientSessionId, event });
-        }
+      case "session.cancel":
+        await sessions.cancelTurn(message.clientSessionId);
         return;
-      }
       case "heartbeat":
         return;
     }
@@ -81,7 +49,8 @@ function createMockProvider(): AgentProvider {
     id: "codex",
     async createSession() {
       return {
-        async *send(prompt: string) {
+        async *send(input: AgentSendInput) {
+          const prompt = input.prompt;
           yield { type: "assistant.text.delta", text: `Mock response to: ${prompt}` };
           yield { type: "assistant.done" };
         },
@@ -92,3 +61,4 @@ function createMockProvider(): AgentProvider {
 }
 
 export { runNativeMessagingBridge } from "./native-messaging.js";
+export type { AgentProvider, AgentSendInput, AgentSession };

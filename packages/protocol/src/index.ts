@@ -24,11 +24,13 @@ export type ExtensionToBridge =
       prompt: string;
       pageContext?: PageContext;
     }
+  | { type: "session.cancel"; version: 1; clientSessionId: string }
   | { type: "heartbeat"; version: 1 };
 
 export type AgentEvent =
   | { type: "assistant.text.delta"; text: string }
-  | { type: "assistant.done" };
+  | { type: "assistant.done" }
+  | { type: "assistant.cancelled" };
 
 export type BridgeToExtension =
   | {
@@ -64,6 +66,9 @@ export function parseExtensionToBridge(input: unknown): ParseResult<ExtensionToB
       if (input.pageContext !== undefined && !isPageContext(input.pageContext)) {
         return invalid("pageContext is invalid");
       }
+      return { ok: true, value: input as ExtensionToBridge };
+    case "session.cancel":
+      if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
       return { ok: true, value: input as ExtensionToBridge };
     case "heartbeat":
       return { ok: true, value: input as ExtensionToBridge };
@@ -123,6 +128,7 @@ function isAgentEvent(value: unknown): value is AgentEvent {
     case "assistant.text.delta":
       return typeof value.text === "string";
     case "assistant.done":
+    case "assistant.cancelled":
       return true;
     default:
       return false;

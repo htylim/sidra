@@ -1,0 +1,171 @@
+import type { AgentEvent, BridgeToExtension, PageContext, ProviderId } from "@sidra/protocol";
+
+export type AgentSendInput = {
+  prompt: string;
+  pageContext?: PageContext;
+};
+
+export type AgentSession = {
+  send(input: AgentSendInput, signal: AbortSignal): AsyncIterable<AgentEvent>;
+  close(): Promise<void>;
+};
+
+export type AgentProvider = {
+  id: ProviderId;
+  createSession(): Promise<AgentSession>;
+};
+
+export type AgentSessionOptions = {
+  clientSessionId: string;
+  providerId: ProviderId;
+};
+
+export type ManagedSession = {
+  providerSession: AgentSession;
+  inFlight?: {
+    controller: AbortController;
+    done: Promise<void>;
+  };
+};
+
+type BridgeSessionManagerOptions = {
+  provider: AgentProvider;
+  emit(message: BridgeToExtension): void;
+};
+
+export class BridgeSessionManager {
+  private readonly sessions = new Map<string, ManagedSession>();
+  private readonly sessionStarts = new Map<string, Promise<void>>();
+  private nextBridgeSessionId = 1;
+
+  constructor(private readonly options: BridgeSessionManagerOptions) {}
+
+  async startSession(clientSessionId: string, providerId: ProviderId): Promise<void> {
+    const previousStart = this.sessionStarts.get(clientSessionId) ?? Promise.resolve();
+    const start = previousStart.catch(() => {}).then(() => this.replaceSession(clientSessionId, providerId));
+    this.sessionStarts.set(clientSessionId, start);
+    try {
+      await start;
+    } finally {
+      if (this.sessionStarts.get(clientSessionId) === start) {
+        this.sessionStarts.delete(clientSessionId);
+      }
+    }
+  }
+
+  async sendPrompt(clientSessionId: string, input: AgentSendInput): Promise<void> {
+    await this.sessionStarts.get(clientSessionId);
+    const session = this.sessions.get(clientSessionId);
+    if (!session) {
+      this.options.emit({
+        type: "session.error",
+        version: 1,
+        clientSessionId,
+        message: "Session has not been started",
+        code: "session_not_started"
+      });
+      return;
+    }
+
+    if (session.inFlight) {
+      this.options.emit({
+        type: "session.error",
+        version: 1,
+        clientSessionId,
+        message: "A turn is already in flight for this session",
+        code: "turn_in_flight"
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+    const inFlight: ManagedSession["inFlight"] = {
+      controller,
+      done: Promise.resolve()
+    };
+
+    inFlight.done = this.runProviderSend(clientSessionId, session.providerSession, input, controller).finally(() => {
+      if (session.inFlight === inFlight) {
+        delete session.inFlight;
+      }
+    });
+    session.inFlight = inFlight;
+    await inFlight.done;
+  }
+
+  async cancelTurn(clientSessionId: string): Promise<void> {
+    await this.sessionStarts.get(clientSessionId);
+    const session = this.sessions.get(clientSessionId);
+    if (!session?.inFlight) {
+      this.options.emit({
+        type: "session.error",
+        version: 1,
+        clientSessionId,
+        message: "No in-flight turn to cancel",
+        code: "no_in_flight_turn"
+      });
+      return;
+    }
+
+    const inFlight = session.inFlight;
+    inFlight.controller.abort();
+    await inFlight.done;
+    this.options.emit({
+      type: "agent.event",
+      version: 1,
+      clientSessionId,
+      event: { type: "assistant.cancelled" }
+    });
+  }
+
+  private async replaceSession(clientSessionId: string, providerId: ProviderId): Promise<void> {
+    if (providerId !== this.options.provider.id) {
+      this.options.emit({
+        type: "session.error",
+        version: 1,
+        clientSessionId,
+        message: "Provider is not available",
+        code: "provider_unavailable"
+      });
+      return;
+    }
+
+    const existing = this.sessions.get(clientSessionId);
+    if (existing) {
+      existing.inFlight?.controller.abort();
+      await existing.providerSession.close();
+    }
+
+    const providerSession = await this.options.provider.createSession();
+    this.sessions.set(clientSessionId, { providerSession });
+    this.options.emit({
+      type: "session.started",
+      version: 1,
+      clientSessionId,
+      bridgeSessionId: `mock-${this.nextBridgeSessionId++}`
+    });
+  }
+
+  private async runProviderSend(
+    clientSessionId: string,
+    providerSession: AgentSession,
+    input: AgentSendInput,
+    controller: AbortController
+  ): Promise<void> {
+    try {
+      for await (const event of providerSession.send(input, controller.signal)) {
+        if (controller.signal.aborted) return;
+        this.options.emit({ type: "agent.event", version: 1, clientSessionId, event });
+      }
+    } catch {
+      if (controller.signal.aborted) return;
+      this.options.emit({
+        type: "session.error",
+        version: 1,
+        clientSessionId,
+        message: "Provider send failed",
+        code: "provider_error"
+      });
+    }
+  }
+}

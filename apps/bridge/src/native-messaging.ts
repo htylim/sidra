@@ -15,7 +15,6 @@ export function runNativeMessagingBridge(
 ) {
   const bridge = options.bridge ?? createBridge({ emit: (message) => writeNativeMessage(output, message) });
   let buffer = Buffer.alloc(0);
-  const clientSessionQueues = new Map<string, Promise<void>>();
 
   writeNativeMessage(output, { type: "bridge.ready", version: 1 });
 
@@ -28,21 +27,7 @@ export function runNativeMessagingBridge(
       return;
     }
 
-    const clientSessionId = getClientSessionId(message);
-    if (!clientSessionId) {
-      void dispatchMessage(message);
-      return;
-    }
-
-    const previous = clientSessionQueues.get(clientSessionId) ?? Promise.resolve();
-    const next = previous
-      .then(() => dispatchMessage(message))
-      .finally(() => {
-        if (clientSessionQueues.get(clientSessionId) === next) {
-          clientSessionQueues.delete(clientSessionId);
-        }
-      });
-    clientSessionQueues.set(clientSessionId, next);
+    void dispatchMessage(message);
   }
 
   async function dispatchMessage(message: unknown) {
@@ -65,14 +50,6 @@ export function runNativeMessagingBridge(
       enqueueRawMessage(raw);
     }
   });
-}
-
-function getClientSessionId(message: unknown) {
-  if (typeof message !== "object" || message === null || !("clientSessionId" in message)) {
-    return undefined;
-  }
-  const clientSessionId = message.clientSessionId;
-  return typeof clientSessionId === "string" ? clientSessionId : undefined;
 }
 
 export function writeNativeMessage(output: NodeJS.WritableStream, message: unknown) {
