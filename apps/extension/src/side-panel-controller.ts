@@ -22,6 +22,7 @@ export type SidePanelController = {
   getSnapshot(): SidePanelSnapshot;
   subscribe(listener: () => void): () => void;
   sendPrompt(prompt: string): boolean;
+  newChat(): void;
   retryBridge(): void;
 };
 
@@ -92,6 +93,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       };
     },
     sendPrompt: (prompt) => coordinator.sendPrompt(prompt),
+    newChat: () => coordinator.newChat(),
     retryBridge: () => connection.retry()
   };
 }

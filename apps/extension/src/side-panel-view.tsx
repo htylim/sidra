@@ -4,6 +4,7 @@ import type { SidePanelSnapshot } from "./side-panel-controller";
 export function SidePanelView(props: {
   snapshot: SidePanelSnapshot;
   onSendPrompt(prompt: string): boolean;
+  onNewChat(): void;
   onRetryBridge(): void;
 }) {
   const [draft, setDraft] = useState("");
@@ -22,7 +23,7 @@ export function SidePanelView(props: {
       <header className="header">
         <div className="brand-mark">S</div>
         <h1>Sidra</h1>
-        <button type="button" className="toolbar-button" aria-label="New chat">
+        <button type="button" className="toolbar-button" aria-label="New chat" onClick={props.onNewChat}>
           +
         </button>
       </header>

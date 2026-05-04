@@ -29,3 +29,15 @@ describe("side panel architecture boundary", () => {
     expect(source).not.toContain("connectNative");
   });
 });
+
+describe("side panel New Chat wiring", () => {
+  it("passes controller.newChat into the New Chat button path", () => {
+    const sidePanelSource = readSource("./side-panel.tsx");
+    const viewSource = readSource("./side-panel-view.tsx");
+
+    expect(sidePanelSource).toContain("onNewChat={sidePanelController.newChat}");
+    expect(viewSource).toContain("onNewChat(): void");
+    expect(viewSource).toContain('aria-label="New chat"');
+    expect(viewSource).toContain("onClick={props.onNewChat}");
+  });
+});

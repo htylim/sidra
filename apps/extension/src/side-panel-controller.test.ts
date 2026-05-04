@@ -176,3 +176,101 @@ describe("SidePanelController", () => {
     });
   });
 });
+
+describe("SidePanelController newChat", () => {
+  it("clears the active transcript and pending prompts", () => {
+    const { controller, ports } = createHarness();
+
+    controller.sendPrompt("first");
+    controller.sendPrompt("second");
+    controller.newChat();
+
+    expect(controller.getSnapshot().activeSession).toMatchObject({
+      pendingPromptCount: 0,
+      sessionStarted: false,
+      starting: true,
+      transcript: []
+    });
+    expect(ports[0].postedMessages).toEqual([
+      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.reset", version: 1, clientSessionId: "client-1" }
+    ]);
+  });
+
+  it("sends session.reset for the active clientSessionId when provider state may exist", () => {
+    const { controller, ports } = createHarness();
+
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+    controller.newChat();
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.reset",
+      version: 1,
+      clientSessionId: "client-1"
+    });
+  });
+
+  it("does not send reset for a never-started empty session", () => {
+    const { controller, connectNative } = createHarness();
+
+    controller.newChat();
+
+    expect(connectNative).not.toHaveBeenCalled();
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
+  });
+
+  it("keeps bridge connection state when clearing local session state", () => {
+    const { controller, ports } = createHarness();
+
+    controller.sendPrompt("first");
+    ports[0].emitMessage({ type: "bridge.ready", version: 1 });
+    controller.newChat();
+
+    expect(controller.getSnapshot().bridge).toEqual({
+      connected: true,
+      ready: true,
+      setupError: undefined
+    });
+  });
+
+  it("uses the fresh session.started event after reset before sending later prompts", () => {
+    const { controller, ports } = createHarness();
+
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+    controller.newChat();
+    controller.sendPrompt("after reset");
+
+    expect(ports[0].postedMessages).toEqual([
+      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.reset", version: 1, clientSessionId: "client-1" }
+    ]);
+
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toEqual([
+      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.reset", version: 1, clientSessionId: "client-1" },
+      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "after reset" }
+    ]);
+  });
+
+  it("keeps the visible chat empty when reset session.started arrives with no queued prompt", () => {
+    const { controller, ports } = createHarness();
+
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+    controller.newChat();
+    ports[0].emitMessage(sessionStarted());
+
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
+    expect(controller.getSnapshot().activeSession).toMatchObject({
+      sessionStarted: true,
+      starting: false,
+      pendingPromptCount: 0
+    });
+  });
+});

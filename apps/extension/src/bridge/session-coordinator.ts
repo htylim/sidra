@@ -37,6 +37,7 @@ export class BridgeSessionCoordinator {
   private readonly listeners = new Set<Listener>();
   private pendingPrompts: string[] = [];
   private startPosted = false;
+  private suppressNextSessionStartedStatus = false;
   private snapshot: BridgeSessionCoordinatorSnapshot;
 
   constructor(options: BridgeSessionCoordinatorOptions) {
@@ -96,10 +97,47 @@ export class BridgeSessionCoordinator {
     return true;
   }
 
+  newChat(): void {
+    const providerStateMayExist = this.startPosted || this.snapshot.sessionStarted || this.snapshot.starting;
+    this.pendingPrompts = [];
+
+    if (!providerStateMayExist) {
+      this.startPosted = false;
+      this.suppressNextSessionStartedStatus = false;
+      this.setSnapshot(this.initialSnapshot());
+      return;
+    }
+
+    const result = this.transport.post({
+      type: "session.reset",
+      version: 1,
+      clientSessionId: this.clientSessionId
+    });
+
+    if (!result.ok) {
+      this.startPosted = false;
+      this.suppressNextSessionStartedStatus = false;
+      this.setSnapshot({
+        ...this.initialSnapshot(),
+        lastError: result.error,
+        transcript: addStatusEntry([], result.error)
+      });
+      return;
+    }
+
+    this.startPosted = true;
+    this.suppressNextSessionStartedStatus = true;
+    this.setSnapshot({
+      ...this.initialSnapshot(),
+      starting: true
+    });
+  }
+
   reset(clientSessionId: string): void {
     this.clientSessionId = clientSessionId;
     this.pendingPrompts = [];
     this.startPosted = false;
+    this.suppressNextSessionStartedStatus = false;
     this.snapshot = {
       clientSessionId,
       sessionStarted: false,
@@ -138,11 +176,15 @@ export class BridgeSessionCoordinator {
         return;
       case "session.started":
         if (message.clientSessionId !== this.snapshot.clientSessionId || !this.startPosted) return;
+        const nextTranscript = this.suppressNextSessionStartedStatus
+          ? this.snapshot.transcript
+          : addStatusEntry(this.snapshot.transcript, "Session started");
+        this.suppressNextSessionStartedStatus = false;
         this.setSnapshot({
           ...this.snapshot,
           sessionStarted: true,
           starting: false,
-          transcript: addStatusEntry(this.snapshot.transcript, "Session started")
+          transcript: nextTranscript
         });
         this.flushPendingPrompts();
         return;
@@ -188,6 +230,7 @@ export class BridgeSessionCoordinator {
   private clearPendingAfterError(message: string): void {
     this.pendingPrompts = [];
     this.startPosted = false;
+    this.suppressNextSessionStartedStatus = false;
     this.setSnapshot({
       ...this.snapshot,
       sessionStarted: false,

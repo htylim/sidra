@@ -16,6 +16,7 @@ function SidePanel() {
     <SidePanelView
       snapshot={snapshot}
       onSendPrompt={sidePanelController.sendPrompt}
+      onNewChat={sidePanelController.newChat}
       onRetryBridge={sidePanelController.retryBridge}
     />
   );

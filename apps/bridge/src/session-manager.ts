@@ -22,6 +22,7 @@ export type AgentSessionOptions = {
 
 export type ManagedSession = {
   providerSession: AgentSession;
+  providerId: ProviderId;
   inFlight?: {
     controller: AbortController;
     done: Promise<void>;
@@ -35,26 +36,17 @@ type BridgeSessionManagerOptions = {
 
 export class BridgeSessionManager {
   private readonly sessions = new Map<string, ManagedSession>();
-  private readonly sessionStarts = new Map<string, Promise<void>>();
+  private readonly sessionOperations = new Map<string, Promise<void>>();
   private nextBridgeSessionId = 1;
 
   constructor(private readonly options: BridgeSessionManagerOptions) {}
 
   async startSession(clientSessionId: string, providerId: ProviderId): Promise<void> {
-    const previousStart = this.sessionStarts.get(clientSessionId) ?? Promise.resolve();
-    const start = previousStart.catch(() => {}).then(() => this.replaceSession(clientSessionId, providerId));
-    this.sessionStarts.set(clientSessionId, start);
-    try {
-      await start;
-    } finally {
-      if (this.sessionStarts.get(clientSessionId) === start) {
-        this.sessionStarts.delete(clientSessionId);
-      }
-    }
+    await this.enqueueSessionOperation(clientSessionId, () => this.replaceSession(clientSessionId, providerId));
   }
 
   async sendPrompt(clientSessionId: string, input: AgentSendInput): Promise<void> {
-    await this.sessionStarts.get(clientSessionId);
+    await this.sessionOperations.get(clientSessionId);
     const session = this.sessions.get(clientSessionId);
     if (!session) {
       this.options.emit({
@@ -94,7 +86,7 @@ export class BridgeSessionManager {
   }
 
   async cancelTurn(clientSessionId: string): Promise<void> {
-    await this.sessionStarts.get(clientSessionId);
+    await this.sessionOperations.get(clientSessionId);
     const session = this.sessions.get(clientSessionId);
     if (!session?.inFlight) {
       this.options.emit({
@@ -118,6 +110,38 @@ export class BridgeSessionManager {
     });
   }
 
+  async resetSession(clientSessionId: string): Promise<void> {
+    await this.enqueueSessionOperation(clientSessionId, async () => {
+      const providerId = this.sessions.get(clientSessionId)?.providerId ?? this.options.provider.id;
+      await this.replaceSession(clientSessionId, providerId);
+    });
+  }
+
+  async closeSession(clientSessionId: string): Promise<void> {
+    await this.enqueueSessionOperation(clientSessionId, async () => {
+      const existing = this.sessions.get(clientSessionId);
+      if (!existing) return;
+
+      await this.closeManagedSession(existing);
+      if (this.sessions.get(clientSessionId) === existing) {
+        this.sessions.delete(clientSessionId);
+      }
+    });
+  }
+
+  private async enqueueSessionOperation(clientSessionId: string, operation: () => Promise<void>): Promise<void> {
+    const previousOperation = this.sessionOperations.get(clientSessionId) ?? Promise.resolve();
+    const nextOperation = previousOperation.catch(() => {}).then(operation);
+    this.sessionOperations.set(clientSessionId, nextOperation);
+    try {
+      await nextOperation;
+    } finally {
+      if (this.sessionOperations.get(clientSessionId) === nextOperation) {
+        this.sessionOperations.delete(clientSessionId);
+      }
+    }
+  }
+
   private async replaceSession(clientSessionId: string, providerId: ProviderId): Promise<void> {
     if (providerId !== this.options.provider.id) {
       this.options.emit({
@@ -132,18 +156,25 @@ export class BridgeSessionManager {
 
     const existing = this.sessions.get(clientSessionId);
     if (existing) {
-      existing.inFlight?.controller.abort();
-      await existing.providerSession.close();
+      await this.closeManagedSession(existing);
     }
 
     const providerSession = await this.options.provider.createSession();
-    this.sessions.set(clientSessionId, { providerSession });
+    this.sessions.set(clientSessionId, { providerSession, providerId });
     this.options.emit({
       type: "session.started",
       version: 1,
       clientSessionId,
       bridgeSessionId: `mock-${this.nextBridgeSessionId++}`
     });
+  }
+
+  private async closeManagedSession(session: ManagedSession): Promise<void> {
+    if (session.inFlight) {
+      session.inFlight.controller.abort();
+      await session.inFlight.done;
+    }
+    await session.providerSession.close();
   }
 
   private async runProviderSend(

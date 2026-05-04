@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PassThrough } from "node:stream";
 import type { BridgeToExtension } from "@sidra/protocol";
-import { createBridge } from "./index.js";
+import { createBridge, type AgentProvider, type AgentSession } from "./index.js";
 import { runNativeMessagingBridge } from "./native-messaging.js";
 
 describe("mock bridge chat path", () => {
@@ -105,6 +105,46 @@ describe("mock bridge chat path", () => {
     ]);
   });
 
+  it("dispatches reset and close lifecycle commands to provider sessions", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createRecordingProvider();
+    const bridge = createBridge({ emit: (message) => emitted.push(message) }, provider);
+
+    await bridge.handleMessage({
+      type: "session.start",
+      version: 1,
+      clientSessionId: "page-1",
+      providerId: "codex"
+    });
+    await bridge.handleMessage({
+      type: "session.reset",
+      version: 1,
+      clientSessionId: "page-1"
+    });
+    await bridge.handleMessage({
+      type: "session.close",
+      version: 1,
+      clientSessionId: "page-1"
+    });
+    await bridge.handleMessage({
+      type: "session.send",
+      version: 1,
+      clientSessionId: "page-1",
+      prompt: "After close"
+    });
+
+    expect(provider.createdSessions).toHaveLength(2);
+    expect(provider.createdSessions[0]?.closeCount).toBe(1);
+    expect(provider.createdSessions[1]?.closeCount).toBe(1);
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 1,
+      clientSessionId: "page-1",
+      message: "Session has not been started",
+      code: "session_not_started"
+    });
+  });
+
   it("dispatches a later client session while an earlier session is still pending", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
@@ -168,6 +208,32 @@ describe("mock bridge chat path", () => {
     ]);
   });
 });
+
+function createRecordingProvider() {
+  const createdSessions: RecordingSession[] = [];
+  const provider: AgentProvider & { createdSessions: RecordingSession[] } = {
+    id: "codex",
+    createdSessions,
+    async createSession() {
+      const session = new RecordingSession();
+      createdSessions.push(session);
+      return session;
+    }
+  };
+  return provider;
+}
+
+class RecordingSession implements AgentSession {
+  closeCount = 0;
+
+  async *send() {
+    yield { type: "assistant.done" } as const;
+  }
+
+  async close() {
+    this.closeCount += 1;
+  }
+}
 
 function encodeNativeMessage(message: unknown) {
   return encodeRawNativeMessage(JSON.stringify(message));

@@ -70,6 +70,56 @@ describe("session.cancel protocol validation", () => {
   });
 });
 
+describe("session lifecycle protocol validation", () => {
+  it("accepts session.reset with a clientSessionId", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.reset",
+        version: 1,
+        clientSessionId: "page-1"
+      })
+    ).toMatchObject({ ok: true });
+  });
+
+  it("accepts session.close with a clientSessionId", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.close",
+        version: 1,
+        clientSessionId: "page-1"
+      })
+    ).toMatchObject({ ok: true });
+  });
+
+  it("rejects session.reset without a clientSessionId", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.reset",
+        version: 1
+      })
+    ).toEqual({ ok: false, error: "clientSessionId is required" });
+  });
+
+  it("rejects session.close without a clientSessionId", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.close",
+        version: 1
+      })
+    ).toEqual({ ok: false, error: "clientSessionId is required" });
+  });
+
+  it("keeps rejecting unknown lifecycle commands", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.destroy",
+        version: 1,
+        clientSessionId: "page-1"
+      })
+    ).toEqual({ ok: false, error: "Unknown command" });
+  });
+});
+
 describe("bridge-to-extension protocol validation", () => {
   it("accepts valid bridge messages and rejects malformed assistant deltas", () => {
     expect(parseBridgeToExtension({ type: "bridge.ready", version: 1 })).toMatchObject({ ok: true });

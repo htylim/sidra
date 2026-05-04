@@ -25,6 +25,8 @@ export type ExtensionToBridge =
       pageContext?: PageContext;
     }
   | { type: "session.cancel"; version: 1; clientSessionId: string }
+  | { type: "session.reset"; version: 1; clientSessionId: string }
+  | { type: "session.close"; version: 1; clientSessionId: string }
   | { type: "heartbeat"; version: 1 };
 
 export type AgentEvent =
@@ -68,6 +70,8 @@ export function parseExtensionToBridge(input: unknown): ParseResult<ExtensionToB
       }
       return { ok: true, value: input as ExtensionToBridge };
     case "session.cancel":
+    case "session.reset":
+    case "session.close":
       if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
       return { ok: true, value: input as ExtensionToBridge };
     case "heartbeat":

@@ -36,6 +36,12 @@ export function createBridge(runtime: BridgeRuntime, provider: AgentProvider = c
       case "session.cancel":
         await sessions.cancelTurn(message.clientSessionId);
         return;
+      case "session.reset":
+        await sessions.resetSession(message.clientSessionId);
+        return;
+      case "session.close":
+        await sessions.closeSession(message.clientSessionId);
+        return;
       case "heartbeat":
         return;
     }
