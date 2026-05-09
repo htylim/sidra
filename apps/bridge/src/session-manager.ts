@@ -34,6 +34,13 @@ type BridgeSessionManagerOptions = {
   emit(message: BridgeToExtension): void;
 };
 
+/**
+ * Owns bridge-side provider sessions and turn lifecycle.
+ *
+ * The extension identifies sessions with `clientSessionId`; this manager maps
+ * those ids to provider sessions, enforces one in-flight turn per session, and
+ * owns cancellation, reset, and close behavior.
+ */
 export class BridgeSessionManager {
   private readonly sessions = new Map<string, ManagedSession>();
   private readonly sessionOperations = new Map<string, Promise<void>>();
@@ -130,6 +137,8 @@ export class BridgeSessionManager {
   }
 
   private async enqueueSessionOperation(clientSessionId: string, operation: () => Promise<void>): Promise<void> {
+    // Destructive lifecycle operations for one session must run in order, but
+    // unrelated sessions should still be able to progress independently.
     const previousOperation = this.sessionOperations.get(clientSessionId) ?? Promise.resolve();
     const nextOperation = previousOperation.catch(() => {}).then(operation);
     this.sessionOperations.set(clientSessionId, nextOperation);

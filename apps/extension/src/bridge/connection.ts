@@ -25,6 +25,13 @@ type BridgeConnectionOptions = {
   hostName?: string;
 };
 
+/**
+ * Owns the extension's Native Messaging port.
+ *
+ * This is the only extension boundary that opens `chrome.runtime.connectNative`.
+ * It validates raw bridge messages, tracks readiness, and exposes transport
+ * state without leaking Chrome port details into application or React code.
+ */
 export class BridgeConnection {
   private readonly connectNative: BridgeConnectionOptions["connectNative"];
   private readonly hostName: string;

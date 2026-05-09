@@ -2,6 +2,26 @@
 
 This document records project-level decisions that should guide future implementation. Update it when a decision changes.
 
+## Project Map
+
+Use this map to decide where behavior belongs. It is not a file catalog.
+
+- `apps/extension`: Browser extension UI and browser-side application state.
+  - Owns side panel rendering, URL session state, capture orchestration, settings, and bridge-facing application commands.
+  - Must not own provider lifecycle, low-level bridge protocol sequencing, or raw Native Messaging IO.
+- `apps/extension/src/bridge`: Extension-side bridge boundary.
+  - Owns Chrome Native Messaging connection state, bridge readiness, reconnect/disconnect behavior, and session-start coordination before prompts are sent.
+  - Must expose application-level behavior to the side panel instead of leaking transport sequencing into React code.
+- `apps/bridge`: Local Native Messaging bridge.
+  - Owns process IO, protocol command handling, provider session lifecycle, in-flight turn state, cancellation, reset/close, heartbeat/disconnect cleanup, and provider allowlisting.
+  - Must keep raw transport, protocol dispatch, and provider session management in separate modules as those concerns grow.
+- `packages/protocol`: Versioned extension-to-bridge message contract.
+  - Owns message types and runtime validation for the Native Messaging boundary.
+  - Must grow protocol commands before UI or bridge code depends on new message shapes.
+- `docs`: Current architecture and engineering guidance.
+  - Owns durable decisions, ownership boundaries, and non-obvious lifecycle rules.
+  - Must stay concise and describe the current state, not a historical migration log.
+
 ## ADR-001: Keep Side Panel UI Out Of Bridge Protocol Coordination
 
 Status: Accepted

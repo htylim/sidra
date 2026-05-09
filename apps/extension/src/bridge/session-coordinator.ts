@@ -30,13 +30,23 @@ type BridgeSessionCoordinatorOptions = {
   transport: ProtocolTransport;
 };
 
+/**
+ * Owns one extension-side provider session from the side panel's point of view.
+ *
+ * React code sends application intents here. This coordinator handles the
+ * protocol ordering: start the bridge session, queue prompts until
+ * `session.started`, then turn bridge events into transcript state.
+ */
 export class BridgeSessionCoordinator {
   private clientSessionId: string;
   private readonly providerId: ProviderId;
   private readonly transport: ProtocolTransport;
   private readonly listeners = new Set<Listener>();
+  // Prompts sent before `session.started` must wait for the bridge to create provider state.
   private pendingPrompts: string[] = [];
+  // Tracks whether the bridge may already have provider state for this session.
   private startPosted = false;
+  // New Chat sends `session.reset`, whose success also arrives as `session.started`.
   private suppressNextSessionStartedStatus = false;
   private snapshot: BridgeSessionCoordinatorSnapshot;
 

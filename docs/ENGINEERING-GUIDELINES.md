@@ -74,4 +74,4 @@ When stopping, be specific:
 - Keep docs current when code ownership, module boundaries, or product behavior changes.
 - Prefer concise current-state docs over long history logs.
 - Document non-obvious ownership, lifecycle, async ordering, and failure-handling rules.
-- Add concise comments only where behavior, ownership, or async invariants are non-obvious.
+- Add concise comments where behavior, ownership, type modeling, browser constraints, or async invariants are non-obvious.

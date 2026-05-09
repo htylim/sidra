@@ -32,6 +32,12 @@ type SidePanelControllerOptions = {
   providerId?: ProviderId;
 };
 
+/**
+ * Composes the bridge transport and session coordinator into the side panel API.
+ *
+ * React receives a stable view snapshot and sends user intents here; protocol
+ * sequencing stays behind the bridge/session boundary.
+ */
 export function createSidePanelController(options: SidePanelControllerOptions): SidePanelController {
   const connection = new BridgeConnection({ connectNative: options.connectNative });
   const coordinator = new BridgeSessionCoordinator({

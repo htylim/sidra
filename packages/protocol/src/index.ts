@@ -53,6 +53,12 @@ export type BridgeToExtension =
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
+/**
+ * Runtime validation for messages crossing the Native Messaging boundary.
+ *
+ * Callers should use these parsers before trusting external JSON. The casts
+ * below are safe only because each message variant is checked first.
+ */
 export function parseExtensionToBridge(input: unknown): ParseResult<ExtensionToBridge> {
   if (!isRecord(input)) return invalid("Message must be an object");
   if (input.version !== PROTOCOL_VERSION) return invalid("Unsupported protocol version");

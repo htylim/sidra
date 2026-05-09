@@ -41,6 +41,8 @@ export function runNativeMessagingBridge(
   input.on("data", (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk]);
 
+    // Chrome Native Messaging frames each JSON message as a 4-byte
+    // little-endian byte length followed by the UTF-8 JSON payload.
     while (buffer.length >= 4) {
       const messageLength = buffer.readUInt32LE(0);
       if (buffer.length < messageLength + 4) return;
