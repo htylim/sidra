@@ -1,7 +1,10 @@
 import type { ProviderId } from "@sidra/protocol";
+import { createChromeActivePageTracker } from "./active-page";
+import type { PageIdentity } from "./page-key";
 import { BridgeConnection, type BridgeAvailability, type NativeBridgePort } from "./bridge/connection";
 import { BridgeSessionCoordinator } from "./bridge/session-coordinator";
 import type { TranscriptEntry } from "./transcript";
+import { UrlSessionStore, type ContextState } from "./url-session-store";
 
 export type SidePanelSnapshot = {
   bridge: {
@@ -11,8 +14,12 @@ export type SidePanelSnapshot = {
     setupError?: string;
     canUseChat: boolean;
   };
+  activePage: PageIdentity;
   activeSession: {
+    pageKey: string;
     clientSessionId: string;
+    draftPrompt: string;
+    contextState: ContextState;
     transcript: TranscriptEntry[];
     pendingPromptCount: number;
     sessionStarted: boolean;
@@ -24,13 +31,21 @@ export type SidePanelController = {
   getSnapshot(): SidePanelSnapshot;
   subscribe(listener: () => void): () => void;
   sendPrompt(prompt: string): boolean;
+  updateDraftPrompt(text: string): void;
   newChat(): void;
   retryBridge(): void;
+};
+
+type ActivePageSource = {
+  getSnapshot(): PageIdentity;
+  subscribe(listener: () => void): () => void;
+  start(): Promise<void>;
 };
 
 type SidePanelControllerOptions = {
   connectNative(application: string): NativeBridgePort;
   createClientSessionId(): string;
+  activePageTracker?: ActivePageSource;
   providerId?: ProviderId;
 };
 
@@ -42,25 +57,46 @@ type SidePanelControllerOptions = {
  */
 export function createSidePanelController(options: SidePanelControllerOptions): SidePanelController {
   const connection = new BridgeConnection({ connectNative: options.connectNative });
-  const coordinator = new BridgeSessionCoordinator({
-    clientSessionId: options.createClientSessionId(),
-    providerId: options.providerId,
-    transport: connection
+  const activePageTracker =
+    options.activePageTracker ??
+    ({
+      getSnapshot: () => ({ status: "unsupported", reason: "missing_url" }),
+      subscribe: () => () => undefined,
+      start: async () => undefined
+    } satisfies ActivePageSource);
+  const urlSessionStore = new UrlSessionStore({
+    createClientSessionId: options.createClientSessionId,
+    createCoordinator: (clientSessionId) =>
+      new BridgeSessionCoordinator({
+        clientSessionId,
+        providerId: options.providerId,
+        transport: connection
+      })
   });
   const listeners = new Set<() => void>();
   let bridgeConnected = connection.getSnapshot().connected;
   let bridgeSnapshot = connection.getSnapshot();
-  let activeSessionSnapshot = coordinator.getSnapshot();
-  let snapshot = createSnapshot(bridgeSnapshot, activeSessionSnapshot);
+  let activePageSnapshot = activePageTracker.getSnapshot();
+  urlSessionStore.selectPage(activePageSnapshot);
+  let urlSessionSnapshot = urlSessionStore.getSnapshot();
+  let snapshot = createSnapshot(bridgeSnapshot, activePageSnapshot, urlSessionSnapshot);
 
   const refreshSnapshot = () => {
     const nextBridgeSnapshot = connection.getSnapshot();
-    const nextActiveSessionSnapshot = coordinator.getSnapshot();
-    if (nextBridgeSnapshot === bridgeSnapshot && nextActiveSessionSnapshot === activeSessionSnapshot) return;
+    const nextActivePageSnapshot = activePageTracker.getSnapshot();
+    const nextUrlSessionSnapshot = urlSessionStore.getSnapshot();
+    if (
+      nextBridgeSnapshot === bridgeSnapshot &&
+      nextActivePageSnapshot === activePageSnapshot &&
+      snapshotsMatch(nextUrlSessionSnapshot, urlSessionSnapshot)
+    ) {
+      return;
+    }
 
     bridgeSnapshot = nextBridgeSnapshot;
-    activeSessionSnapshot = nextActiveSessionSnapshot;
-    snapshot = createSnapshot(bridgeSnapshot, activeSessionSnapshot);
+    activePageSnapshot = nextActivePageSnapshot;
+    urlSessionSnapshot = nextUrlSessionSnapshot;
+    snapshot = createSnapshot(bridgeSnapshot, activePageSnapshot, urlSessionSnapshot);
   };
 
   const emit = () => {
@@ -74,21 +110,18 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     bridgeConnected = connected;
 
     if (disconnected) {
-      const activeSession = coordinator.getSnapshot();
-      if (
-        activeSession.sessionStarted ||
-        activeSession.starting ||
-        activeSession.pendingPromptCount > 0
-      ) {
-        coordinator.markBridgeDisconnected();
-        return;
-      }
+      urlSessionStore.markBridgeDisconnected();
     }
 
     emit();
   });
-  coordinator.subscribe(emit);
+  activePageTracker.subscribe(() => {
+    urlSessionStore.selectPage(activePageTracker.getSnapshot());
+    emit();
+  });
+  urlSessionStore.subscribe(emit);
   connection.connect();
+  void activePageTracker.start();
   bridgeConnected = connection.getSnapshot().connected;
   refreshSnapshot();
 
@@ -106,27 +139,34 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     sendPrompt: (prompt) => {
       refreshSnapshot();
       if (!snapshot.bridge.canUseChat) return false;
-      return coordinator.sendPrompt(prompt);
+      return urlSessionStore.sendPrompt(prompt);
     },
-    newChat: () => coordinator.newChat(),
+    updateDraftPrompt: (text) => urlSessionStore.updateActiveDraftPrompt(text),
+    newChat: () => urlSessionStore.newChat(),
     retryBridge: () => connection.retry()
   };
 }
 
 function createSnapshot(
   bridge: ReturnType<BridgeConnection["getSnapshot"]>,
-  activeSession: ReturnType<BridgeSessionCoordinator["getSnapshot"]>
+  activePage: PageIdentity,
+  urlSessions: ReturnType<UrlSessionStore["getSnapshot"]>
 ): SidePanelSnapshot {
+  const activeSession = urlSessions.activeSession;
   return {
     bridge: {
       availability: bridge.availability,
       connected: bridge.connected,
       ready: bridge.ready,
       setupError: bridge.setupError,
-      canUseChat: bridge.availability.status === "ready"
+      canUseChat: bridge.availability.status === "ready" && activePage.status === "ready"
     },
+    activePage,
     activeSession: {
+      pageKey: activeSession.pageKey,
       clientSessionId: activeSession.clientSessionId,
+      draftPrompt: activeSession.draftPrompt,
+      contextState: activeSession.contextState,
       transcript: activeSession.transcript,
       pendingPromptCount: activeSession.pendingPromptCount,
       sessionStarted: activeSession.sessionStarted,
@@ -138,6 +178,14 @@ function createSnapshot(
 export function createChromeSidePanelController(): SidePanelController {
   return createSidePanelController({
     connectNative: (hostName) => chrome.runtime.connectNative(hostName),
-    createClientSessionId: () => `sidra-${crypto.randomUUID()}`
+    createClientSessionId: () => `sidra-${crypto.randomUUID()}`,
+    activePageTracker: createChromeActivePageTracker()
   });
+}
+
+function snapshotsMatch(
+  first: ReturnType<UrlSessionStore["getSnapshot"]>,
+  second: ReturnType<UrlSessionStore["getSnapshot"]>
+): boolean {
+  return first.activeSession === second.activeSession && first.sessions === second.sessions;
 }

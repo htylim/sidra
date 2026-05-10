@@ -16,6 +16,7 @@ function SidePanel() {
     <SidePanelView
       snapshot={snapshot}
       onSendPrompt={sidePanelController.sendPrompt}
+      onDraftPromptChange={sidePanelController.updateDraftPrompt}
       onNewChat={sidePanelController.newChat}
       onRetryBridge={sidePanelController.retryBridge}
     />

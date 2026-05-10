@@ -52,3 +52,16 @@ describe("side panel New Chat wiring", () => {
     expect(viewSource).toContain("onClick={props.onNewChat}");
   });
 });
+
+describe("active page tracking boundary", () => {
+  it("does_not_use_scripting_or_page_content_capture_for_page_identity", () => {
+    const source = readSource("./active-page.ts");
+
+    expect(source).not.toContain("chrome.scripting");
+    expect(source).not.toContain("executeScript");
+    expect(source).not.toContain("document.body");
+    expect(source).not.toContain("querySelector");
+    expect(source).not.toContain("innerText");
+    expect(source).not.toContain("Readability");
+  });
+});

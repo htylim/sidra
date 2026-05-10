@@ -1,5 +1,6 @@
 import type { BridgeToExtension, ExtensionToBridge } from "@sidra/protocol";
 import { describe, expect, it, vi } from "vitest";
+import type { PageIdentity, PageKey } from "./page-key";
 import { type NativeBridgePort, SIDRA_NATIVE_HOST } from "./bridge/connection";
 import { createSidePanelController } from "./side-panel-controller";
 
@@ -34,6 +35,40 @@ class FakePort implements NativeBridgePort {
 }
 
 function createHarness() {
+  return createHarnessWithOptions();
+}
+
+type HarnessOptions = {
+  initialPage?: PageIdentity;
+  clientSessionIds?: string[];
+};
+
+class FakeActivePageSource {
+  private readonly listeners = new Set<() => void>();
+  private snapshot: PageIdentity;
+
+  constructor(initialPage: PageIdentity = pageIdentity("https://example.com/default")) {
+    this.snapshot = initialPage;
+  }
+
+  getSnapshot = (): PageIdentity => this.snapshot;
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  start = async (): Promise<void> => undefined;
+
+  emit(identity: PageIdentity): void {
+    this.snapshot = identity;
+    for (const listener of this.listeners) listener();
+  }
+}
+
+function createHarnessWithOptions(options: HarnessOptions = {}) {
   const ports: FakePort[] = [];
   const connectNative = vi.fn((hostName: string) => {
     expect(hostName).toBe(SIDRA_NATIVE_HOST);
@@ -41,25 +76,81 @@ function createHarness() {
     ports.push(port);
     return port;
   });
+  const clientSessionIds = options.clientSessionIds ?? ["client-1"];
+  let nextClientSessionIdIndex = 0;
+  const initialPage =
+    options.initialPage ??
+    (options.clientSessionIds ? unsupportedPageIdentity("chrome://newtab") : undefined);
+  const activePage = new FakeActivePageSource(initialPage);
   const controller = createSidePanelController({
     connectNative,
-    createClientSessionId: () => "client-1"
+    createClientSessionId: () => {
+      const clientSessionId = clientSessionIds[nextClientSessionIdIndex] ?? clientSessionIds.at(-1);
+      nextClientSessionIdIndex += 1;
+      if (!clientSessionId) throw new Error("missing test client session id");
+      return clientSessionId;
+    },
+    activePageTracker: activePage
   });
 
-  return { controller, connectNative, ports };
+  return { controller, connectNative, ports, activePage };
 }
 
-function sessionStarted(): BridgeToExtension {
+function createUnavailableBridgeHarness(options: HarnessOptions = {}) {
+  const activePage = new FakeActivePageSource(options.initialPage);
+  const controller = createSidePanelController({
+    connectNative: () => {
+      throw new Error("missing host");
+    },
+    createClientSessionId: () => "client-1",
+    activePageTracker: activePage
+  });
+
+  return { controller, activePage };
+}
+
+function pageIdentity(pageKey: string): PageIdentity {
+  return {
+    status: "ready",
+    pageKey: pageKey as PageKey,
+    url: pageKey,
+    displayTitle: pageKey
+  };
+}
+
+function pageIdentityWithTitle(pageKey: string, displayTitle: string): PageIdentity {
+  return {
+    status: "ready",
+    pageKey: pageKey as PageKey,
+    url: pageKey,
+    displayTitle
+  };
+}
+
+function unsupportedPageIdentity(url: string): PageIdentity {
+  return { status: "unsupported", reason: "unsupported_url", url };
+}
+
+function sessionStarted(clientSessionId = "client-1"): BridgeToExtension {
   return {
     type: "session.started",
     version: 1,
-    clientSessionId: "client-1",
+    clientSessionId,
     bridgeSessionId: "bridge-1"
   };
 }
 
 function bridgeReady(): BridgeToExtension {
   return { type: "bridge.ready", version: 1 };
+}
+
+function agentTextDelta(clientSessionId: string, text: string): BridgeToExtension {
+  return {
+    type: "agent.event",
+    version: 1,
+    clientSessionId,
+    event: { type: "assistant.text.delta", text }
+  };
 }
 
 describe("SidePanelController", () => {
@@ -87,6 +178,20 @@ describe("SidePanelController", () => {
       canUseChat: true,
       availability: { status: "ready" }
     });
+  });
+
+  it("keeps chat blocked when bridge is ready but the active page is unsupported", () => {
+    const { controller, ports } = createHarnessWithOptions({
+      initialPage: unsupportedPageIdentity("chrome://extensions")
+    });
+
+    ports[0].emitMessage(bridgeReady());
+
+    expect(controller.getSnapshot().bridge).toMatchObject({
+      availability: { status: "ready" },
+      canUseChat: false
+    });
+    expect(controller.sendPrompt("hello")).toBe(false);
   });
 
   it("does not send prompts while bridge is unavailable", () => {
@@ -203,7 +308,8 @@ describe("SidePanelController", () => {
       });
     const controller = createSidePanelController({
       connectNative,
-      createClientSessionId: () => "client-1"
+      createClientSessionId: () => "client-1",
+      activePageTracker: new FakeActivePageSource(pageIdentity("https://example.com/a"))
     });
 
     expect(controller.getSnapshot().bridge.canUseChat).toBe(false);
@@ -441,6 +547,172 @@ describe("SidePanelController newChat", () => {
       sessionStarted: true,
       starting: false,
       pendingPromptCount: 0
+    });
+  });
+});
+
+describe("SidePanelController URL sessions", () => {
+  it("selects_the_initial_active_page_session_before_bridge_ready", () => {
+    const { controller } = createHarnessWithOptions({ initialPage: pageIdentity("https://example.com/a") });
+    expect(controller.getSnapshot().bridge.canUseChat).toBe(false);
+    expect(controller.getSnapshot().activeSession.pageKey).toBe("https://example.com/a");
+  });
+
+  it("switches_active_page_session_while_bridge_is_unavailable", () => {
+    const { controller, activePage } = createUnavailableBridgeHarness();
+    activePage.emit(pageIdentity("https://example.com/a"));
+    activePage.emit(pageIdentity("https://example.com/b"));
+    expect(controller.getSnapshot().bridge.canUseChat).toBe(false);
+    expect(controller.getSnapshot().activeSession.pageKey).toBe("https://example.com/b");
+  });
+
+  it("unsupported_active_page_does_not_expose_the_previous_page_transcript", () => {
+    const { controller, activePage, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    activePage.emit(pageIdentity("https://example.com/a"));
+    controller.sendPrompt("page a");
+    activePage.emit(unsupportedPageIdentity("chrome://extensions"));
+    expect(controller.getSnapshot().activePage).toMatchObject({
+      status: "unsupported",
+      reason: "unsupported_url"
+    });
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
+  });
+
+  it("refreshes_active_page_metadata_when_the_page_key_stays_the_same", () => {
+    const { controller, activePage } = createHarnessWithOptions({
+      initialPage: pageIdentityWithTitle("https://example.com/a", "Old title")
+    });
+
+    activePage.emit(pageIdentityWithTitle("https://example.com/a", "New title"));
+
+    expect(controller.getSnapshot().activePage).toMatchObject({
+      status: "ready",
+      displayTitle: "New title"
+    });
+  });
+
+  it("refreshes_unsupported_page_details_when_the_page_stays_unsupported", () => {
+    const { controller, activePage } = createHarnessWithOptions({
+      initialPage: { status: "unsupported", reason: "missing_url" }
+    });
+
+    activePage.emit(unsupportedPageIdentity("chrome://extensions"));
+
+    expect(controller.getSnapshot().activePage).toMatchObject({
+      status: "unsupported",
+      reason: "unsupported_url",
+      url: "chrome://extensions"
+    });
+  });
+
+  it("switches_visible_transcript_when_active_page_changes", () => {
+    const { controller, activePage, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    activePage.emit(pageIdentity("https://example.com/a"));
+    controller.sendPrompt("page a");
+    activePage.emit(pageIdentity("https://example.com/b"));
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
+  });
+
+  it("restores_unsent_draft_when_returning_to_seen_page", () => {
+    const { controller, activePage, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    activePage.emit(pageIdentity("https://example.com/a"));
+    controller.updateDraftPrompt("draft a");
+    activePage.emit(pageIdentity("https://example.com/b"));
+    expect(controller.getSnapshot().activeSession.draftPrompt).toBe("");
+    activePage.emit(pageIdentity("https://example.com/a"));
+    expect(controller.getSnapshot().activeSession.draftPrompt).toBe("draft a");
+  });
+
+  it("restores_transcript_when_returning_to_seen_page", () => {
+    const { controller, activePage, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    activePage.emit(pageIdentity("https://example.com/a"));
+    controller.sendPrompt("page a");
+    activePage.emit(pageIdentity("https://example.com/b"));
+    activePage.emit(pageIdentity("https://example.com/a"));
+    expect(controller.getSnapshot().activeSession.transcript).toContainEqual({ role: "user", text: "page a" });
+  });
+
+  it("sends_first_prompt_with_the_active_page_client_session_id", () => {
+    const { controller, activePage, ports } = createHarnessWithOptions({ clientSessionIds: ["client-a"] });
+    ports[0].emitMessage(bridgeReady());
+    activePage.emit(pageIdentity("https://example.com/a"));
+    controller.sendPrompt("hello");
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.start",
+      version: 1,
+      clientSessionId: "client-a",
+      providerId: "codex"
+    });
+  });
+
+  it("reuses_the_existing_client_session_id_for_returning_page", () => {
+    const { controller, activePage, ports } = createHarnessWithOptions({
+      clientSessionIds: ["client-a", "client-b"]
+    });
+    ports[0].emitMessage(bridgeReady());
+    activePage.emit(pageIdentity("https://example.com/a"));
+    controller.sendPrompt("first");
+    activePage.emit(pageIdentity("https://example.com/b"));
+    activePage.emit(pageIdentity("https://example.com/a"));
+    controller.sendPrompt("second");
+    expect(controller.getSnapshot().activeSession.clientSessionId).toBe("client-a");
+  });
+
+  it("does_not_show_inactive_session_errors_or_agent_events_in_active_session", () => {
+    const { controller, activePage, ports } = createHarnessWithOptions({
+      clientSessionIds: ["client-a", "client-b"]
+    });
+    ports[0].emitMessage(bridgeReady());
+    activePage.emit(pageIdentity("https://example.com/a"));
+    controller.sendPrompt("first");
+    activePage.emit(pageIdentity("https://example.com/b"));
+    ports[0].emitMessage(agentTextDelta("client-a", "inactive text"));
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
+  });
+
+  it("switches_visible_running_state_when_active_page_changes", () => {
+    const { controller, activePage, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    activePage.emit(pageIdentity("https://example.com/a"));
+    controller.sendPrompt("pending");
+    expect(controller.getSnapshot().activeSession.pendingPromptCount).toBe(1);
+    activePage.emit(pageIdentity("https://example.com/b"));
+    expect(controller.getSnapshot().activeSession.pendingPromptCount).toBe(0);
+  });
+
+  it("keeps_bridge_retry_and_blocking_setup_state_global_while_preserving_url_sessions", () => {
+    const { controller, activePage, ports } = createHarness();
+    activePage.emit(pageIdentity("https://example.com/a"));
+    ports[0].disconnect();
+    controller.retryBridge();
+    activePage.emit(pageIdentity("https://example.com/b"));
+    activePage.emit(pageIdentity("https://example.com/a"));
+    expect(controller.getSnapshot().activeSession.pageKey).toBe("https://example.com/a");
+  });
+
+  it("new_chat_routes_to_the_active_url_session_only", () => {
+    const { controller, activePage, ports } = createHarnessWithOptions({
+      clientSessionIds: ["client-a", "client-b"]
+    });
+    ports[0].emitMessage(bridgeReady());
+    activePage.emit(pageIdentity("https://example.com/a"));
+    controller.sendPrompt("first");
+    activePage.emit(pageIdentity("https://example.com/b"));
+    controller.sendPrompt("second");
+    controller.newChat();
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.reset",
+      version: 1,
+      clientSessionId: "client-b"
+    });
+    expect(ports[0].postedMessages).not.toContainEqual({
+      type: "session.reset",
+      version: 1,
+      clientSessionId: "client-a"
     });
   });
 });

@@ -1,0 +1,55 @@
+import { describe, expect, it } from "vitest";
+import { resolvePageIdentity } from "./page-key";
+
+describe("resolvePageIdentity", () => {
+  it("prefers_canonical_url_when_present", () => {
+    expect(
+      resolvePageIdentity({
+        url: "https://example.com/current?x=1",
+        canonicalUrl: "https://example.com/canonical?utm_source=newsletter#section"
+      })
+    ).toMatchObject({ status: "ready", pageKey: "https://example.com/canonical" });
+  });
+
+  it("falls_back_to_current_url_without_hash", () => {
+    expect(resolvePageIdentity({ url: "https://example.com/article#comments" })).toMatchObject({
+      status: "ready",
+      pageKey: "https://example.com/article"
+    });
+  });
+
+  it("strips_common_tracking_parameters_case_insensitively", () => {
+    expect(
+      resolvePageIdentity({
+        url: "https://example.com/article?UTM_Source=x&fbclid=y&GCLID=z&id=42"
+      })
+    ).toMatchObject({ pageKey: "https://example.com/article?id=42" });
+  });
+
+  it("preserves_non_tracking_query_parameters_and_stabilizes_order", () => {
+    const first = resolvePageIdentity({ url: "https://example.com/article?b=2&a=1" });
+    const second = resolvePageIdentity({ url: "https://example.com/article?a=1&b=2" });
+    expect(first).toMatchObject({ status: "ready" });
+    expect(second).toMatchObject({ status: "ready" });
+    if (first.status !== "ready" || second.status !== "ready") throw new Error("expected ready pages");
+    expect(first.pageKey).toBe(second.pageKey);
+  });
+
+  it("falls_back_to_current_url_when_canonical_url_is_invalid", () => {
+    expect(
+      resolvePageIdentity({
+        url: "https://example.com/current",
+        canonicalUrl: "not a url"
+      })
+    ).toMatchObject({ pageKey: "https://example.com/current" });
+  });
+
+  it("keeps_distinct_page_keys_for_distinct_non_tracking_queries", () => {
+    const first = resolvePageIdentity({ url: "https://example.com/article?id=1" });
+    const second = resolvePageIdentity({ url: "https://example.com/article?id=2" });
+    expect(first).toMatchObject({ status: "ready" });
+    expect(second).toMatchObject({ status: "ready" });
+    if (first.status !== "ready" || second.status !== "ready") throw new Error("expected ready pages");
+    expect(first.pageKey).not.toBe(second.pageKey);
+  });
+});

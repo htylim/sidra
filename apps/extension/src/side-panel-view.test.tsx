@@ -1,18 +1,64 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { PageKey } from "./page-key";
 import type { SidePanelSnapshot } from "./side-panel-controller";
 import { SidePanelView } from "./side-panel-view";
 
-function createSnapshot(bridge: SidePanelSnapshot["bridge"]): SidePanelSnapshot {
+afterEach(() => {
+  cleanup();
+});
+
+type SnapshotOptions = {
+  title?: string;
+  contextLabel?: string;
+  draftPrompt?: string;
+  transcript?: SidePanelSnapshot["activeSession"]["transcript"];
+};
+
+function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
   return {
-    bridge,
+    bridge: readyBridge,
+    activePage: {
+      status: "ready",
+      pageKey: "https://example.com/article" as PageKey,
+      url: "https://example.com/article",
+      displayTitle: options.title ?? "Example Article"
+    },
     activeSession: {
+      pageKey: "https://example.com/article" as SidePanelSnapshot["activeSession"]["pageKey"],
       clientSessionId: "client-1",
-      transcript: [],
+      draftPrompt: options.draftPrompt ?? "",
+      contextState: { status: "none", label: options.contextLabel ?? "No context sent yet" },
+      transcript: options.transcript ?? [],
       pendingPromptCount: 0,
       sessionStarted: false,
       starting: false
     }
+  };
+}
+
+function snapshotForUnsupportedPage(): SidePanelSnapshot {
+  return {
+    ...snapshotForPage(),
+    bridge: { ...readyBridge, canUseChat: false },
+    activePage: { status: "unsupported", reason: "unsupported_url", url: "chrome://extensions" },
+    activeSession: {
+      ...snapshotForPage().activeSession,
+      pageKey: "" as PageKey,
+      clientSessionId: "",
+      transcript: []
+    }
+  };
+}
+
+function createSnapshot(bridge: SidePanelSnapshot["bridge"]): SidePanelSnapshot {
+  return {
+    ...snapshotForPage(),
+    bridge
   };
 }
 
@@ -21,11 +67,83 @@ function renderSnapshot(bridge: SidePanelSnapshot["bridge"]): string {
     <SidePanelView
       snapshot={createSnapshot(bridge)}
       onSendPrompt={() => false}
+      onDraftPromptChange={() => undefined}
       onNewChat={() => undefined}
       onRetryBridge={() => undefined}
     />
   );
 }
+
+function renderPageSnapshot(snapshot: SidePanelSnapshot): string {
+  return renderToStaticMarkup(
+    <SidePanelView
+      snapshot={snapshot}
+      onSendPrompt={() => false}
+      onDraftPromptChange={() => undefined}
+      onNewChat={() => undefined}
+      onRetryBridge={() => undefined}
+    />
+  );
+}
+
+function renderInteractiveSnapshot(
+  snapshot: SidePanelSnapshot,
+  overrides: Partial<{
+    onSendPrompt(prompt: string): boolean;
+    onDraftPromptChange(text: string): void;
+  }> = {}
+) {
+  let currentSnapshot = snapshot;
+  const renderedView = renderView();
+
+  function renderView() {
+    return render(
+      <SidePanelView
+        snapshot={currentSnapshot}
+        onSendPrompt={overrides.onSendPrompt ?? (() => false)}
+        onDraftPromptChange={(text) => {
+          currentSnapshot = {
+            ...currentSnapshot,
+            activeSession: { ...currentSnapshot.activeSession, draftPrompt: text }
+          };
+          overrides.onDraftPromptChange?.(text);
+          renderedView.rerender(viewElement());
+        }}
+        onNewChat={() => undefined}
+        onRetryBridge={() => undefined}
+      />
+    );
+  }
+
+  function viewElement() {
+    return (
+      <SidePanelView
+        snapshot={currentSnapshot}
+        onSendPrompt={overrides.onSendPrompt ?? (() => false)}
+        onDraftPromptChange={(text) => {
+          currentSnapshot = {
+            ...currentSnapshot,
+            activeSession: { ...currentSnapshot.activeSession, draftPrompt: text }
+          };
+          overrides.onDraftPromptChange?.(text);
+          renderedView.rerender(viewElement());
+        }}
+        onNewChat={() => undefined}
+        onRetryBridge={() => undefined}
+      />
+    );
+  }
+
+  return renderedView;
+}
+
+const readyBridge: SidePanelSnapshot["bridge"] = {
+  connected: true,
+  ready: true,
+  setupError: undefined,
+  canUseChat: true,
+  availability: { status: "ready" }
+};
 
 const checkingBridge: SidePanelSnapshot["bridge"] = {
   connected: true,
@@ -104,5 +222,86 @@ describe("SidePanelView bridge setup", () => {
     expect(markup).toContain("Retry");
     expect(markup).not.toContain("Summarize this page");
     expect(markup).toContain("disabled=\"\"");
+  });
+});
+
+describe("SidePanelView URL sessions", () => {
+  it("renders_active_page_title_and_context_state_from_snapshot", () => {
+    const markup = renderPageSnapshot(
+      snapshotForPage({
+        title: "Readable Article",
+        contextLabel: "No context sent yet"
+      })
+    );
+    expect(markup).toContain("Readable Article");
+    expect(markup).toContain("No context sent yet");
+  });
+
+  it("renders_controlled_draft_prompt_from_snapshot", () => {
+    const markup = renderPageSnapshot(snapshotForPage({ draftPrompt: "saved draft" }));
+    expect(markup).toContain("saved draft");
+  });
+
+  it("renders_unsupported_page_state_without_previous_transcript", () => {
+    render(
+      <SidePanelView
+        snapshot={snapshotForUnsupportedPage()}
+        onSendPrompt={() => false}
+        onDraftPromptChange={() => undefined}
+        onNewChat={() => undefined}
+        onRetryBridge={() => undefined}
+      />
+    );
+    expect(screen.getByText("chrome://extensions")).not.toBeNull();
+    expect(screen.getAllByText("This page cannot be captured")).toHaveLength(2);
+    expect(screen.queryByText("previous page text")).toBeNull();
+  });
+
+  it("disables_prompt_controls_and_hides_suggestions_for_unsupported_pages", () => {
+    render(
+      <SidePanelView
+        snapshot={snapshotForUnsupportedPage()}
+        onSendPrompt={() => false}
+        onDraftPromptChange={() => undefined}
+        onNewChat={() => undefined}
+        onRetryBridge={() => undefined}
+      />
+    );
+
+    expect(screen.queryByText("Summarize this page")).toBeNull();
+    expect(screen.getByRole("textbox")).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Capture + Send" })).toHaveProperty("disabled", true);
+  });
+
+  it("calls_onDraftPromptChange_when_the_textarea_changes", async () => {
+    const user = userEvent.setup();
+    const onDraftPromptChange = vi.fn();
+    renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "" }), { onDraftPromptChange });
+    await user.type(screen.getByRole("textbox"), "new draft");
+    expect(onDraftPromptChange).toHaveBeenCalledWith("new draft");
+  });
+
+  it("send_does_not_clear_the_draft_without_a_new_controller_snapshot", async () => {
+    const user = userEvent.setup();
+    const onSendPrompt = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "send me" }), { onSendPrompt });
+    await user.click(screen.getByRole("button", { name: "Capture + Send" }));
+    expect(onSendPrompt).toHaveBeenCalledWith("send me");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("send me");
+  });
+
+  it("renders_active_session_transcript_only", () => {
+    const markup = renderPageSnapshot(
+      snapshotForPage({
+        transcript: [{ role: "user", text: "active page text" }]
+      })
+    );
+    expect(markup).toContain("active page text");
+    expect(markup).not.toContain("inactive page text");
+  });
+
+  it("keeps_empty_state_scoped_to_the_active_session", () => {
+    const markup = renderPageSnapshot(snapshotForPage({ transcript: [] }));
+    expect(markup).toContain("Ask anything about this page");
   });
 });

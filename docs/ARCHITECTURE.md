@@ -7,7 +7,7 @@ This document records project-level decisions that should guide future implement
 Use this map to decide where behavior belongs. It is not a file catalog.
 
 - `apps/extension`: Browser extension UI and browser-side application state.
-  - Owns side panel rendering, URL session state, capture orchestration, settings, and bridge-facing application commands.
+  - Owns side panel rendering, active page tracking, URL Session mapping, Draft Prompt state, capture orchestration, settings, and bridge-facing application commands.
   - Must not own provider lifecycle, low-level bridge protocol sequencing, or raw Native Messaging IO.
 - `apps/extension/src/bridge`: Extension-side bridge boundary.
   - Owns Chrome Native Messaging connection state, bridge readiness, reconnect/disconnect behavior, and session-start coordination before prompts are sent.
@@ -82,11 +82,13 @@ Decision:
 
 - Extension code must be organized around a deep application boundary, not a React component plus a transport helper.
 - The side panel view renders a derived UI snapshot and invokes application commands. It must not own URL session mapping, capture orchestration, bridge protocol sequencing, provider lifecycle, cancellation, permissions, or heartbeat cleanup.
+  Draft Prompt state is part of the URL Session snapshot and is controlled by the extension application boundary, not by React-local state.
 - The extension application boundary should expose commands such as `sendPrompt`, `captureAndSend`, `cancelTurn`, `newChat`, `retryBridge`, and later `respondToPermission`, backed by non-React modules.
 - Extension modules should separate at least these responsibilities before related behavior expands:
   - `BridgeConnection`: Chrome Native Messaging connection, reconnect, disconnect, raw protocol IO, and bridge availability.
-  - `UrlSessionStore`: page-keyed URL sessions, transcript, draft prompt, context state, running state, and client session IDs.
-  - `SidePanelController`: application commands, active-session selection, and derived UI snapshots.
+  - `ActivePageTracker`: active tab URL/title metadata reads and tab/window change subscriptions. It must not use scripting or page content extraction.
+  - `UrlSessionStore`: page-keyed URL sessions, Draft Prompt, Context State, running state, and Client Session IDs. Transcript and provider-session state are derived from each session's coordinator.
+  - `SidePanelController`: application commands, active-page selection, bridge availability composition, and derived UI snapshots.
   - `CaptureService`: active-tab capture, extraction, size decisions, and page-context construction.
   - `SettingsStore`: persisted extension settings and live settings updates.
 - The bridge must manage provider sessions behind a session manager. A raw message switch must not accumulate provider lifecycle, cancellation, reset, close, heartbeat, or permission logic.

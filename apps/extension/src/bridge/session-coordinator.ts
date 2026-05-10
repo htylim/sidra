@@ -60,6 +60,9 @@ export class BridgeSessionCoordinator {
 
   getSnapshot = (): BridgeSessionCoordinatorSnapshot => this.snapshot;
 
+  hasProviderState = (): boolean =>
+    this.startPosted || this.snapshot.sessionStarted || this.snapshot.starting;
+
   subscribe = (listener: Listener): (() => void) => {
     this.listeners.add(listener);
     return () => {
