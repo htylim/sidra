@@ -32,7 +32,8 @@ The initial bridge smoke test verifies the prompt-to-mock-response path without 
 `pnpm test:e2e` currently runs the extension Playwright smoke test. It builds
 `apps/extension/dist`, launches a temporary Chromium profile with that unpacked
 extension loaded, verifies the Manifest V3 service worker starts, and opens the
-side panel page to confirm the Sidra UI renders.
+side panel page to confirm Sidra shows the bridge setup state when the Native
+Messaging host is not installed.
 
 ## Run Locally
 
@@ -129,6 +130,10 @@ Mock response to: <your prompt>
 
 If the bridge does not connect, check:
 
+- the side panel shows `Sidra cannot connect to the local bridge.` and a
+  **Retry** button while the host is missing or unavailable;
+- after fixing the host manifest or rebuilding the bridge, click **Retry** in
+  the side panel instead of reloading the side panel;
 - the extension has the `nativeMessaging` permission in `apps/extension/dist/manifest.json`;
 - the host manifest filename is exactly `com.sidra.agent_bridge.json`;
 - the host manifest `name` is exactly `com.sidra.agent_bridge`;

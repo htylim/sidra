@@ -7,6 +7,7 @@ Use these rules when implementing, reviewing, or planning changes. They are inte
 - Build the proper solution for the current problem, not the fastest local patch.
 - Start from first principles: identify the behavior, the owner of that behavior, the public interface, the state lifecycle, and the failure modes before editing code.
 - Prefer simple systems, not simplistic code. A design is simple when each part has one clear reason to exist and one clear reason to change.
+- Do not add complexity unless the current problem requires it. Extra abstractions, fallback paths, compatibility behavior, state transitions, configuration, or indirection must be justified by a current requirement, an existing caller, or a realistic failure mode. If the need is only theoretical, leave it out or document it as out of scope.
 - Use deep modules: expose a small, stable interface that hides meaningful complexity behind it.
 - Avoid shallow modules that only forward calls, rename data, or spread one behavior across many places without hiding complexity.
 - Separate responsibilities by ownership, not by convenience. Distinct concerns such as presentation, transport, data contracts, persistence, domain state, orchestration, policy, and external integrations should not collapse into one object because it is easy in the moment.

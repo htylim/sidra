@@ -1,13 +1,15 @@
 import type { ProviderId } from "@sidra/protocol";
-import { BridgeConnection, type NativeBridgePort } from "./bridge/connection";
+import { BridgeConnection, type BridgeAvailability, type NativeBridgePort } from "./bridge/connection";
 import { BridgeSessionCoordinator } from "./bridge/session-coordinator";
 import type { TranscriptEntry } from "./transcript";
 
 export type SidePanelSnapshot = {
   bridge: {
+    availability: BridgeAvailability;
     connected: boolean;
     ready: boolean;
     setupError?: string;
+    canUseChat: boolean;
   };
   activeSession: {
     clientSessionId: string;
@@ -86,6 +88,9 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     emit();
   });
   coordinator.subscribe(emit);
+  connection.connect();
+  bridgeConnected = connection.getSnapshot().connected;
+  refreshSnapshot();
 
   return {
     getSnapshot: () => {
@@ -98,7 +103,11 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
         listeners.delete(listener);
       };
     },
-    sendPrompt: (prompt) => coordinator.sendPrompt(prompt),
+    sendPrompt: (prompt) => {
+      refreshSnapshot();
+      if (!snapshot.bridge.canUseChat) return false;
+      return coordinator.sendPrompt(prompt);
+    },
     newChat: () => coordinator.newChat(),
     retryBridge: () => connection.retry()
   };
@@ -110,9 +119,11 @@ function createSnapshot(
 ): SidePanelSnapshot {
   return {
     bridge: {
+      availability: bridge.availability,
       connected: bridge.connected,
       ready: bridge.ready,
-      setupError: bridge.setupError ?? activeSession.lastError
+      setupError: bridge.setupError,
+      canUseChat: bridge.availability.status === "ready"
     },
     activeSession: {
       clientSessionId: activeSession.clientSessionId,

@@ -105,6 +105,33 @@ describe("mock bridge chat path", () => {
     ]);
   });
 
+  it("emits invalid_message bridge.error for unknown extension commands", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const bridge = createBridge({ emit: (message) => emitted.push(message) });
+
+    await bridge.handleMessage({ type: "session.delete", version: 1, clientSessionId: "page-1" });
+
+    expect(emitted).toEqual([
+      { type: "bridge.error", version: 1, message: "Unknown command", code: "invalid_message" }
+    ]);
+  });
+
+  it("emits invalid_message bridge.error for malformed session.start", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const bridge = createBridge({ emit: (message) => emitted.push(message) });
+
+    await bridge.handleMessage({ type: "session.start", version: 1, clientSessionId: "page-1" });
+
+    expect(emitted).toEqual([
+      {
+        type: "bridge.error",
+        version: 1,
+        message: "providerId must be codex",
+        code: "invalid_message"
+      }
+    ]);
+  });
+
   it("dispatches reset and close lifecycle commands to provider sessions", async () => {
     const emitted: BridgeToExtension[] = [];
     const provider = createRecordingProvider();

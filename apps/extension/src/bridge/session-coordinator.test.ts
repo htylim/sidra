@@ -180,7 +180,19 @@ describe("BridgeSessionCoordinator", () => {
       pendingPromptCount: 0,
       sessionStarted: false,
       starting: false,
-      lastError: "bridge failed"
+      lastError: undefined
     });
+    expect(coordinator.getSnapshot().transcript).toEqual([]);
+  });
+
+  it("removes queued prompt entries when the bridge disconnects before session.started", () => {
+    const { coordinator } = createHarness();
+
+    coordinator.sendPrompt("unsent");
+    coordinator.markBridgeDisconnected();
+
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      { role: "status", text: "Bridge disconnected" }
+    ]);
   });
 });

@@ -8,8 +8,11 @@ export function SidePanelView(props: {
   onRetryBridge(): void;
 }) {
   const [draft, setDraft] = useState("");
+  const chatBlocked = !props.snapshot.bridge.canUseChat;
 
   function sendPrompt() {
+    if (chatBlocked) return;
+
     const prompt = draft.trim();
     if (!prompt) return;
 
@@ -38,7 +41,12 @@ export function SidePanelView(props: {
       </section>
 
       <section className="chat" aria-live="polite">
-        {props.snapshot.activeSession.transcript.length === 0 ? (
+        {chatBlocked ? (
+          <BridgeSetupPanel
+            availability={props.snapshot.bridge.availability}
+            onRetryBridge={props.onRetryBridge}
+          />
+        ) : props.snapshot.activeSession.transcript.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">✦</div>
             <h2>Ask anything about this page</h2>
@@ -59,7 +67,8 @@ export function SidePanelView(props: {
       <footer className="composer">
         <textarea
           value={draft}
-          placeholder={props.snapshot.bridge.connected ? "Ask about this page" : "Ask about this page"}
+          placeholder="Ask about this page"
+          disabled={chatBlocked}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -69,14 +78,38 @@ export function SidePanelView(props: {
           }}
         />
         <div className="composer-actions">
-          <button type="button" className="options-button" aria-label="Prompt options">
+          <button type="button" className="options-button" aria-label="Prompt options" disabled={chatBlocked}>
             ⚙
           </button>
-          <button type="button" className="send-button" onClick={sendPrompt}>
+          <button type="button" className="send-button" onClick={sendPrompt} disabled={chatBlocked}>
             Capture + Send
           </button>
         </div>
       </footer>
     </main>
+  );
+}
+
+function BridgeSetupPanel(props: {
+  availability: SidePanelSnapshot["bridge"]["availability"];
+  onRetryBridge(): void;
+}) {
+  const retryable =
+    props.availability.status === "unavailable" || props.availability.status === "error";
+  const heading =
+    props.availability.status === "error" ? "Bridge setup needs attention" : "Sidra bridge setup";
+  const message = props.availability.status === "ready" ? "" : props.availability.message;
+
+  return (
+    <div className={`setup-panel ${props.availability.status}`}>
+      <div className="setup-icon">!</div>
+      <h2>{heading}</h2>
+      <p>{message}</p>
+      {retryable ? (
+        <button type="button" className="retry-button" onClick={props.onRetryBridge}>
+          Retry
+        </button>
+      ) : null}
+    </div>
   );
 }

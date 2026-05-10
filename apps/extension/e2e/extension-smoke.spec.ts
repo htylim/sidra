@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 
 const extensionPath = fileURLToPath(new URL("../dist", import.meta.url));
 
-test("loads the Sidra extension and renders the side panel", async ({ browserName }, testInfo) => {
+test("loads the Sidra extension and shows bridge setup when the native host is missing", async ({
+  browserName
+}, testInfo) => {
   test.skip(browserName !== "chromium", "Chromium extensions require a Chromium browser");
   expect(existsSync(extensionPath), "extension dist must exist before launching Chromium").toBe(true);
 
@@ -25,9 +27,11 @@ test("loads the Sidra extension and renders the side panel", async ({ browserNam
     await page.goto(`chrome-extension://${extensionId}/side-panel.html`);
     await page.screenshot({ path: testInfo.outputPath("side-panel.png"), fullPage: true });
 
-    await expect(page.getByRole("heading", { name: "Sidra" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Ask anything about this page" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Capture + Send" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sidra", exact: true })).toBeVisible();
+    await expect(page.getByText("Sidra cannot connect to the local bridge.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+    await expect(page.getByRole("textbox")).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Capture + Send" })).toBeDisabled();
   } finally {
     await context.close();
   }

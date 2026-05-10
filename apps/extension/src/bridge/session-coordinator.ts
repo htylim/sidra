@@ -159,6 +159,7 @@ export class BridgeSessionCoordinator {
   }
 
   markBridgeDisconnected(): void {
+    const transcript = removePendingPromptEntries(this.snapshot.transcript, this.pendingPrompts);
     this.pendingPrompts = [];
     this.startPosted = false;
     this.setSnapshot({
@@ -166,7 +167,7 @@ export class BridgeSessionCoordinator {
       sessionStarted: false,
       starting: false,
       pendingPromptCount: 0,
-      transcript: addStatusEntry(this.snapshot.transcript, "Bridge disconnected")
+      transcript: addStatusEntry(transcript, "Bridge disconnected")
     });
   }
 
@@ -212,7 +213,7 @@ export class BridgeSessionCoordinator {
         this.clearPendingAfterError(message.message);
         return;
       case "bridge.error":
-        this.clearPendingAfterError(message.message);
+        this.clearPendingAfterBridgeError();
         return;
     }
   }
@@ -251,6 +252,21 @@ export class BridgeSessionCoordinator {
     });
   }
 
+  private clearPendingAfterBridgeError(): void {
+    const transcript = removePendingPromptEntries(this.snapshot.transcript, this.pendingPrompts);
+    this.pendingPrompts = [];
+    this.startPosted = false;
+    this.suppressNextSessionStartedStatus = false;
+    this.setSnapshot({
+      ...this.snapshot,
+      sessionStarted: false,
+      starting: false,
+      pendingPromptCount: 0,
+      lastError: undefined,
+      transcript
+    });
+  }
+
   private setSnapshot(snapshot: BridgeSessionCoordinatorSnapshot): void {
     this.snapshot = snapshot;
     this.emit();
@@ -259,4 +275,28 @@ export class BridgeSessionCoordinator {
   private emit(): void {
     for (const listener of this.listeners) listener();
   }
+}
+
+function removePendingPromptEntries(
+  transcript: TranscriptEntry[],
+  pendingPrompts: string[]
+): TranscriptEntry[] {
+  if (pendingPrompts.length === 0) return transcript;
+
+  const nextTranscript = [...transcript];
+  let pendingPromptIndex = pendingPrompts.length - 1;
+
+  for (
+    let transcriptIndex = nextTranscript.length - 1;
+    transcriptIndex >= 0 && pendingPromptIndex >= 0;
+    transcriptIndex--
+  ) {
+    const entry = nextTranscript[transcriptIndex];
+    if (entry.role === "user" && entry.text === pendingPrompts[pendingPromptIndex]) {
+      nextTranscript.splice(transcriptIndex, 1);
+      pendingPromptIndex--;
+    }
+  }
+
+  return nextTranscript;
 }

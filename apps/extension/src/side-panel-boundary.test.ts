@@ -28,6 +28,17 @@ describe("side panel architecture boundary", () => {
     expect(source).not.toContain("chrome.runtime");
     expect(source).not.toContain("connectNative");
   });
+
+  it("keeps bridge availability decisions out of the React entry point", () => {
+    const entrySource = readSource("./side-panel.tsx");
+    const viewSource = readSource("./side-panel-view.tsx");
+
+    expect(entrySource).toContain("createChromeSidePanelController");
+    expect(entrySource).not.toContain("BridgeConnection");
+    expect(entrySource).not.toContain("./bridge/connection");
+    expect(viewSource).not.toContain("snapshot.bridge.connected ?");
+    expect(viewSource).not.toContain("snapshot.bridge.ready ?");
+  });
 });
 
 describe("side panel New Chat wiring", () => {

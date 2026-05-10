@@ -59,6 +59,147 @@ function createHarness() {
 }
 
 describe("BridgeConnection", () => {
+  it("connects explicitly and enters checking before bridge.ready", () => {
+    const { connection, connectNative, ports } = createHarness();
+
+    expect(connection.connect()).toEqual({ ok: true });
+
+    expect(connectNative).toHaveBeenCalledTimes(1);
+    expect(ports).toHaveLength(1);
+    expect(connection.getSnapshot()).toMatchObject({
+      connected: true,
+      ready: false,
+      availability: { status: "checking" }
+    });
+  });
+
+  it("marks bridge.ready as usable chat availability", () => {
+    const { connection, ports } = createHarness();
+
+    connection.connect();
+    ports[0].emitMessage({ type: "bridge.ready", version: 1 });
+
+    expect(connection.getSnapshot()).toMatchObject({
+      connected: true,
+      ready: true,
+      availability: { status: "ready" }
+    });
+  });
+
+  it("records unavailable state when connectNative throws", () => {
+    const connection = new BridgeConnection({
+      connectNative: () => {
+        throw new Error("missing host");
+      }
+    });
+
+    expect(connection.connect()).toEqual({ ok: false, error: "missing host" });
+    expect(connection.getSnapshot()).toEqual({
+      connected: false,
+      ready: false,
+      setupError: "missing host",
+      availability: { status: "unavailable", message: "missing host" }
+    });
+  });
+
+  it("records unavailable state when the startup port disconnects before readiness", () => {
+    const { connection, ports } = createHarness();
+
+    connection.connect();
+    ports[0].emitDisconnect();
+
+    expect(connection.getSnapshot()).toMatchObject({
+      connected: false,
+      ready: false,
+      availability: {
+        status: "unavailable",
+        message: "Sidra cannot connect to the local bridge."
+      }
+    });
+  });
+
+  it("records unavailable state when a ready idle port disconnects", () => {
+    const { connection, ports } = createHarness();
+
+    connection.connect();
+    ports[0].emitMessage({ type: "bridge.ready", version: 1 });
+    ports[0].emitDisconnect();
+
+    expect(connection.getSnapshot()).toMatchObject({
+      connected: false,
+      ready: false,
+      availability: {
+        status: "unavailable",
+        message: "Sidra cannot connect to the local bridge."
+      }
+    });
+  });
+
+  it("retry opens a fresh native port after unavailable state", () => {
+    const ports: FakePort[] = [];
+    const connectNative = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("missing host");
+      })
+      .mockImplementation(() => {
+        const port = new FakePort();
+        ports.push(port);
+        return port;
+      });
+    const connection = new BridgeConnection({ connectNative });
+
+    expect(connection.connect()).toEqual({ ok: false, error: "missing host" });
+    expect(connection.retry()).toEqual({ ok: true });
+    ports[0].emitMessage({ type: "bridge.ready", version: 1 });
+
+    expect(connectNative).toHaveBeenCalledTimes(2);
+    expect(connection.getSnapshot()).toMatchObject({
+      connected: true,
+      ready: true,
+      availability: { status: "ready" }
+    });
+  });
+
+  it("retry replaces a connected error port", () => {
+    const { connection, connectNative, ports } = createHarness();
+
+    connection.connect();
+    ports[0].emitMessage({ type: "bridge.error", version: 1, message: "bridge failed" });
+    expect(connection.retry()).toEqual({ ok: true });
+    ports[0].emitMessage({ type: "bridge.ready", version: 1 });
+    ports[1].emitMessage({ type: "bridge.ready", version: 1 });
+
+    expect(connectNative).toHaveBeenCalledTimes(2);
+    expect(connection.getSnapshot()).toMatchObject({
+      connected: true,
+      ready: true,
+      availability: { status: "ready" }
+    });
+  });
+
+  it("blocks on invalid inbound bridge messages before notifying subscribers", () => {
+    const { connection, ports } = createHarness();
+    const messageListener = vi.fn();
+
+    connection.subscribeToMessages(messageListener);
+    connection.connect();
+    ports[0].emitMessage({
+      type: "agent.event",
+      version: 1,
+      clientSessionId: "client-1",
+      event: { type: "assistant.text.delta" }
+    });
+
+    expect(messageListener).not.toHaveBeenCalled();
+    expect(connection.getSnapshot()).toEqual({
+      connected: true,
+      ready: false,
+      setupError: "event is invalid",
+      availability: { status: "error", message: "event is invalid", code: "invalid_message" }
+    });
+  });
+
   it("connects lazily on the first posted message", () => {
     const { connection, connectNative, ports } = createHarness();
 
@@ -106,10 +247,11 @@ describe("BridgeConnection", () => {
     ).not.toThrow();
 
     expect(messageListener).not.toHaveBeenCalled();
-    expect(connection.getSnapshot()).toEqual({
+    expect(connection.getSnapshot()).toMatchObject({
       connected: true,
       ready: false,
-      setupError: "event is invalid"
+      setupError: "event is invalid",
+      availability: { status: "error", message: "event is invalid", code: "invalid_message" }
     });
   });
 
@@ -120,7 +262,11 @@ describe("BridgeConnection", () => {
     ports[0].emitMessage({ type: "bridge.ready", version: 1 });
     ports[0].emitDisconnect();
 
-    expect(connection.getSnapshot()).toEqual({ connected: false, ready: false });
+    expect(connection.getSnapshot()).toMatchObject({
+      connected: false,
+      ready: false,
+      availability: { status: "unavailable" }
+    });
   });
 
   it("ignores messages emitted by a stale disconnected port", () => {
@@ -142,10 +288,11 @@ describe("BridgeConnection", () => {
     });
 
     expect(connection.post(startMessage())).toEqual({ ok: false, error: "missing host" });
-    expect(connection.getSnapshot()).toEqual({
+    expect(connection.getSnapshot()).toMatchObject({
       connected: false,
       ready: false,
-      setupError: "missing host"
+      setupError: "missing host",
+      availability: { status: "unavailable", message: "missing host" }
     });
   });
 
@@ -157,10 +304,11 @@ describe("BridgeConnection", () => {
     const connection = new BridgeConnection({ connectNative: () => port });
 
     expect(connection.post(startMessage())).toEqual({ ok: false, error: "post failed" });
-    expect(connection.getSnapshot()).toEqual({
+    expect(connection.getSnapshot()).toMatchObject({
       connected: false,
       ready: false,
-      setupError: "post failed"
+      setupError: "post failed",
+      availability: { status: "error", message: "post failed" }
     });
   });
 });

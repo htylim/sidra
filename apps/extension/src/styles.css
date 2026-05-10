@@ -113,6 +113,58 @@ textarea {
   text-align: center;
 }
 
+.setup-panel {
+  display: grid;
+  min-height: 100%;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 18px;
+  text-align: center;
+}
+
+.setup-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid #c7dbd5;
+  border-radius: 8px;
+  color: #087c71;
+  background: #eef8f5;
+  font-weight: 700;
+}
+
+.setup-panel.error .setup-icon,
+.setup-panel.unavailable .setup-icon {
+  border-color: #efd2c3;
+  color: #9a3412;
+  background: #fff7ed;
+}
+
+.setup-panel h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.setup-panel p {
+  max-width: 260px;
+  margin: 0;
+  color: #62716d;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.retry-button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #087c71;
+  border-radius: 6px;
+  background: #087c71;
+  color: #ffffff;
+  font-weight: 650;
+}
+
 .empty-icon {
   display: grid;
   width: 44px;
@@ -202,4 +254,10 @@ textarea {
 .send-button {
   min-height: 32px;
   padding: 0 12px;
+}
+
+button:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }

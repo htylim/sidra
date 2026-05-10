@@ -37,6 +37,13 @@ describe("extension-to-bridge protocol validation", () => {
       })
     ).toEqual({ ok: false, error: "prompt is required" });
   });
+
+  it("rejects unknown extension commands with a parser-backed error", () => {
+    expect(parseExtensionToBridge({ type: "session.delete", version: 1 })).toEqual({
+      ok: false,
+      error: "Unknown command"
+    });
+  });
 });
 
 describe("session.cancel protocol validation", () => {
@@ -181,5 +188,12 @@ describe("bridge-to-extension protocol validation", () => {
         event: { type: "assistant.text.delta" }
       })
     ).toEqual({ ok: false, error: "event is invalid" });
+  });
+
+  it("rejects unknown bridge messages with a parser-backed error", () => {
+    expect(parseBridgeToExtension({ type: "bridge.noop", version: 1 })).toEqual({
+      ok: false,
+      error: "Unknown message"
+    });
   });
 });

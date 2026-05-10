@@ -119,6 +119,20 @@ describe("native messaging dispatch", () => {
       { type: "bridge.error", version: 1, message: "Invalid JSON", code: "invalid_message" }
     ]);
   });
+
+  it("reports parser validation errors from framed native messages", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 2);
+
+    runNativeMessagingBridge(input, output);
+    input.write(encodeNativeMessage({ type: "session.delete", version: 1, clientSessionId: "page-1" }));
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.ready", version: 1 },
+      { type: "bridge.error", version: 1, message: "Unknown command", code: "invalid_message" }
+    ]);
+  });
 });
 
 function encodeNativeMessage(message: unknown) {

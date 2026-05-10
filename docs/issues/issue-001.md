@@ -2,7 +2,7 @@
 
 ## Status
 
-Open
+Complete
 
 ## Type
 
@@ -14,11 +14,11 @@ Create the initial pnpm/TypeScript workspace and a minimal Sidra vertical path: 
 
 ## Acceptance criteria
 
-- [ ] Workspace contains `apps/extension`, `apps/bridge`, and `packages/protocol` with shared TypeScript configuration and runnable build/test scripts.
-- [ ] Extension manifest uses Manifest V3 with `sidePanel`, `nativeMessaging`, `storage`, `tabs`, and `scripting` permissions declared for V1 development.
-- [ ] Side panel renders Sidra header, empty chat area, prompt composer, and a send control.
-- [ ] Bridge accepts a validated `session.start` and `session.send` message, then emits a mock `session.started` and assistant response event.
-- [ ] A local test or smoke script verifies the prompt-to-mock-response path without Codex.
+- [x] Workspace contains `apps/extension`, `apps/bridge`, and `packages/protocol` with shared TypeScript configuration and runnable build/test scripts.
+- [x] Extension manifest uses Manifest V3 with `sidePanel`, `nativeMessaging`, `storage`, `tabs`, and `scripting` permissions declared for V1 development.
+- [x] Side panel renders Sidra header, empty chat area, prompt composer, and a send control.
+- [x] Bridge accepts a validated `session.start` and `session.send` message, then emits a mock `session.started` and assistant response event.
+- [x] A local test or smoke script verifies the prompt-to-mock-response path without Codex.
 
 ## Blocked by
 

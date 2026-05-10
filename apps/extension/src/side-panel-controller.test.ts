@@ -58,10 +58,165 @@ function sessionStarted(): BridgeToExtension {
   };
 }
 
+function bridgeReady(): BridgeToExtension {
+  return { type: "bridge.ready", version: 1 };
+}
+
 describe("SidePanelController", () => {
+  it("connects to the native bridge when the controller is created", () => {
+    const { connectNative } = createHarness();
+
+    expect(connectNative).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes chat as blocked until bridge.ready arrives", () => {
+    const { controller } = createHarness();
+
+    expect(controller.getSnapshot().bridge).toMatchObject({
+      canUseChat: false,
+      availability: { status: "checking" }
+    });
+  });
+
+  it("enables chat after bridge.ready", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+
+    expect(controller.getSnapshot().bridge).toMatchObject({
+      canUseChat: true,
+      availability: { status: "ready" }
+    });
+  });
+
+  it("does not send prompts while bridge is unavailable", () => {
+    const connectNative = vi.fn(() => {
+      throw new Error("missing host");
+    });
+    const controller = createSidePanelController({
+      connectNative,
+      createClientSessionId: () => "client-1"
+    });
+
+    expect(controller.sendPrompt("hello")).toBe(false);
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
+    expect(connectNative).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not send prompts while bridge reports a blocking error", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage({ type: "bridge.error", version: 1, message: "bridge failed" });
+
+    expect(controller.sendPrompt("hello")).toBe(false);
+    expect(ports[0].postedMessages).toEqual([]);
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
+  });
+
+  it("clears the blocking bridge error after retry succeeds", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage({ type: "bridge.error", version: 1, message: "bridge failed" });
+    controller.retryBridge();
+    ports[1].emitMessage(bridgeReady());
+
+    expect(controller.getSnapshot().bridge).toMatchObject({
+      setupError: undefined,
+      canUseChat: true,
+      availability: { status: "ready" }
+    });
+  });
+
+  it("does not keep queued prompts that failed before bridge.error recovery", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+    expect(controller.sendPrompt("unsent")).toBe(true);
+    ports[0].emitMessage({ type: "bridge.error", version: 1, message: "bridge failed" });
+
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
+
+    controller.retryBridge();
+    ports[1].emitMessage(bridgeReady());
+
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
+    expect(controller.sendPrompt("after retry")).toBe(true);
+    expect(ports[1].postedMessages).toEqual([
+      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" }
+    ]);
+  });
+
+  it("blocks new prompts after bridge disconnect until retry succeeds", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+    expect(controller.sendPrompt("first")).toBe(true);
+    ports[0].emitMessage(sessionStarted());
+    ports[0].disconnect();
+
+    expect(controller.sendPrompt("second")).toBe(false);
+    expect(ports).toHaveLength(1);
+    expect(controller.getSnapshot().bridge.canUseChat).toBe(false);
+
+    controller.retryBridge();
+    ports[1].emitMessage(bridgeReady());
+
+    expect(controller.sendPrompt("second")).toBe(true);
+    expect(ports[1].postedMessages).toEqual([
+      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" }
+    ]);
+  });
+
+  it("blocks prompts after a ready idle bridge disconnects", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+    ports[0].disconnect();
+
+    expect(controller.getSnapshot().bridge.canUseChat).toBe(false);
+    expect(controller.sendPrompt("hello")).toBe(false);
+    expect(ports[0].postedMessages).toEqual([]);
+  });
+
+  it("retryBridge reconnects without recreating the controller", () => {
+    const { controller, connectNative, ports } = createHarness();
+    const firstSessionId = controller.getSnapshot().activeSession.clientSessionId;
+
+    ports[0].disconnect();
+    controller.retryBridge();
+
+    expect(connectNative).toHaveBeenCalledTimes(2);
+    expect(controller.getSnapshot().activeSession.clientSessionId).toBe(firstSessionId);
+  });
+
+  it("retryBridge returns to usable chat after bridge.ready", () => {
+    const ports: FakePort[] = [];
+    const connectNative = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("missing host");
+      })
+      .mockImplementation(() => {
+        const port = new FakePort();
+        ports.push(port);
+        return port;
+      });
+    const controller = createSidePanelController({
+      connectNative,
+      createClientSessionId: () => "client-1"
+    });
+
+    expect(controller.getSnapshot().bridge.canUseChat).toBe(false);
+    controller.retryBridge();
+    ports[0].emitMessage(bridgeReady());
+
+    expect(controller.getSnapshot().bridge.canUseChat).toBe(true);
+  });
+
   it("queues the first prompt until the bridge session starts", () => {
     const { controller, ports } = createHarness();
 
+    ports[0].emitMessage(bridgeReady());
     expect(controller.sendPrompt("hello")).toBe(true);
 
     expect(ports[0].postedMessages).toEqual([
@@ -84,6 +239,7 @@ describe("SidePanelController", () => {
   it("flushes queued prompts in order after session.started", () => {
     const { controller, ports } = createHarness();
 
+    ports[0].emitMessage(bridgeReady());
     controller.sendPrompt("first");
     controller.sendPrompt("second");
     ports[0].emitMessage(sessionStarted());
@@ -95,12 +251,15 @@ describe("SidePanelController", () => {
     ]);
   });
 
-  it("starts a new provider session before sending after the native bridge disconnects", () => {
+  it("starts a new provider session before sending after retrying a native bridge disconnect", () => {
     const { controller, ports } = createHarness();
 
+    ports[0].emitMessage(bridgeReady());
     controller.sendPrompt("first");
     ports[0].emitMessage(sessionStarted());
     ports[0].disconnect();
+    controller.retryBridge();
+    ports[1].emitMessage(bridgeReady());
     controller.sendPrompt("second");
 
     expect(ports[1].postedMessages).toEqual([
@@ -118,6 +277,7 @@ describe("SidePanelController", () => {
   it("renders user and assistant transcript entries through the controller snapshot", () => {
     const { controller, ports } = createHarness();
 
+    ports[0].emitMessage(bridgeReady());
     controller.sendPrompt("hello");
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
@@ -141,7 +301,7 @@ describe("SidePanelController", () => {
     expect(controller.sendPrompt("   ")).toBe(false);
 
     expect(controller.getSnapshot()).toEqual(before);
-    expect(connectNative).not.toHaveBeenCalled();
+    expect(connectNative).toHaveBeenCalledTimes(1);
   });
 
   it("returns the same snapshot object until controller state changes", () => {
@@ -150,6 +310,7 @@ describe("SidePanelController", () => {
 
     expect(controller.getSnapshot()).toBe(initial);
 
+    ports[0].emitMessage(bridgeReady());
     controller.sendPrompt("hello");
     const afterPrompt = controller.getSnapshot();
 
@@ -166,13 +327,16 @@ describe("SidePanelController", () => {
   it("surfaces bridge errors as setup state without exposing protocol details to the view", () => {
     const { controller, ports } = createHarness();
 
+    ports[0].emitMessage(bridgeReady());
     controller.sendPrompt("hello");
     ports[0].emitMessage({ type: "bridge.error", version: 1, message: "bridge failed" });
 
     expect(controller.getSnapshot().bridge).toEqual({
       connected: true,
       ready: false,
-      setupError: "bridge failed"
+      setupError: "bridge failed",
+      canUseChat: false,
+      availability: { status: "error", message: "bridge failed", code: undefined }
     });
   });
 });
@@ -181,6 +345,7 @@ describe("SidePanelController newChat", () => {
   it("clears the active transcript and pending prompts", () => {
     const { controller, ports } = createHarness();
 
+    ports[0].emitMessage(bridgeReady());
     controller.sendPrompt("first");
     controller.sendPrompt("second");
     controller.newChat();
@@ -200,6 +365,7 @@ describe("SidePanelController newChat", () => {
   it("sends session.reset for the active clientSessionId when provider state may exist", () => {
     const { controller, ports } = createHarness();
 
+    ports[0].emitMessage(bridgeReady());
     controller.sendPrompt("first");
     ports[0].emitMessage(sessionStarted());
     controller.newChat();
@@ -216,27 +382,30 @@ describe("SidePanelController newChat", () => {
 
     controller.newChat();
 
-    expect(connectNative).not.toHaveBeenCalled();
+    expect(connectNative).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
   });
 
   it("keeps bridge connection state when clearing local session state", () => {
     const { controller, ports } = createHarness();
 
-    controller.sendPrompt("first");
     ports[0].emitMessage({ type: "bridge.ready", version: 1 });
+    controller.sendPrompt("first");
     controller.newChat();
 
     expect(controller.getSnapshot().bridge).toEqual({
       connected: true,
       ready: true,
-      setupError: undefined
+      setupError: undefined,
+      canUseChat: true,
+      availability: { status: "ready" }
     });
   });
 
   it("uses the fresh session.started event after reset before sending later prompts", () => {
     const { controller, ports } = createHarness();
 
+    ports[0].emitMessage(bridgeReady());
     controller.sendPrompt("first");
     ports[0].emitMessage(sessionStarted());
     controller.newChat();
@@ -261,6 +430,7 @@ describe("SidePanelController newChat", () => {
   it("keeps the visible chat empty when reset session.started arrives with no queued prompt", () => {
     const { controller, ports } = createHarness();
 
+    ports[0].emitMessage(bridgeReady());
     controller.sendPrompt("first");
     ports[0].emitMessage(sessionStarted());
     controller.newChat();

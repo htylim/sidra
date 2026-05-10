@@ -2,7 +2,7 @@
 
 ## Status
 
-Open
+Complete
 
 ## Type
 
@@ -14,11 +14,12 @@ Make the side panel detect whether the Native Messaging bridge is reachable, sho
 
 ## Acceptance criteria
 
-- [ ] Side panel shows a connected chat experience only after receiving `bridge.ready` or a successful session start.
-- [ ] When the bridge is unavailable or returns `bridge.error`, the chat area shows a blocking error panel and disables prompt input.
-- [ ] Retry attempts to reconnect without requiring the side panel to be reloaded.
-- [ ] Bridge and extension reject unknown or invalid protocol messages with schema-backed errors.
-- [ ] Tests cover connected, unavailable, invalid-message, and retry states.
+- [x] Side panel shows a connected chat experience only after receiving `bridge.ready`.
+- [x] `session.started` remains the response to `session.start`; it does not drive bridge availability in V1 because the Native Messaging bridge emits `bridge.ready` before prompts can be sent.
+- [x] When the bridge is unavailable or returns `bridge.error`, the chat area shows a blocking error panel and disables prompt input.
+- [x] Retry attempts to reconnect without requiring the side panel to be reloaded.
+- [x] Bridge and extension reject unknown or invalid protocol messages with schema-backed errors.
+- [x] Tests cover connected, unavailable, invalid-message, and retry states.
 
 ## Blocked by
 
