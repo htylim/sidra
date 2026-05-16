@@ -1,4 +1,4 @@
-import type { BridgeToExtension, ExtensionToBridge } from "@sidra/protocol";
+import type { BridgeToExtension, ExtensionToBridge, PageContext } from "@sidra/protocol";
 import { describe, expect, it } from "vitest";
 import { BridgeSessionCoordinator, type ProtocolTransport } from "./bridge/session-coordinator";
 import type { PageIdentity, PageKey } from "./page-key";
@@ -64,6 +64,30 @@ function agentTextDelta(clientSessionId: string, text: string): BridgeToExtensio
 
 function sessionsByClientSessionId(store: UrlSessionStore) {
   return new Map(store.getSnapshot().sessions.map((session) => [session.clientSessionId, session]));
+}
+
+function readablePageContext(text = "Readable page text that should not be visible in transcript."): PageContext {
+  return {
+    kind: "readable",
+    metadata: {
+      url: "https://example.com/article",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    text,
+    textLength: text.length,
+    extractionMethod: "readability"
+  };
+}
+
+function metadataOnlyPageContext(): PageContext {
+  return {
+    kind: "metadata_only",
+    metadata: {
+      url: "https://example.com/short",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    reason: "no_usable_text"
+  };
 }
 
 describe("UrlSessionStore", () => {
@@ -182,5 +206,95 @@ describe("UrlSessionStore", () => {
       version: 1,
       clientSessionId: "client-1"
     });
+  });
+});
+
+describe("UrlSessionStore context state", () => {
+  it("updates_context_state_for_the_active_session_after_readable_context_send", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.sendPromptWithContext({ prompt: "summarize", pageContext: readablePageContext() })).toBe(true);
+
+    expect(store.getSnapshot().activeSession.contextState).toEqual({
+      status: "attached",
+      label: "Context attached",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    });
+  });
+
+  it("updates_context_state_for_metadata_only_send", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.sendPromptWithContext({ prompt: "describe", pageContext: metadataOnlyPageContext() })).toBe(true);
+
+    expect(store.getSnapshot().activeSession.contextState).toEqual({
+      status: "metadata_only",
+      label: "Metadata attached",
+      capturedAt: "2026-05-10T12:00:00.000Z",
+      reason: "no_usable_text"
+    });
+  });
+
+  it("does_not_update_context_state_when_context_submission_is_rejected", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.sendPromptWithContext({ prompt: "   ", pageContext: readablePageContext() })).toBe(false);
+
+    expect(store.getSnapshot().activeSession.contextState).toEqual({
+      status: "none",
+      label: "No context sent yet"
+    });
+  });
+
+  it("keeps_context_state_scoped_to_the_url_session", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPromptWithContext({ prompt: "summarize", pageContext: readablePageContext() });
+    store.selectPage(pageIdentity("https://example.com/b"));
+
+    expect(store.getSnapshot().activeSession.contextState).toEqual({
+      status: "none",
+      label: "No context sent yet"
+    });
+  });
+
+  it("clears_context_state_on_new_chat_for_the_active_session_only", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPromptWithContext({ prompt: "a", pageContext: readablePageContext() });
+    store.selectPage(pageIdentity("https://example.com/b"));
+    store.sendPromptWithContext({ prompt: "b", pageContext: metadataOnlyPageContext() });
+    store.newChat();
+
+    expect(store.getSnapshot().activeSession.contextState).toEqual({
+      status: "none",
+      label: "No context sent yet"
+    });
+    store.selectPage(pageIdentity("https://example.com/a"));
+    expect(store.getSnapshot().activeSession.contextState.status).toBe("attached");
+  });
+
+  it("records_capture_unavailable_for_the_active_session_without_clearing_draft", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.updateActiveDraftPrompt("keep this");
+
+    store.recordCaptureUnavailable({ message: "Could not capture this page." });
+
+    expect(transport.postedMessages).toEqual([]);
+    expect(store.getSnapshot().activeSession).toMatchObject({
+      draftPrompt: "keep this",
+      contextState: {
+        status: "capture_unavailable",
+        label: "Capture unavailable",
+        message: "Could not capture this page."
+      }
+    });
+    expect(store.getSnapshot().activeSession.transcript).toEqual([
+      expect.objectContaining({ role: "status", text: "Could not capture this page" })
+    ]);
   });
 });

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { addAssistantTextDelta, addStatusEntry, addUserPrompt, type TranscriptEntry } from "./transcript";
+import {
+  addAssistantTextDelta,
+  addContextMarker,
+  addStatusEntry,
+  addUserPrompt,
+  type TranscriptEntry
+} from "./transcript";
 
 describe("transcript reducer", () => {
   it("adds escaped user prompt entries", () => {
@@ -37,5 +43,18 @@ describe("transcript reducer", () => {
     expect(addStatusEntry(transcript, "Session started")).toEqual([
       { role: "status", text: "Session started" }
     ]);
+  });
+
+  it("adds_status_marker_without_raw_page_content", () => {
+    const transcript: TranscriptEntry[] = [];
+
+    const nextTranscript = addContextMarker(
+      transcript,
+      { kind: "page_context_attached", text: "Page context attached" },
+      "marker-1"
+    );
+
+    expect(nextTranscript).toEqual([{ role: "status", text: "Page context attached" }]);
+    expect(nextTranscript[0].id).toBe("marker-1");
   });
 });

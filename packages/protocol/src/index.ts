@@ -2,13 +2,30 @@ export const PROTOCOL_VERSION = 1;
 
 export type ProviderId = "codex";
 
-export type PageContext = {
+export type PageContextMetadata = {
   url: string;
   canonicalUrl?: string;
   title?: string;
-  text?: string;
+  siteName?: string;
+  excerpt?: string;
+  byline?: string;
+  language?: string;
   capturedAt: string;
 };
+
+export type PageContext =
+  | {
+      kind: "readable";
+      metadata: PageContextMetadata;
+      text: string;
+      textLength: number;
+      extractionMethod: "readability" | "body_inner_text";
+    }
+  | {
+      kind: "metadata_only";
+      metadata: PageContextMetadata;
+      reason: "no_usable_text";
+    };
 
 export type ExtensionToBridge =
   | {
@@ -71,10 +88,31 @@ export function parseExtensionToBridge(input: unknown): ParseResult<ExtensionToB
     case "session.send":
       if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
       if (!isNonEmptyString(input.prompt)) return invalid("prompt is required");
-      if (input.pageContext !== undefined && !isPageContext(input.pageContext)) {
-        return invalid("pageContext is invalid");
+      if (input.pageContext === undefined) {
+        return {
+          ok: true,
+          value: {
+            type: "session.send",
+            version: PROTOCOL_VERSION,
+            clientSessionId: input.clientSessionId,
+            prompt: input.prompt
+          }
+        };
       }
-      return { ok: true, value: input as ExtensionToBridge };
+      {
+        const pageContext = parsePageContext(input.pageContext);
+        if (!pageContext) return invalid("pageContext is invalid");
+        return {
+          ok: true,
+          value: {
+            type: "session.send",
+            version: PROTOCOL_VERSION,
+            clientSessionId: input.clientSessionId,
+            prompt: input.prompt,
+            pageContext
+          }
+        };
+      }
     case "session.cancel":
     case "session.reset":
     case "session.close":
@@ -120,15 +158,70 @@ function invalid(error: string): ParseResult<never> {
   return { ok: false, error };
 }
 
-function isPageContext(value: unknown): value is PageContext {
-  return (
-    isRecord(value) &&
-    isNonEmptyString(value.url) &&
-    isNonEmptyString(value.capturedAt) &&
-    optionalString(value.canonicalUrl) &&
-    optionalString(value.title) &&
-    optionalString(value.text)
-  );
+function parsePageContext(value: unknown): PageContext | null {
+  if (!isRecord(value)) return null;
+  if (!isRecord(value.metadata)) return null;
+
+  const metadata = parsePageContextMetadata(value.metadata);
+  if (!metadata) return null;
+
+  switch (value.kind) {
+    case "readable":
+      if (!hasOnlyKeys(value, ["kind", "metadata", "text", "textLength", "extractionMethod"])) return null;
+      if (!isNonEmptyString(value.text)) return null;
+      if (typeof value.textLength !== "number" || !Number.isInteger(value.textLength)) return null;
+      if (value.textLength !== value.text.length) return null;
+      if (value.extractionMethod !== "readability" && value.extractionMethod !== "body_inner_text") return null;
+      return {
+        kind: "readable",
+        metadata,
+        text: value.text,
+        textLength: value.textLength,
+        extractionMethod: value.extractionMethod
+      };
+    case "metadata_only":
+      if (!hasOnlyKeys(value, ["kind", "metadata", "reason"])) return null;
+      if (value.reason !== "no_usable_text") return null;
+      return {
+        kind: "metadata_only",
+        metadata,
+        reason: "no_usable_text"
+      };
+    default:
+      return null;
+  }
+}
+
+function parsePageContextMetadata(value: Record<string, unknown>): PageContextMetadata | null {
+  if (
+    !hasOnlyKeys(value, ["url", "canonicalUrl", "title", "siteName", "excerpt", "byline", "language", "capturedAt"])
+  ) {
+    return null;
+  }
+  if (!isNonEmptyString(value.url)) return null;
+  if (!isNonEmptyString(value.capturedAt)) return null;
+  if (
+    !optionalString(value.canonicalUrl) ||
+    !optionalString(value.title) ||
+    !optionalString(value.siteName) ||
+    !optionalString(value.excerpt) ||
+    !optionalString(value.byline) ||
+    !optionalString(value.language)
+  ) {
+    return null;
+  }
+
+  const metadata: PageContextMetadata = {
+    url: value.url,
+    capturedAt: value.capturedAt
+  };
+  if (value.canonicalUrl !== undefined) metadata.canonicalUrl = value.canonicalUrl;
+  if (value.title !== undefined) metadata.title = value.title;
+  if (value.siteName !== undefined) metadata.siteName = value.siteName;
+  if (value.excerpt !== undefined) metadata.excerpt = value.excerpt;
+  if (value.byline !== undefined) metadata.byline = value.byline;
+  if (value.language !== undefined) metadata.language = value.language;
+  return metadata;
 }
 
 function isAgentEvent(value: unknown): value is AgentEvent {
@@ -155,4 +248,9 @@ function isNonEmptyString(value: unknown): value is string {
 
 function optionalString(value: unknown): value is string | undefined {
   return value === undefined || typeof value === "string";
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: readonly string[]): boolean {
+  const allowed = new Set(allowedKeys);
+  return Object.keys(value).every((key) => allowed.has(key));
 }

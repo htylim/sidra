@@ -1,5 +1,6 @@
 import type { ProviderId } from "@sidra/protocol";
 import { createChromeActivePageTracker } from "./active-page";
+import { createChromeCaptureService, type CaptureResult } from "./capture-service";
 import type { PageIdentity } from "./page-key";
 import { BridgeConnection, type BridgeAvailability, type NativeBridgePort } from "./bridge/connection";
 import { BridgeSessionCoordinator } from "./bridge/session-coordinator";
@@ -31,6 +32,7 @@ export type SidePanelController = {
   getSnapshot(): SidePanelSnapshot;
   subscribe(listener: () => void): () => void;
   sendPrompt(prompt: string): boolean;
+  captureAndSend(prompt: string): Promise<boolean>;
   updateDraftPrompt(text: string): void;
   newChat(): void;
   retryBridge(): void;
@@ -42,10 +44,15 @@ type ActivePageSource = {
   start(): Promise<void>;
 };
 
+type CaptureServiceLike = {
+  captureActivePageContext(): Promise<CaptureResult>;
+};
+
 type SidePanelControllerOptions = {
   connectNative(application: string): NativeBridgePort;
   createClientSessionId(): string;
   activePageTracker?: ActivePageSource;
+  captureService?: CaptureServiceLike;
   providerId?: ProviderId;
 };
 
@@ -64,6 +71,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       subscribe: () => () => undefined,
       start: async () => undefined
     } satisfies ActivePageSource);
+  const captureService = options.captureService ?? createChromeCaptureService();
   const urlSessionStore = new UrlSessionStore({
     createClientSessionId: options.createClientSessionId,
     createCoordinator: (clientSessionId) =>
@@ -83,18 +91,16 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
 
   const refreshSnapshot = () => {
     const nextBridgeSnapshot = connection.getSnapshot();
-    const nextActivePageSnapshot = activePageTracker.getSnapshot();
     const nextUrlSessionSnapshot = urlSessionStore.getSnapshot();
     if (
       nextBridgeSnapshot === bridgeSnapshot &&
-      nextActivePageSnapshot === activePageSnapshot &&
+      activePageSnapshot === snapshot.activePage &&
       snapshotsMatch(nextUrlSessionSnapshot, urlSessionSnapshot)
     ) {
       return;
     }
 
     bridgeSnapshot = nextBridgeSnapshot;
-    activePageSnapshot = nextActivePageSnapshot;
     urlSessionSnapshot = nextUrlSessionSnapshot;
     snapshot = createSnapshot(bridgeSnapshot, activePageSnapshot, urlSessionSnapshot);
   };
@@ -116,7 +122,8 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     emit();
   });
   activePageTracker.subscribe(() => {
-    urlSessionStore.selectPage(activePageTracker.getSnapshot());
+    activePageSnapshot = activePageTracker.getSnapshot();
+    urlSessionStore.selectPage(activePageSnapshot);
     emit();
   });
   urlSessionStore.subscribe(emit);
@@ -140,6 +147,34 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       refreshSnapshot();
       if (!snapshot.bridge.canUseChat) return false;
       return urlSessionStore.sendPrompt(prompt);
+    },
+    captureAndSend: async (prompt) => {
+      const normalizedPrompt = prompt.trim();
+      if (!normalizedPrompt) return false;
+
+      refreshSnapshot();
+      if (!snapshot.bridge.canUseChat) return false;
+
+      const captureResult = await captureService.captureActivePageContext();
+      if (captureResult.status === "captured") {
+        activePageSnapshot = captureResult.pageIdentity;
+        urlSessionStore.selectPage(captureResult.pageIdentity);
+        const accepted = urlSessionStore.sendPromptWithContext({
+          prompt: normalizedPrompt,
+          pageContext: captureResult.pageContext
+        });
+        emit();
+        return accepted;
+      }
+
+      activePageSnapshot = captureResult.pageIdentity;
+      urlSessionStore.selectPage(captureResult.pageIdentity);
+      if (captureResult.pageIdentity.status === "ready") {
+        urlSessionStore.updateActiveDraftPrompt(normalizedPrompt);
+        urlSessionStore.recordCaptureUnavailable({ message: captureResult.message });
+      }
+      emit();
+      return false;
     },
     updateDraftPrompt: (text) => urlSessionStore.updateActiveDraftPrompt(text),
     newChat: () => urlSessionStore.newChat(),
@@ -179,7 +214,8 @@ export function createChromeSidePanelController(): SidePanelController {
   return createSidePanelController({
     connectNative: (hostName) => chrome.runtime.connectNative(hostName),
     createClientSessionId: () => `sidra-${crypto.randomUUID()}`,
-    activePageTracker: createChromeActivePageTracker()
+    activePageTracker: createChromeActivePageTracker(),
+    captureService: createChromeCaptureService()
   });
 }
 

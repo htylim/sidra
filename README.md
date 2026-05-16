@@ -6,14 +6,14 @@ V1 targets article and text-heavy pages on macOS. The extension will capture rea
 
 ## Current status
 
-This repository contains product planning artifacts and the first runnable bootstrap slice:
+This repository contains product planning artifacts and a runnable local slice:
 
 - V1 PRD: [docs/prd-v1.md](docs/prd-v1.md)
 - Implementation issues: [docs/issues](docs/issues)
 - UI mockups: [docs/ui-mockups](docs/ui-mockups)
 - Ubiquitous language glossary: [UBIQUITOUS_LANGUAGE.md](UBIQUITOUS_LANGUAGE.md)
-- Chromium extension scaffold: [apps/extension](apps/extension)
-- Native Messaging bridge scaffold with mock provider: [apps/bridge](apps/bridge)
+- Chromium extension with explicit readable page capture: [apps/extension](apps/extension)
+- Native Messaging bridge with a mock provider: [apps/bridge](apps/bridge)
 - Shared protocol types and validation: [packages/protocol](packages/protocol)
 
 ## Development
@@ -27,7 +27,7 @@ pnpm build
 pnpm test:e2e
 ```
 
-The initial bridge smoke test verifies the prompt-to-mock-response path without Codex.
+The bridge smoke test verifies the prompt-to-mock-response path without Codex.
 
 `pnpm test:e2e` currently runs the extension Playwright smoke test. It builds
 `apps/extension/dist`, launches a temporary Chromium profile with that unpacked
@@ -37,9 +37,11 @@ Messaging host is not installed.
 
 ## Run Locally
 
-The current runnable path is a developer install. It can load the extension and
-connect it to the local Native Messaging bridge, but the bridge still uses the
-mock provider. The real Codex provider and installer script are planned work.
+The current runnable path is a developer install. It can load the extension,
+capture readable page context only when **Capture + Send** is pressed, and
+connect to the local Native Messaging bridge. The bridge still uses the mock
+provider. The real Codex provider, size settings, and full-DOM capture are
+planned work.
 
 1. Clone and install dependencies:
 
@@ -121,12 +123,28 @@ Brave commonly uses:
 Helium support is not claimed by this repo yet. Issue 014 tracks verifying the
 Helium manifest location, side panel compatibility, and a real installer.
 
-6. Reload Sidra from `chrome://extensions`, open its side panel, and submit a
-prompt. With the current mock bridge, the expected response is:
+6. Reload Sidra from `chrome://extensions`, open a normal article page, open
+Sidra's side panel, and confirm no capture marker appears just from opening the
+panel.
+
+7. Type a prompt and press **Capture + Send**. The transcript should show
+`Page context attached`, then your prompt, then the mock response. Raw page
+content should not appear in the transcript.
+
+With the current mock bridge, a captured prompt returns:
+
+```text
+Mock response received.
+```
+
+A plain prompt sent without page context returns:
 
 ```text
 Mock response to: <your prompt>
 ```
+
+8. Open an unsupported page such as `chrome://extensions`. Confirm capture is
+unavailable and the prompt controls are disabled.
 
 If the bridge does not connect, check:
 

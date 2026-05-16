@@ -56,8 +56,10 @@ function createMockProvider(): AgentProvider {
     async createSession() {
       return {
         async *send(input: AgentSendInput) {
-          const prompt = input.prompt;
-          yield { type: "assistant.text.delta", text: `Mock response to: ${prompt}` };
+          const text = input.prompt.includes("Untrusted page context JSON:")
+            ? "Mock response received."
+            : `Mock response to: ${input.prompt}`;
+          yield { type: "assistant.text.delta", text };
           yield { type: "assistant.done" };
         },
         async close() {}

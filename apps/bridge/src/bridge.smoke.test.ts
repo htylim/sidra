@@ -132,6 +132,43 @@ describe("mock bridge chat path", () => {
     ]);
   });
 
+  it("mock_provider_response_does_not_echo_captured_page_context", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const bridge = createBridge({ emit: (message) => emitted.push(message) });
+
+    await bridge.handleMessage({
+      type: "session.start",
+      version: 1,
+      clientSessionId: "page-1",
+      providerId: "codex"
+    });
+    await bridge.handleMessage({
+      type: "session.send",
+      version: 1,
+      clientSessionId: "page-1",
+      prompt: "Summarize this page",
+      pageContext: {
+        kind: "readable",
+        metadata: {
+          url: "https://example.com/article",
+          title: "Example article",
+          capturedAt: "2026-05-10T12:00:00.000Z"
+        },
+        text: "Sensitive captured page text",
+        textLength: "Sensitive captured page text".length,
+        extractionMethod: "readability"
+      }
+    });
+
+    expect(emitted).toContainEqual({
+      type: "agent.event",
+      version: 1,
+      clientSessionId: "page-1",
+      event: { type: "assistant.text.delta", text: "Mock response received." }
+    });
+    expect(JSON.stringify(emitted)).not.toContain("Sensitive captured page text");
+  });
+
   it("dispatches reset and close lifecycle commands to provider sessions", async () => {
     const emitted: BridgeToExtension[] = [];
     const provider = createRecordingProvider();

@@ -10,6 +10,7 @@
     "test:e2e": "pnpm build && playwright test"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "@sidra/protocol": "workspace:*",
     "@vitejs/plugin-react": "^5.1.1",
     "react": "^19.2.3",

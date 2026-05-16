@@ -3,6 +3,7 @@ import type { SidePanelSnapshot } from "./side-panel-controller";
 export function SidePanelView(props: {
   snapshot: SidePanelSnapshot;
   onSendPrompt(prompt: string): boolean;
+  onCaptureAndSend(prompt: string): boolean | Promise<boolean>;
   onDraftPromptChange(text: string): void;
   onNewChat(): void;
   onRetryBridge(): void;
@@ -18,7 +19,7 @@ export function SidePanelView(props: {
     const prompt = draftPrompt.trim();
     if (!prompt) return;
 
-    props.onSendPrompt(prompt);
+    void props.onCaptureAndSend(prompt);
   }
 
   const pageCard = getPageCardDisplay(props.snapshot);

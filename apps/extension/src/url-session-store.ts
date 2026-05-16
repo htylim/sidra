@@ -1,8 +1,18 @@
+import type { PageContext } from "@sidra/protocol";
 import type { BridgeSessionCoordinatorSnapshot } from "./bridge/session-coordinator";
 import type { PageIdentity, PageKey } from "./page-key";
 import type { TranscriptEntry } from "./transcript";
 
-export type ContextState = { status: "none"; label: string };
+export type ContextState =
+  | { status: "none"; label: "No context sent yet" }
+  | { status: "attached"; label: "Context attached"; capturedAt: string }
+  | {
+      status: "metadata_only";
+      label: "Metadata attached";
+      capturedAt: string;
+      reason: "no_usable_text";
+    }
+  | { status: "capture_unavailable"; label: "Capture unavailable"; message: string };
 
 export type UrlSessionSnapshot = {
   pageKey: PageKey;
@@ -26,7 +36,8 @@ type UrlSessionRecord = {
 export type UrlSessionCoordinator = {
   getSnapshot(): BridgeSessionCoordinatorSnapshot;
   subscribe(listener: () => void): () => void;
-  sendPrompt(prompt: string): boolean;
+  sendPrompt(input: string | { prompt: string; pageContext?: PageContext }): boolean;
+  recordCaptureUnavailable?(message: string): void;
   newChat(): void;
   markBridgeDisconnected(): void;
   hasProviderState?(): boolean;
@@ -119,11 +130,38 @@ export class UrlSessionStore {
     return true;
   }
 
+  sendPromptWithContext(input: { prompt: string; pageContext: PageContext }): boolean {
+    const activeRecord = this.getActiveRecord();
+    if (!activeRecord) return false;
+
+    const accepted = activeRecord.coordinator.sendPrompt(input);
+    if (!accepted) return false;
+
+    activeRecord.draftPrompt = "";
+    activeRecord.contextState = contextStateForPageContext(input.pageContext);
+    this.emit();
+    return true;
+  }
+
+  recordCaptureUnavailable(input: { message: string }): void {
+    const activeRecord = this.getActiveRecord();
+    if (!activeRecord) return;
+
+    activeRecord.contextState = {
+      status: "capture_unavailable",
+      label: "Capture unavailable",
+      message: input.message
+    };
+    activeRecord.coordinator.recordCaptureUnavailable?.(input.message);
+    this.emit();
+  }
+
   newChat(): void {
     const activeRecord = this.getActiveRecord();
     if (!activeRecord) return;
 
     activeRecord.draftPrompt = "";
+    activeRecord.contextState = INITIAL_CONTEXT_STATE;
     activeRecord.coordinator.newChat();
     this.emit();
   }
@@ -196,5 +234,22 @@ function createEmptySessionSnapshot(): UrlSessionSnapshot {
     pendingPromptCount: 0,
     sessionStarted: false,
     starting: false
+  };
+}
+
+function contextStateForPageContext(pageContext: PageContext): ContextState {
+  if (pageContext.kind === "metadata_only") {
+    return {
+      status: "metadata_only",
+      label: "Metadata attached",
+      capturedAt: pageContext.metadata.capturedAt,
+      reason: pageContext.reason
+    };
+  }
+
+  return {
+    status: "attached",
+    label: "Context attached",
+    capturedAt: pageContext.metadata.capturedAt
   };
 }

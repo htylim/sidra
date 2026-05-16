@@ -46,6 +46,23 @@ declare namespace chrome {
     function connectNative(application: string): Port;
   }
 
+  namespace scripting {
+    type InjectionTarget = {
+      tabId: number;
+    };
+
+    type InjectionResult<T> = {
+      result?: T;
+    };
+
+    type ScriptInjection<T> = {
+      target: InjectionTarget;
+      func: () => T;
+    };
+
+    function executeScript<T>(injection: ScriptInjection<T>): Promise<Array<InjectionResult<T>>>;
+  }
+
   namespace windows {
     const WINDOW_ID_NONE: number;
 

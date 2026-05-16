@@ -1,8 +1,8 @@
-import type { AgentEvent, BridgeToExtension, PageContext, ProviderId } from "@sidra/protocol";
+import type { AgentEvent, BridgeToExtension, ProviderId } from "@sidra/protocol";
+import { formatPromptForAgent, type BridgeTurnInput } from "./context-prompt.js";
 
 export type AgentSendInput = {
   prompt: string;
-  pageContext?: PageContext;
 };
 
 export type AgentSession = {
@@ -52,7 +52,7 @@ export class BridgeSessionManager {
     await this.enqueueSessionOperation(clientSessionId, () => this.replaceSession(clientSessionId, providerId));
   }
 
-  async sendPrompt(clientSessionId: string, input: AgentSendInput): Promise<void> {
+  async sendPrompt(clientSessionId: string, input: BridgeTurnInput): Promise<void> {
     await this.sessionOperations.get(clientSessionId);
     const session = this.sessions.get(clientSessionId);
     if (!session) {
@@ -83,7 +83,11 @@ export class BridgeSessionManager {
       done: Promise.resolve()
     };
 
-    inFlight.done = this.runProviderSend(clientSessionId, session.providerSession, input, controller).finally(() => {
+    const providerInput: AgentSendInput = {
+      prompt: formatPromptForAgent(input)
+    };
+
+    inFlight.done = this.runProviderSend(clientSessionId, session.providerSession, providerInput, controller).finally(() => {
       if (session.inFlight === inFlight) {
         delete session.inFlight;
       }

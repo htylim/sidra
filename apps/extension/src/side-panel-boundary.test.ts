@@ -64,4 +64,35 @@ describe("active page tracking boundary", () => {
     expect(source).not.toContain("innerText");
     expect(source).not.toContain("Readability");
   });
+
+  it("keeps_active_page_tracker_free_of_scripting_and_content_capture", () => {
+    const activePageSource = readSource("./active-page.ts");
+    const captureServiceSource = readSource("./capture-service.ts");
+
+    expect(activePageSource).not.toContain("chrome.scripting");
+    expect(activePageSource).not.toContain("executeScript");
+    expect(activePageSource).not.toContain("document.body");
+    expect(activePageSource).not.toContain("innerText");
+    expect(captureServiceSource).toContain("CaptureService");
+  });
+
+  it("keeps_chrome_scripting_usage_inside_capture_service", () => {
+    const activePageSource = readSource("./active-page.ts");
+    const captureServiceSource = readSource("./capture-service.ts");
+    const controllerSource = readSource("./side-panel-controller.ts");
+
+    expect(activePageSource).not.toContain("chrome.scripting");
+    expect(controllerSource).not.toContain("chrome.scripting");
+    expect(captureServiceSource).toContain("chrome.scripting");
+    expect(captureServiceSource).toContain("executeScript");
+  });
+
+  it("keeps_capture_orchestration_out_of_the_react_view", () => {
+    const viewSource = readSource("./side-panel-view.tsx");
+
+    expect(viewSource).not.toContain("captureActivePageContext");
+    expect(viewSource).not.toContain("CaptureService");
+    expect(viewSource).not.toContain("chrome.scripting");
+    expect(viewSource).not.toContain("session.send");
+  });
 });

@@ -198,6 +198,39 @@ describe("BridgeSessionManager", () => {
   });
 });
 
+describe("BridgeSessionManager page context prompt formatting", () => {
+  it("passes_formatted_untrusted_prompt_to_the_provider_session", async () => {
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", {
+      prompt: "Summarize this",
+      pageContext: readablePageContext()
+    });
+
+    expect(provider.createdSessions[0]?.sentInputs).toEqual([
+      {
+        prompt: expect.stringContaining("Untrusted page context JSON:")
+      }
+    ]);
+    expect(provider.createdSessions[0]?.sentInputs[0]?.prompt).toContain("User request:\nSummarize this");
+  });
+
+  it("does_not_pass_raw_page_context_to_the_provider_session", async () => {
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", {
+      prompt: "Summarize this",
+      pageContext: readablePageContext()
+    });
+
+    expect(provider.createdSessions[0]?.sentInputs[0]).not.toHaveProperty("pageContext");
+  });
+});
+
 describe("BridgeSessionManager cancellation", () => {
   it("aborts the active provider send for the target client session", async () => {
     const stream = new ManualAsyncEvents();
@@ -576,4 +609,18 @@ class ManualAsyncEvents implements AsyncIterable<AgentEvent> {
       }
     };
   }
+}
+
+function readablePageContext() {
+  return {
+    kind: "readable" as const,
+    metadata: {
+      url: "https://example.com/article",
+      title: "Example article",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    text: "Captured page text",
+    textLength: "Captured page text".length,
+    extractionMethod: "readability" as const
+  };
 }

@@ -15,6 +15,7 @@ afterEach(() => {
 type SnapshotOptions = {
   title?: string;
   contextLabel?: string;
+  contextState?: SidePanelSnapshot["activeSession"]["contextState"];
   draftPrompt?: string;
   transcript?: SidePanelSnapshot["activeSession"]["transcript"];
 };
@@ -32,7 +33,7 @@ function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
       pageKey: "https://example.com/article" as SidePanelSnapshot["activeSession"]["pageKey"],
       clientSessionId: "client-1",
       draftPrompt: options.draftPrompt ?? "",
-      contextState: { status: "none", label: options.contextLabel ?? "No context sent yet" },
+      contextState: options.contextState ?? { status: "none", label: "No context sent yet" },
       transcript: options.transcript ?? [],
       pendingPromptCount: 0,
       sessionStarted: false,
@@ -67,6 +68,7 @@ function renderSnapshot(bridge: SidePanelSnapshot["bridge"]): string {
     <SidePanelView
       snapshot={createSnapshot(bridge)}
       onSendPrompt={() => false}
+      onCaptureAndSend={() => false}
       onDraftPromptChange={() => undefined}
       onNewChat={() => undefined}
       onRetryBridge={() => undefined}
@@ -79,6 +81,7 @@ function renderPageSnapshot(snapshot: SidePanelSnapshot): string {
     <SidePanelView
       snapshot={snapshot}
       onSendPrompt={() => false}
+      onCaptureAndSend={() => false}
       onDraftPromptChange={() => undefined}
       onNewChat={() => undefined}
       onRetryBridge={() => undefined}
@@ -90,6 +93,7 @@ function renderInteractiveSnapshot(
   snapshot: SidePanelSnapshot,
   overrides: Partial<{
     onSendPrompt(prompt: string): boolean;
+    onCaptureAndSend(prompt: string): boolean | Promise<boolean>;
     onDraftPromptChange(text: string): void;
   }> = {}
 ) {
@@ -101,6 +105,7 @@ function renderInteractiveSnapshot(
       <SidePanelView
         snapshot={currentSnapshot}
         onSendPrompt={overrides.onSendPrompt ?? (() => false)}
+        onCaptureAndSend={overrides.onCaptureAndSend ?? (() => false)}
         onDraftPromptChange={(text) => {
           currentSnapshot = {
             ...currentSnapshot,
@@ -120,6 +125,7 @@ function renderInteractiveSnapshot(
       <SidePanelView
         snapshot={currentSnapshot}
         onSendPrompt={overrides.onSendPrompt ?? (() => false)}
+        onCaptureAndSend={overrides.onCaptureAndSend ?? (() => false)}
         onDraftPromptChange={(text) => {
           currentSnapshot = {
             ...currentSnapshot,
@@ -247,6 +253,7 @@ describe("SidePanelView URL sessions", () => {
       <SidePanelView
         snapshot={snapshotForUnsupportedPage()}
         onSendPrompt={() => false}
+        onCaptureAndSend={() => false}
         onDraftPromptChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
@@ -262,6 +269,7 @@ describe("SidePanelView URL sessions", () => {
       <SidePanelView
         snapshot={snapshotForUnsupportedPage()}
         onSendPrompt={() => false}
+        onCaptureAndSend={() => false}
         onDraftPromptChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
@@ -283,10 +291,10 @@ describe("SidePanelView URL sessions", () => {
 
   it("send_does_not_clear_the_draft_without_a_new_controller_snapshot", async () => {
     const user = userEvent.setup();
-    const onSendPrompt = vi.fn(() => true);
-    renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "send me" }), { onSendPrompt });
+    const onCaptureAndSend = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "send me" }), { onCaptureAndSend });
     await user.click(screen.getByRole("button", { name: "Capture + Send" }));
-    expect(onSendPrompt).toHaveBeenCalledWith("send me");
+    expect(onCaptureAndSend).toHaveBeenCalledWith("send me");
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("send me");
   });
 
@@ -303,5 +311,72 @@ describe("SidePanelView URL sessions", () => {
   it("keeps_empty_state_scoped_to_the_active_session", () => {
     const markup = renderPageSnapshot(snapshotForPage({ transcript: [] }));
     expect(markup).toContain("Ask anything about this page");
+  });
+});
+
+describe("SidePanelView Capture + Send", () => {
+  it("clicking_capture_and_send_calls_onCaptureAndSend_with_trimmed_prompt", async () => {
+    const user = userEvent.setup();
+    const onCaptureAndSend = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "  summarize  " }), { onCaptureAndSend });
+
+    await user.click(screen.getByRole("button", { name: "Capture + Send" }));
+
+    expect(onCaptureAndSend).toHaveBeenCalledWith("summarize");
+  });
+
+  it("pressing_enter_uses_capture_and_send", async () => {
+    const user = userEvent.setup();
+    const onCaptureAndSend = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "summarize" }), { onCaptureAndSend });
+
+    await user.click(screen.getByRole("textbox"));
+    await user.keyboard("{Enter}");
+
+    expect(onCaptureAndSend).toHaveBeenCalledWith("summarize");
+  });
+
+  it("clicking_capture_and_send_is_disabled_for_unsupported_pages", () => {
+    render(
+      <SidePanelView
+        snapshot={snapshotForUnsupportedPage()}
+        onSendPrompt={() => false}
+        onCaptureAndSend={() => false}
+        onDraftPromptChange={() => undefined}
+        onNewChat={() => undefined}
+        onRetryBridge={() => undefined}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Capture + Send" })).toHaveProperty("disabled", true);
+  });
+
+  it("renders_context_marker_and_does_not_render_raw_page_content", () => {
+    const markup = renderPageSnapshot(
+      snapshotForPage({
+        transcript: [
+          { role: "status", text: "Page context attached" },
+          { role: "user", text: "summarize" }
+        ]
+      })
+    );
+
+    expect(markup).toContain("Page context attached");
+    expect(markup).toContain("summarize");
+    expect(markup).not.toContain("Raw captured article text");
+  });
+
+  it("renders_page_card_context_state_after_context_send", () => {
+    const markup = renderPageSnapshot(
+      snapshotForPage({
+        contextState: {
+          status: "attached",
+          label: "Context attached",
+          capturedAt: "2026-05-10T12:00:00.000Z"
+        }
+      })
+    );
+
+    expect(markup).toContain("Context attached");
   });
 });

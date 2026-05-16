@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PageIdentity, PageKey } from "./page-key";
 import { type NativeBridgePort, SIDRA_NATIVE_HOST } from "./bridge/connection";
 import { createSidePanelController } from "./side-panel-controller";
+import type { CaptureResult } from "./capture-service";
 
 class FakePort implements NativeBridgePort {
   readonly postedMessages: ExtensionToBridge[] = [];
@@ -41,7 +42,22 @@ function createHarness() {
 type HarnessOptions = {
   initialPage?: PageIdentity;
   clientSessionIds?: string[];
+  captureService?: FakeCaptureService;
 };
+
+class FakeCaptureService {
+  captureCalls = 0;
+  nextResult: CaptureResult = {
+    status: "captured",
+    pageIdentity: pageIdentity("https://example.com/captured"),
+    pageContext: readablePageContext()
+  };
+
+  async captureActivePageContext(): Promise<CaptureResult> {
+    this.captureCalls += 1;
+    return this.nextResult;
+  }
+}
 
 class FakeActivePageSource {
   private readonly listeners = new Set<() => void>();
@@ -90,7 +106,8 @@ function createHarnessWithOptions(options: HarnessOptions = {}) {
       if (!clientSessionId) throw new Error("missing test client session id");
       return clientSessionId;
     },
-    activePageTracker: activePage
+    activePageTracker: activePage,
+    captureService: options.captureService
   });
 
   return { controller, connectNative, ports, activePage };
@@ -109,7 +126,7 @@ function createUnavailableBridgeHarness(options: HarnessOptions = {}) {
   return { controller, activePage };
 }
 
-function pageIdentity(pageKey: string): PageIdentity {
+function pageIdentity(pageKey: string): Extract<PageIdentity, { status: "ready" }> {
   return {
     status: "ready",
     pageKey: pageKey as PageKey,
@@ -124,6 +141,37 @@ function pageIdentityWithTitle(pageKey: string, displayTitle: string): PageIdent
     pageKey: pageKey as PageKey,
     url: pageKey,
     displayTitle
+  };
+}
+
+function readablePageContext(text = "Readable captured article text that should not appear in transcript.") {
+  return {
+    kind: "readable" as const,
+    metadata: {
+      url: "https://example.com/captured",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    text,
+    textLength: text.length,
+    extractionMethod: "readability" as const
+  };
+}
+
+function fallbackBodyPageContext(text = "Fallback body text that is long enough to be treated as readable context.") {
+  return {
+    ...readablePageContext(text),
+    extractionMethod: "body_inner_text" as const
+  };
+}
+
+function metadataOnlyPageContext() {
+  return {
+    kind: "metadata_only" as const,
+    metadata: {
+      url: "https://example.com/short",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    reason: "no_usable_text" as const
   };
 }
 
@@ -714,5 +762,211 @@ describe("SidePanelController URL sessions", () => {
       version: 1,
       clientSessionId: "client-a"
     });
+  });
+});
+
+describe("SidePanelController Capture + Send", () => {
+  it("does_not_capture_on_controller_creation_or_active_page_changes", async () => {
+    const captureService = new FakeCaptureService();
+    const { activePage } = createHarnessWithOptions({ captureService });
+
+    activePage.emit(pageIdentity("https://example.com/a"));
+    activePage.emit(pageIdentity("https://example.com/b"));
+
+    expect(captureService.captureCalls).toBe(0);
+  });
+
+  it("capture_and_send_posts_readable_page_context_to_the_active_session", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+
+    await expect(controller.captureAndSend(" summarize ")).resolves.toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.send",
+      version: 1,
+      clientSessionId: "client-1",
+      prompt: "summarize",
+      pageContext: captureService.nextResult.status === "captured" ? captureService.nextResult.pageContext : undefined
+    });
+    expect(controller.getSnapshot().activeSession.contextState.status).toBe("attached");
+  });
+
+  it("capture_and_send_posts_fallback_body_text_as_readable_context", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/fallback"),
+      pageContext: fallbackBodyPageContext()
+    };
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+
+    await controller.captureAndSend("summarize");
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        pageContext: expect.objectContaining({ extractionMethod: "body_inner_text" })
+      })
+    );
+  });
+
+  it("capture_and_send_recomputes_the_url_session_from_captured_canonical_url", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/canonical"),
+      pageContext: readablePageContext()
+    };
+    const { controller, ports } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/stale"),
+      captureService
+    });
+    ports[0].emitMessage(bridgeReady());
+
+    await controller.captureAndSend("summarize");
+
+    expect(controller.getSnapshot().activePage).toMatchObject({ pageKey: "https://example.com/canonical" });
+  });
+
+  it("capture_and_send_routes_to_the_tab_active_at_click_time", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/click-time"),
+      pageContext: readablePageContext()
+    };
+    const { controller, ports, activePage } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/old"),
+      captureService
+    });
+    ports[0].emitMessage(bridgeReady());
+    activePage.emit(pageIdentity("https://example.com/tracker-snapshot"));
+
+    await controller.captureAndSend("summarize");
+
+    expect(controller.getSnapshot().activeSession.pageKey).toBe("https://example.com/click-time");
+  });
+
+  it("capture_and_send_marks_metadata_only_without_sending_raw_page_text", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/short"),
+      pageContext: metadataOnlyPageContext()
+    };
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+
+    await controller.captureAndSend("describe");
+
+    expect(controller.getSnapshot().activeSession.contextState.status).toBe("metadata_only");
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([
+      expect.objectContaining({ role: "status", text: "Page metadata attached" }),
+      expect.objectContaining({ role: "user", text: "describe" })
+    ]);
+  });
+
+  it("capture_and_send_reports_capture_unavailable_without_posting_prompt", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "unavailable",
+      pageIdentity: pageIdentity("https://example.com/a"),
+      message: "Could not capture this page."
+    };
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+
+    await expect(controller.captureAndSend("summarize")).resolves.toBe(false);
+
+    expect(ports[0].postedMessages).toEqual([]);
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([
+      expect.objectContaining({ role: "status", text: "Could not capture this page" })
+    ]);
+  });
+
+  it("capture_and_send_preserves_the_draft_when_capture_is_unavailable", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "unavailable",
+      pageIdentity: pageIdentity("https://example.com/a"),
+      message: "Could not capture this page."
+    };
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+    controller.updateDraftPrompt("keep draft");
+
+    await controller.captureAndSend("keep draft");
+
+    expect(controller.getSnapshot().activeSession.draftPrompt).toBe("keep draft");
+  });
+
+  it("capture_and_send_records_capture_unavailable_for_the_captured_ready_identity_not_the_stale_tracker_identity", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "unavailable",
+      pageIdentity: pageIdentity("https://example.com/captured-ready"),
+      message: "Could not capture this page."
+    };
+    const { controller, ports } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/stale"),
+      captureService
+    });
+    ports[0].emitMessage(bridgeReady());
+
+    await controller.captureAndSend("summarize");
+
+    expect(controller.getSnapshot().activeSession.pageKey).toBe("https://example.com/captured-ready");
+    expect(controller.getSnapshot().activeSession.contextState.status).toBe("capture_unavailable");
+  });
+
+  it("capture_and_send_updates_to_unsupported_capture_result_without_mutating_the_previous_ready_session", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "unavailable",
+      pageIdentity: unsupportedPageIdentity("chrome://extensions"),
+      message: "Could not capture this page."
+    };
+    const { controller, ports } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/ready"),
+      captureService
+    });
+    ports[0].emitMessage(bridgeReady());
+    controller.updateDraftPrompt("ready draft");
+
+    await controller.captureAndSend("ready draft");
+
+    expect(controller.getSnapshot().activePage).toMatchObject({ status: "unsupported" });
+    expect(controller.getSnapshot().activeSession.clientSessionId).toBe("");
+  });
+
+  it("capture_and_send_does_not_capture_when_chat_is_blocked", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller } = createHarnessWithOptions({ captureService });
+
+    await expect(controller.captureAndSend("summarize")).resolves.toBe(false);
+
+    expect(captureService.captureCalls).toBe(0);
+  });
+
+  it("plain_send_prompt_remains_available_without_page_context", () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+
+    expect(controller.sendPrompt("plain")).toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.send",
+      version: 1,
+      clientSessionId: "client-1",
+      prompt: "plain"
+    });
+    expect(captureService.captureCalls).toBe(0);
   });
 });

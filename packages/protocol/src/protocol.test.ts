@@ -46,6 +46,168 @@ describe("extension-to-bridge protocol validation", () => {
   });
 });
 
+describe("page context protocol validation", () => {
+  it("accepts_readable_page_context_payload", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 1,
+        clientSessionId: "page-1",
+        prompt: "Summarize this page",
+        pageContext: {
+          kind: "readable",
+          metadata: {
+            url: "https://example.com/article",
+            canonicalUrl: "https://example.com/canonical",
+            title: "Article title",
+            siteName: "Example",
+            excerpt: "A useful excerpt.",
+            byline: "Author Name",
+            language: "en",
+            capturedAt: "2026-05-10T12:00:00.000Z"
+          },
+          text: "Readable article text.",
+          textLength: "Readable article text.".length,
+          extractionMethod: "readability"
+        }
+      })
+    ).toMatchObject({ ok: true });
+  });
+
+  it("accepts_metadata_only_page_context_payload", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 1,
+        clientSessionId: "page-1",
+        prompt: "What is this?",
+        pageContext: {
+          kind: "metadata_only",
+          metadata: {
+            url: "https://example.com/article",
+            title: "Article title",
+            capturedAt: "2026-05-10T12:00:00.000Z"
+          },
+          reason: "no_usable_text"
+        }
+      })
+    ).toMatchObject({ ok: true });
+  });
+
+  it("rejects_page_context_with_invalid_kind_or_missing_metadata", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 1,
+        clientSessionId: "page-1",
+        prompt: "Summarize this page",
+        pageContext: {
+          kind: "html",
+          metadata: {
+            url: "https://example.com/article",
+            capturedAt: "2026-05-10T12:00:00.000Z"
+          }
+        }
+      })
+    ).toEqual({ ok: false, error: "pageContext is invalid" });
+
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 1,
+        clientSessionId: "page-1",
+        prompt: "Summarize this page",
+        pageContext: {
+          kind: "metadata_only",
+          reason: "no_usable_text"
+        }
+      })
+    ).toEqual({ ok: false, error: "pageContext is invalid" });
+  });
+
+  it("rejects_readable_page_context_without_non_empty_text", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 1,
+        clientSessionId: "page-1",
+        prompt: "Summarize this page",
+        pageContext: {
+          kind: "readable",
+          metadata: {
+            url: "https://example.com/article",
+            capturedAt: "2026-05-10T12:00:00.000Z"
+          },
+          text: "   ",
+          textLength: 3,
+          extractionMethod: "readability"
+        }
+      })
+    ).toEqual({ ok: false, error: "pageContext is invalid" });
+  });
+
+  it("rejects_readable_page_context_when_text_length_does_not_match_text", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 1,
+        clientSessionId: "page-1",
+        prompt: "Summarize this page",
+        pageContext: {
+          kind: "readable",
+          metadata: {
+            url: "https://example.com/article",
+            capturedAt: "2026-05-10T12:00:00.000Z"
+          },
+          text: "Readable article text.",
+          textLength: 999,
+          extractionMethod: "readability"
+        }
+      })
+    ).toEqual({ ok: false, error: "pageContext is invalid" });
+  });
+
+  it("rejects_page_context_with_unknown_top_level_fields", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 1,
+        clientSessionId: "page-1",
+        prompt: "Summarize this page",
+        pageContext: {
+          kind: "metadata_only",
+          metadata: {
+            url: "https://example.com/article",
+            capturedAt: "2026-05-10T12:00:00.000Z"
+          },
+          reason: "no_usable_text",
+          rawHtml: "<main>secret</main>"
+        }
+      })
+    ).toEqual({ ok: false, error: "pageContext is invalid" });
+  });
+
+  it("rejects_page_context_metadata_with_unknown_fields", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 1,
+        clientSessionId: "page-1",
+        prompt: "Summarize this page",
+        pageContext: {
+          kind: "metadata_only",
+          metadata: {
+            url: "https://example.com/article",
+            capturedAt: "2026-05-10T12:00:00.000Z",
+            rawHtml: "<main>secret</main>"
+          },
+          reason: "no_usable_text"
+        }
+      })
+    ).toEqual({ ok: false, error: "pageContext is invalid" });
+  });
+});
+
 describe("session.cancel protocol validation", () => {
   it("accepts session.cancel with a clientSessionId", () => {
     expect(

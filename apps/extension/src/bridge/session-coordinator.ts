@@ -1,8 +1,11 @@
-import type { BridgeToExtension, ExtensionToBridge, ProviderId } from "@sidra/protocol";
+import type { BridgeToExtension, ExtensionToBridge, PageContext, ProviderId } from "@sidra/protocol";
 import {
   addAssistantTextDelta,
+  addContextMarker,
   addStatusEntry,
   addUserPrompt,
+  removeTranscriptEntriesByIds,
+  type ContextAttachmentMarker,
   type TranscriptEntry
 } from "../transcript";
 
@@ -30,6 +33,25 @@ type BridgeSessionCoordinatorOptions = {
   transport: ProtocolTransport;
 };
 
+export type PromptSubmission = {
+  prompt: string;
+  pageContext?: PageContext;
+  contextMarker?: ContextAttachmentMarker;
+  transcriptEntryIds?: {
+    markerId?: string;
+    promptId: string;
+  };
+};
+
+type PreparedPromptSubmission = PromptSubmission & {
+  transcriptEntryIds: {
+    markerId?: string;
+    promptId: string;
+  };
+};
+
+type SubmissionInput = string | PromptSubmission;
+
 /**
  * Owns one extension-side provider session from the side panel's point of view.
  *
@@ -42,8 +64,8 @@ export class BridgeSessionCoordinator {
   private readonly providerId: ProviderId;
   private readonly transport: ProtocolTransport;
   private readonly listeners = new Set<Listener>();
-  // Prompts sent before `session.started` must wait for the bridge to create provider state.
-  private pendingPrompts: string[] = [];
+  // Submissions sent before `session.started` must wait for the bridge to create provider state.
+  private pendingSubmissions: PreparedPromptSubmission[] = [];
   // Tracks whether the bridge may already have provider state for this session.
   private startPosted = false;
   // New Chat sends `session.reset`, whose success also arrives as `session.started`.
@@ -70,15 +92,19 @@ export class BridgeSessionCoordinator {
     };
   };
 
-  sendPrompt(prompt: string): boolean {
-    const normalizedPrompt = prompt.trim();
-    if (!normalizedPrompt) return false;
+  sendPrompt(input: SubmissionInput): boolean {
+    const submission = this.prepareSubmission(input);
+    if (!submission) return false;
 
     if (this.snapshot.sessionStarted) {
-      if (!this.postSessionSend(normalizedPrompt)) return false;
+      const result = this.postSessionSend(submission);
+      if (!result.ok) {
+        this.clearPendingAfterError(result.error);
+        return false;
+      }
       this.setSnapshot({
         ...this.snapshot,
-        transcript: addUserPrompt(this.snapshot.transcript, normalizedPrompt),
+        transcript: this.addSubmissionTranscriptEntries(this.snapshot.transcript, submission),
         lastError: undefined
       });
       return true;
@@ -100,19 +126,31 @@ export class BridgeSessionCoordinator {
       }
     }
 
-    this.pendingPrompts.push(normalizedPrompt);
+    this.pendingSubmissions.push(submission);
     this.setSnapshot({
       ...this.snapshot,
-      pendingPromptCount: this.pendingPrompts.length,
-      transcript: addUserPrompt(this.snapshot.transcript, normalizedPrompt),
+      pendingPromptCount: this.pendingSubmissions.length,
+      transcript: this.addSubmissionTranscriptEntries(this.snapshot.transcript, submission),
       lastError: undefined
     });
     return true;
   }
 
+  recordCaptureUnavailable(message: string): void {
+    this.setSnapshot({
+      ...this.snapshot,
+      transcript: addContextMarker(
+        this.snapshot.transcript,
+        { kind: "capture_unavailable", text: "Could not capture this page" },
+        this.createTranscriptEntryId()
+      ),
+      lastError: message
+    });
+  }
+
   newChat(): void {
     const providerStateMayExist = this.startPosted || this.snapshot.sessionStarted || this.snapshot.starting;
-    this.pendingPrompts = [];
+    this.pendingSubmissions = [];
 
     if (!providerStateMayExist) {
       this.startPosted = false;
@@ -148,7 +186,7 @@ export class BridgeSessionCoordinator {
 
   reset(clientSessionId: string): void {
     this.clientSessionId = clientSessionId;
-    this.pendingPrompts = [];
+    this.pendingSubmissions = [];
     this.startPosted = false;
     this.suppressNextSessionStartedStatus = false;
     this.snapshot = {
@@ -162,8 +200,8 @@ export class BridgeSessionCoordinator {
   }
 
   markBridgeDisconnected(): void {
-    const transcript = removePendingPromptEntries(this.snapshot.transcript, this.pendingPrompts);
-    this.pendingPrompts = [];
+    const transcript = this.removePendingTranscriptEntries(this.snapshot.transcript);
+    this.pendingSubmissions = [];
     this.startPosted = false;
     this.setSnapshot({
       ...this.snapshot,
@@ -222,27 +260,31 @@ export class BridgeSessionCoordinator {
   }
 
   private flushPendingPrompts(): void {
-    while (this.pendingPrompts.length > 0) {
-      const prompt = this.pendingPrompts.shift();
-      if (prompt === undefined) return;
-      this.setSnapshot({ ...this.snapshot, pendingPromptCount: this.pendingPrompts.length });
-      if (!this.postSessionSend(prompt)) return;
+    while (this.pendingSubmissions.length > 0) {
+      const submission = this.pendingSubmissions.shift();
+      if (submission === undefined) return;
+      this.setSnapshot({ ...this.snapshot, pendingPromptCount: this.pendingSubmissions.length });
+      const result = this.postSessionSend(submission);
+      if (!result.ok) {
+        this.removeFailedSubmissionAfterFlush(submission, result.error);
+        return;
+      }
     }
   }
 
-  private postSessionSend(prompt: string): boolean {
-    const result = this.transport.post({
+  private postSessionSend(submission: PreparedPromptSubmission): ProtocolTransportPostResult {
+    return this.transport.post({
       type: "session.send",
       version: 1,
       clientSessionId: this.snapshot.clientSessionId,
-      prompt
+      prompt: submission.prompt,
+      ...(submission.pageContext ? { pageContext: submission.pageContext } : {})
     });
-    if (!result.ok) this.clearPendingAfterError(result.error);
-    return result.ok;
   }
 
   private clearPendingAfterError(message: string): void {
-    this.pendingPrompts = [];
+    const transcript = this.removePendingTranscriptEntries(this.snapshot.transcript);
+    this.pendingSubmissions = [];
     this.startPosted = false;
     this.suppressNextSessionStartedStatus = false;
     this.setSnapshot({
@@ -251,13 +293,13 @@ export class BridgeSessionCoordinator {
       starting: false,
       pendingPromptCount: 0,
       lastError: message,
-      transcript: addStatusEntry(this.snapshot.transcript, message)
+      transcript: addStatusEntry(transcript, message)
     });
   }
 
   private clearPendingAfterBridgeError(): void {
-    const transcript = removePendingPromptEntries(this.snapshot.transcript, this.pendingPrompts);
-    this.pendingPrompts = [];
+    const transcript = this.removePendingTranscriptEntries(this.snapshot.transcript);
+    this.pendingSubmissions = [];
     this.startPosted = false;
     this.suppressNextSessionStartedStatus = false;
     this.setSnapshot({
@@ -270,6 +312,75 @@ export class BridgeSessionCoordinator {
     });
   }
 
+  private removeFailedSubmissionAfterFlush(submission: PreparedPromptSubmission, message: string): void {
+    const pendingEntriesToRemove = new Set(this.pendingTranscriptEntryIds());
+    pendingEntriesToRemove.add(submission.transcriptEntryIds.promptId);
+    if (submission.transcriptEntryIds.markerId) {
+      pendingEntriesToRemove.add(submission.transcriptEntryIds.markerId);
+    }
+
+    this.pendingSubmissions = [];
+    this.startPosted = false;
+    this.suppressNextSessionStartedStatus = false;
+    this.setSnapshot({
+      ...this.snapshot,
+      sessionStarted: false,
+      starting: false,
+      pendingPromptCount: 0,
+      lastError: message,
+      transcript: addStatusEntry(
+        removeTranscriptEntriesByIds(this.snapshot.transcript, pendingEntriesToRemove),
+        message
+      )
+    });
+  }
+
+  private prepareSubmission(input: SubmissionInput): PreparedPromptSubmission | null {
+    const prompt = typeof input === "string" ? input : input.prompt;
+    const normalizedPrompt = prompt.trim();
+    if (!normalizedPrompt) return null;
+
+    const pageContext = typeof input === "string" ? undefined : input.pageContext;
+    const contextMarker =
+      typeof input === "string" ? undefined : input.contextMarker ?? markerForPageContext(pageContext);
+    return {
+      prompt: normalizedPrompt,
+      pageContext,
+      contextMarker,
+      transcriptEntryIds: {
+        markerId: contextMarker ? this.createTranscriptEntryId() : undefined,
+        promptId: this.createTranscriptEntryId()
+      }
+    };
+  }
+
+  private addSubmissionTranscriptEntries(
+    transcript: TranscriptEntry[],
+    submission: PreparedPromptSubmission
+  ): TranscriptEntry[] {
+    const withMarker =
+      submission.contextMarker && submission.transcriptEntryIds.markerId
+        ? addContextMarker(transcript, submission.contextMarker, submission.transcriptEntryIds.markerId)
+        : transcript;
+    return addUserPrompt(withMarker, submission.prompt, submission.transcriptEntryIds.promptId);
+  }
+
+  private removePendingTranscriptEntries(transcript: TranscriptEntry[]): TranscriptEntry[] {
+    return removeTranscriptEntriesByIds(transcript, new Set(this.pendingTranscriptEntryIds()));
+  }
+
+  private pendingTranscriptEntryIds(): string[] {
+    return this.pendingSubmissions.flatMap((submission) => {
+      const ids = [submission.transcriptEntryIds.promptId];
+      if (submission.transcriptEntryIds.markerId) ids.push(submission.transcriptEntryIds.markerId);
+      return ids;
+    });
+  }
+
+  private createTranscriptEntryId(): string {
+    return `entry-${++nextTranscriptEntryId}`;
+  }
+
   private setSnapshot(snapshot: BridgeSessionCoordinatorSnapshot): void {
     this.snapshot = snapshot;
     this.emit();
@@ -280,26 +391,12 @@ export class BridgeSessionCoordinator {
   }
 }
 
-function removePendingPromptEntries(
-  transcript: TranscriptEntry[],
-  pendingPrompts: string[]
-): TranscriptEntry[] {
-  if (pendingPrompts.length === 0) return transcript;
+let nextTranscriptEntryId = 0;
 
-  const nextTranscript = [...transcript];
-  let pendingPromptIndex = pendingPrompts.length - 1;
-
-  for (
-    let transcriptIndex = nextTranscript.length - 1;
-    transcriptIndex >= 0 && pendingPromptIndex >= 0;
-    transcriptIndex--
-  ) {
-    const entry = nextTranscript[transcriptIndex];
-    if (entry.role === "user" && entry.text === pendingPrompts[pendingPromptIndex]) {
-      nextTranscript.splice(transcriptIndex, 1);
-      pendingPromptIndex--;
-    }
+function markerForPageContext(pageContext: PageContext | undefined): ContextAttachmentMarker | undefined {
+  if (!pageContext) return undefined;
+  if (pageContext.kind === "metadata_only") {
+    return { kind: "page_metadata_attached", text: "Page metadata attached" };
   }
-
-  return nextTranscript;
+  return { kind: "page_context_attached", text: "Page context attached" };
 }
