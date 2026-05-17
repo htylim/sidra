@@ -1,4 +1,11 @@
 export const PROTOCOL_VERSION = 1;
+export const BRIDGE_PAYLOAD_TOO_LARGE_CODE = "payload_too_large";
+export const BRIDGE_PAYLOAD_TOO_LARGE_MESSAGE = "Payload is too large.";
+export const BRIDGE_HARD_PAYLOAD_BYTE_LIMIT = 1_000_000;
+
+export type SerializedJsonByteLengthResult =
+  | { ok: true; byteLength: number }
+  | { ok: false; error: "not_json_serializable" };
 
 export type ProviderId = "codex";
 
@@ -13,6 +20,8 @@ export type PageContextMetadata = {
   capturedAt: string;
 };
 
+export type MetadataOnlyPageContextReason = "no_usable_text" | "content_too_large";
+
 export type PageContext =
   | {
       kind: "readable";
@@ -24,7 +33,7 @@ export type PageContext =
   | {
       kind: "metadata_only";
       metadata: PageContextMetadata;
-      reason: "no_usable_text";
+      reason: MetadataOnlyPageContextReason;
     };
 
 export type ExtensionToBridge =
@@ -69,6 +78,20 @@ export type BridgeToExtension =
   | { type: "bridge.error"; version: 1; message: string; code?: string };
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+export function serializedJsonByteLength(value: unknown): SerializedJsonByteLengthResult {
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) return { ok: false, error: "not_json_serializable" };
+    return { ok: true, byteLength: utf8ByteLength(serialized) };
+  } catch {
+    return { ok: false, error: "not_json_serializable" };
+  }
+}
+
+export function exceedsPayloadByteLimit(byteLength: number, limit: number): boolean {
+  return byteLength > limit;
+}
 
 /**
  * Runtime validation for messages crossing the Native Messaging boundary.
@@ -181,15 +204,19 @@ function parsePageContext(value: unknown): PageContext | null {
       };
     case "metadata_only":
       if (!hasOnlyKeys(value, ["kind", "metadata", "reason"])) return null;
-      if (value.reason !== "no_usable_text") return null;
+      if (!isMetadataOnlyPageContextReason(value.reason)) return null;
       return {
         kind: "metadata_only",
         metadata,
-        reason: "no_usable_text"
+        reason: value.reason
       };
     default:
       return null;
   }
+}
+
+function isMetadataOnlyPageContextReason(value: unknown): value is MetadataOnlyPageContextReason {
+  return value === "no_usable_text" || value === "content_too_large";
 }
 
 function parsePageContextMetadata(value: Record<string, unknown>): PageContextMetadata | null {
@@ -253,4 +280,23 @@ function optionalString(value: unknown): value is string | undefined {
 function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: readonly string[]): boolean {
   const allowed = new Set(allowedKeys);
   return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function utf8ByteLength(value: string): number {
+  let byteLength = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const codePoint = value.codePointAt(index);
+    if (codePoint === undefined) continue;
+
+    if (codePoint <= 0x7f) byteLength += 1;
+    else if (codePoint <= 0x7ff) byteLength += 2;
+    else if (codePoint <= 0xffff) byteLength += 3;
+    else {
+      byteLength += 4;
+      index += 1;
+    }
+  }
+
+  return byteLength;
 }

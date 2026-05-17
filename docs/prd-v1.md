@@ -282,6 +282,15 @@ Sidra should not silently truncate page content.
 
 Readable content and full DOM have configurable limits in extension settings. The bridge may also enforce hard safety ceilings.
 
+V1 readable content settings:
+
+- `readableContentLimitCharacters` defaults to `120_000`.
+- Minimum readable content limit is `1_000`.
+- Maximum readable content limit is `500_000`.
+
+The bridge hard inbound payload ceiling is `1_000_000` bytes.
+The extension preflights serialized `session.send` payload size against that ceiling before posting to Native Messaging.
+
 If readable content exceeds the configured limit:
 
 - Do not send partial readable content.

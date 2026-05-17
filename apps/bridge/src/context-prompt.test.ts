@@ -37,6 +37,26 @@ describe("page context prompt formatting", () => {
     expect(prompt).not.toContain("<page_content>");
   });
 
+  it("formats_content_too_large_metadata_only_context_without_page_content", () => {
+    const prompt = formatPromptForAgent({
+      prompt: "What is this?",
+      pageContext: {
+        kind: "metadata_only",
+        metadata: {
+          url: "https://example.com/article",
+          title: "Example article",
+          capturedAt: "2026-05-10T12:00:00.000Z"
+        },
+        reason: "content_too_large"
+      }
+    });
+
+    expect(prompt).toContain('"kind":"metadata_only"');
+    expect(prompt).toContain('"reason":"content_too_large"');
+    expect(prompt).not.toContain('"text"');
+    expect(prompt).not.toContain("Sensitive captured page text");
+  });
+
   it("serializes_malicious_page_context_inside_the_untrusted_payload", () => {
     const prompt = formatPromptForAgent({
       prompt: "Follow my request only",

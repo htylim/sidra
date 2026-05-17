@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseBridgeToExtension, parseExtensionToBridge } from "./index";
+import {
+  BRIDGE_PAYLOAD_TOO_LARGE_CODE,
+  exceedsPayloadByteLimit,
+  parseBridgeToExtension,
+  parseExtensionToBridge,
+  serializedJsonByteLength
+} from "./index";
 
 describe("extension-to-bridge protocol validation", () => {
   it("accepts valid session start and send messages", () => {
@@ -92,6 +98,45 @@ describe("page context protocol validation", () => {
         }
       })
     ).toMatchObject({ ok: true });
+  });
+
+  it("accepts_content_too_large_metadata_only_page_context_payload", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 1,
+        clientSessionId: "page-1",
+        prompt: "What is this?",
+        pageContext: {
+          kind: "metadata_only",
+          metadata: {
+            url: "https://example.com/article",
+            title: "Article title",
+            capturedAt: "2026-05-10T12:00:00.000Z"
+          },
+          reason: "content_too_large"
+        }
+      })
+    ).toMatchObject({ ok: true });
+  });
+
+  it("rejects_metadata_only_page_context_with_unknown_reason", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 1,
+        clientSessionId: "page-1",
+        prompt: "What is this?",
+        pageContext: {
+          kind: "metadata_only",
+          metadata: {
+            url: "https://example.com/article",
+            capturedAt: "2026-05-10T12:00:00.000Z"
+          },
+          reason: "unknown_reason"
+        }
+      })
+    ).toEqual({ ok: false, error: "pageContext is invalid" });
   });
 
   it("rejects_page_context_with_invalid_kind_or_missing_metadata", () => {
@@ -357,5 +402,37 @@ describe("bridge-to-extension protocol validation", () => {
       ok: false,
       error: "Unknown message"
     });
+  });
+
+  it("accepts_payload_too_large_bridge_error_code", () => {
+    expect(
+      parseBridgeToExtension({
+        type: "bridge.error",
+        version: 1,
+        message: "Payload is too large.",
+        code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
+      })
+    ).toEqual({
+      ok: true,
+      value: {
+        type: "bridge.error",
+        version: 1,
+        message: "Payload is too large.",
+        code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
+      }
+    });
+  });
+});
+
+describe("protocol payload sizing", () => {
+  it("measures_serialized_json_utf8_bytes", () => {
+    expect(serializedJsonByteLength({ text: "abc" })).toEqual({ ok: true, byteLength: 14 });
+    expect(serializedJsonByteLength({ text: "é" })).toEqual({ ok: true, byteLength: 13 });
+    expect(serializedJsonByteLength(undefined)).toEqual({ ok: false, error: "not_json_serializable" });
+  });
+
+  it("checks_payload_limit_as_a_strict_upper_bound", () => {
+    expect(exceedsPayloadByteLimit(10, 10)).toBe(false);
+    expect(exceedsPayloadByteLimit(11, 10)).toBe(true);
   });
 });

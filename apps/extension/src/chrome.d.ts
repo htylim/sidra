@@ -63,6 +63,26 @@ declare namespace chrome {
     function executeScript<T>(injection: ScriptInjection<T>): Promise<Array<InjectionResult<T>>>;
   }
 
+  namespace storage {
+    type AreaName = "local" | "sync" | "managed" | "session";
+
+    type StorageChange = {
+      oldValue?: unknown;
+      newValue?: unknown;
+    };
+
+    type StorageArea = {
+      get(key: string): Promise<Record<string, unknown>>;
+    };
+
+    const local: StorageArea;
+
+    const onChanged: {
+      addListener(listener: (changes: Record<string, StorageChange>, areaName: AreaName) => void): void;
+      removeListener(listener: (changes: Record<string, StorageChange>, areaName: AreaName) => void): void;
+    };
+  }
+
   namespace windows {
     const WINDOW_ID_NONE: number;
 

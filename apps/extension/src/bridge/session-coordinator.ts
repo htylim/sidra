@@ -1,5 +1,11 @@
 import type { BridgeToExtension, ExtensionToBridge, PageContext, ProviderId } from "@sidra/protocol";
 import {
+  BRIDGE_HARD_PAYLOAD_BYTE_LIMIT,
+  BRIDGE_PAYLOAD_TOO_LARGE_MESSAGE,
+  exceedsPayloadByteLimit,
+  serializedJsonByteLength
+} from "@sidra/protocol";
+import {
   addAssistantTextDelta,
   addContextMarker,
   addStatusEntry,
@@ -31,6 +37,7 @@ type BridgeSessionCoordinatorOptions = {
   clientSessionId: string;
   providerId?: ProviderId;
   transport: ProtocolTransport;
+  hardPayloadByteLimit?: number;
 };
 
 export type PromptSubmission = {
@@ -63,6 +70,7 @@ export class BridgeSessionCoordinator {
   private clientSessionId: string;
   private readonly providerId: ProviderId;
   private readonly transport: ProtocolTransport;
+  private readonly hardPayloadByteLimit: number;
   private readonly listeners = new Set<Listener>();
   // Submissions sent before `session.started` must wait for the bridge to create provider state.
   private pendingSubmissions: PreparedPromptSubmission[] = [];
@@ -76,6 +84,7 @@ export class BridgeSessionCoordinator {
     this.clientSessionId = options.clientSessionId;
     this.providerId = options.providerId ?? "codex";
     this.transport = options.transport;
+    this.hardPayloadByteLimit = options.hardPayloadByteLimit ?? BRIDGE_HARD_PAYLOAD_BYTE_LIMIT;
     this.snapshot = this.initialSnapshot();
     this.transport.subscribeToMessages((message) => this.handleBridgeMessage(message));
   }
@@ -95,6 +104,11 @@ export class BridgeSessionCoordinator {
   sendPrompt(input: SubmissionInput): boolean {
     const submission = this.prepareSubmission(input);
     if (!submission) return false;
+    const payloadPreflight = this.validateSessionSendPayload(submission);
+    if (!payloadPreflight.ok) {
+      this.recordLocalSubmissionError(payloadPreflight.error);
+      return false;
+    }
 
     if (this.snapshot.sessionStarted) {
       const result = this.postSessionSend(submission);
@@ -273,12 +287,33 @@ export class BridgeSessionCoordinator {
   }
 
   private postSessionSend(submission: PreparedPromptSubmission): ProtocolTransportPostResult {
-    return this.transport.post({
+    return this.transport.post(this.createSessionSendMessage(submission));
+  }
+
+  private createSessionSendMessage(submission: PreparedPromptSubmission): ExtensionToBridge {
+    return {
       type: "session.send",
       version: 1,
       clientSessionId: this.snapshot.clientSessionId,
       prompt: submission.prompt,
       ...(submission.pageContext ? { pageContext: submission.pageContext } : {})
+    };
+  }
+
+  private validateSessionSendPayload(submission: PreparedPromptSubmission): ProtocolTransportPostResult {
+    const payloadSize = serializedJsonByteLength(this.createSessionSendMessage(submission));
+    if (!payloadSize.ok) return { ok: false, error: "Message must be valid JSON" };
+    if (exceedsPayloadByteLimit(payloadSize.byteLength, this.hardPayloadByteLimit)) {
+      return { ok: false, error: BRIDGE_PAYLOAD_TOO_LARGE_MESSAGE };
+    }
+    return { ok: true };
+  }
+
+  private recordLocalSubmissionError(message: string): void {
+    this.setSnapshot({
+      ...this.snapshot,
+      lastError: message,
+      transcript: addStatusEntry(this.snapshot.transcript, message)
     });
   }
 
@@ -396,6 +431,10 @@ let nextTranscriptEntryId = 0;
 function markerForPageContext(pageContext: PageContext | undefined): ContextAttachmentMarker | undefined {
   if (!pageContext) return undefined;
   if (pageContext.kind === "metadata_only") {
+    if (pageContext.reason === "content_too_large") {
+      return { kind: "page_metadata_content_too_large", text: "Page metadata attached; content too large" };
+    }
+
     return { kind: "page_metadata_attached", text: "Page metadata attached" };
   }
   return { kind: "page_context_attached", text: "Page context attached" };

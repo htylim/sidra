@@ -3,6 +3,7 @@ import type { PageContext, PageContextMetadata } from "@sidra/protocol";
 import { type ActivePageTab } from "./active-page";
 import { captureCurrentDocumentSnapshot, type CapturedTabDocument } from "./capture-script";
 import { resolvePageIdentity, type PageIdentity } from "./page-key";
+import { createDefaultSettingsSource, type SidraSettings } from "./settings-store";
 
 export type { CapturedTabDocument };
 
@@ -25,15 +26,23 @@ export type CaptureGateway = {
   readTabDocument(tabId: number): Promise<CapturedTabDocument>;
 };
 
+export type CaptureSettingsSource = {
+  getSnapshot(): Pick<SidraSettings, "readableContentLimitCharacters">;
+  whenReady(): Promise<void>;
+};
+
 type CaptureServiceOptions = {
   gateway: CaptureGateway;
+  settings?: CaptureSettingsSource;
 };
 
 export class CaptureService {
   private readonly gateway: CaptureGateway;
+  private readonly settings: CaptureSettingsSource;
 
   constructor(options: CaptureServiceOptions) {
     this.gateway = options.gateway;
+    this.settings = options.settings ?? createDefaultSettingsSource();
   }
 
   async captureActivePageContext(): Promise<CaptureResult> {
@@ -74,16 +83,19 @@ export class CaptureService {
       return unavailable(pageIdentity, "Could not capture this page.");
     }
 
+    await this.settings.whenReady();
+    const settings = this.settings.getSnapshot();
+
     return {
       status: "captured",
       pageIdentity,
-      pageContext: buildPageContext(capturedDocument)
+      pageContext: buildPageContext(capturedDocument, settings.readableContentLimitCharacters)
     };
   }
 }
 
-export function createChromeCaptureService(): CaptureService {
-  return new CaptureService({ gateway: createChromeCaptureGateway() });
+export function createChromeCaptureService(settings?: CaptureSettingsSource): CaptureService {
+  return new CaptureService({ gateway: createChromeCaptureGateway(), settings });
 }
 
 function createChromeCaptureGateway(): CaptureGateway {
@@ -105,23 +117,25 @@ function createChromeCaptureGateway(): CaptureGateway {
   };
 }
 
-function buildPageContext(capturedDocument: CapturedTabDocument): PageContext {
+function buildPageContext(capturedDocument: CapturedTabDocument, readableContentLimitCharacters: number): PageContext {
   const metadata = buildMetadata(capturedDocument);
   const readabilityText = extractReadableText(capturedDocument.html);
   if (isUsableText(readabilityText)) {
+    if (readabilityText.length > readableContentLimitCharacters) {
+      return metadataOnlyContext(metadata, "content_too_large");
+    }
     return readableContext(metadata, readabilityText, "readability");
   }
 
   const bodyText = normalizeWhitespace(capturedDocument.bodyInnerText);
   if (isUsableText(bodyText)) {
+    if (bodyText.length > readableContentLimitCharacters) {
+      return metadataOnlyContext(metadata, "content_too_large");
+    }
     return readableContext(metadata, bodyText, "body_inner_text");
   }
 
-  return {
-    kind: "metadata_only",
-    metadata,
-    reason: "no_usable_text"
-  };
+  return metadataOnlyContext(metadata, "no_usable_text");
 }
 
 function buildMetadata(capturedDocument: CapturedTabDocument): PageContextMetadata {
@@ -149,6 +163,14 @@ function readableContext(
     text,
     textLength: text.length,
     extractionMethod
+  };
+}
+
+function metadataOnlyContext(metadata: PageContextMetadata, reason: Extract<PageContext, { kind: "metadata_only" }>["reason"]): PageContext {
+  return {
+    kind: "metadata_only",
+    metadata,
+    reason
   };
 }
 

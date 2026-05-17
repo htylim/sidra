@@ -1,9 +1,10 @@
 import type { ProviderId } from "@sidra/protocol";
 import { createChromeActivePageTracker } from "./active-page";
-import { createChromeCaptureService, type CaptureResult } from "./capture-service";
+import { CaptureService, createChromeCaptureService, type CaptureGateway, type CaptureResult } from "./capture-service";
 import type { PageIdentity } from "./page-key";
 import { BridgeConnection, type BridgeAvailability, type NativeBridgePort } from "./bridge/connection";
 import { BridgeSessionCoordinator } from "./bridge/session-coordinator";
+import { createChromeSettingsStore, type SettingsStore } from "./settings-store";
 import type { TranscriptEntry } from "./transcript";
 import { UrlSessionStore, type ContextState } from "./url-session-store";
 
@@ -53,6 +54,8 @@ type SidePanelControllerOptions = {
   createClientSessionId(): string;
   activePageTracker?: ActivePageSource;
   captureService?: CaptureServiceLike;
+  captureGateway?: CaptureGateway;
+  settingsStore?: Pick<SettingsStore, "start" | "getSnapshot" | "whenReady">;
   providerId?: ProviderId;
 };
 
@@ -71,7 +74,12 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       subscribe: () => () => undefined,
       start: async () => undefined
     } satisfies ActivePageSource);
-  const captureService = options.captureService ?? createChromeCaptureService();
+  const settingsStore = options.settingsStore;
+  const captureService =
+    options.captureService ??
+    (options.captureGateway
+      ? new CaptureService({ gateway: options.captureGateway, settings: settingsStore })
+      : createChromeCaptureService(settingsStore));
   const urlSessionStore = new UrlSessionStore({
     createClientSessionId: options.createClientSessionId,
     createCoordinator: (clientSessionId) =>
@@ -128,6 +136,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
   });
   urlSessionStore.subscribe(emit);
   connection.connect();
+  void settingsStore?.start();
   void activePageTracker.start();
   bridgeConnected = connection.getSnapshot().connected;
   refreshSnapshot();
@@ -211,11 +220,12 @@ function createSnapshot(
 }
 
 export function createChromeSidePanelController(): SidePanelController {
+  const settingsStore = createChromeSettingsStore();
   return createSidePanelController({
     connectNative: (hostName) => chrome.runtime.connectNative(hostName),
     createClientSessionId: () => `sidra-${crypto.randomUUID()}`,
     activePageTracker: createChromeActivePageTracker(),
-    captureService: createChromeCaptureService()
+    settingsStore
   });
 }
 

@@ -12,6 +12,12 @@ export type ContextState =
       capturedAt: string;
       reason: "no_usable_text";
     }
+  | {
+      status: "content_too_large";
+      label: "Content too large";
+      capturedAt: string;
+      reason: "content_too_large";
+    }
   | { status: "capture_unavailable"; label: "Capture unavailable"; message: string };
 
 export type UrlSessionSnapshot = {
@@ -239,6 +245,15 @@ function createEmptySessionSnapshot(): UrlSessionSnapshot {
 
 function contextStateForPageContext(pageContext: PageContext): ContextState {
   if (pageContext.kind === "metadata_only") {
+    if (pageContext.reason === "content_too_large") {
+      return {
+        status: "content_too_large",
+        label: "Content too large",
+        capturedAt: pageContext.metadata.capturedAt,
+        reason: pageContext.reason
+      };
+    }
+
     return {
       status: "metadata_only",
       label: "Metadata attached",

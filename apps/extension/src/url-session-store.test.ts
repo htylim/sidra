@@ -90,6 +90,17 @@ function metadataOnlyPageContext(): PageContext {
   };
 }
 
+function contentTooLargePageContext(): PageContext {
+  return {
+    kind: "metadata_only",
+    metadata: {
+      url: "https://example.com/large",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    reason: "content_too_large"
+  };
+}
+
 describe("UrlSessionStore", () => {
   it("creates_one_url_session_per_page_key_with_distinct_client_session_ids", () => {
     const { store } = createStoreHarness({ clientSessionIds: ["client-1", "client-2"] });
@@ -234,6 +245,20 @@ describe("UrlSessionStore context state", () => {
       label: "Metadata attached",
       capturedAt: "2026-05-10T12:00:00.000Z",
       reason: "no_usable_text"
+    });
+  });
+
+  it("updates_context_state_for_content_too_large_metadata_only_send", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.sendPromptWithContext({ prompt: "describe", pageContext: contentTooLargePageContext() })).toBe(true);
+
+    expect(store.getSnapshot().activeSession.contextState).toEqual({
+      status: "content_too_large",
+      label: "Content too large",
+      capturedAt: "2026-05-10T12:00:00.000Z",
+      reason: "content_too_large"
     });
   });
 

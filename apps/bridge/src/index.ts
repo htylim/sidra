@@ -3,16 +3,38 @@ import {
   type ExtensionToBridge,
   parseExtensionToBridge
 } from "@sidra/protocol";
+import {
+  BRIDGE_HARD_PAYLOAD_BYTE_LIMIT,
+  exceedsPayloadByteLimit,
+  payloadTooLargeError,
+  serializedJsonByteLength
+} from "./payload-limit.js";
 import { BridgeSessionManager, type AgentProvider, type AgentSendInput, type AgentSession } from "./session-manager.js";
 
 export type BridgeRuntime = {
   emit(message: BridgeToExtension): void;
 };
 
-export function createBridge(runtime: BridgeRuntime, provider: AgentProvider = createMockProvider()) {
+export function createBridge(
+  runtime: BridgeRuntime,
+  provider: AgentProvider = createMockProvider(),
+  options: { hardPayloadByteLimit?: number } = {}
+) {
   const sessions = new BridgeSessionManager({ provider, emit: (message) => runtime.emit(message) });
+  const hardPayloadByteLimit = options.hardPayloadByteLimit ?? BRIDGE_HARD_PAYLOAD_BYTE_LIMIT;
 
   async function handleMessage(input: unknown): Promise<void> {
+    const payloadSize = serializedJsonByteLength(input);
+    if (!payloadSize.ok) {
+      runtime.emit({ type: "bridge.error", version: 1, message: "Message must be valid JSON", code: "invalid_message" });
+      return;
+    }
+
+    if (exceedsPayloadByteLimit(payloadSize.byteLength, hardPayloadByteLimit)) {
+      runtime.emit(payloadTooLargeError);
+      return;
+    }
+
     const parsed = parseExtensionToBridge(input);
     if (!parsed.ok) {
       runtime.emit({ type: "bridge.error", version: 1, message: parsed.error, code: "invalid_message" });

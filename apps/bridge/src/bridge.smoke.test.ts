@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { PassThrough } from "node:stream";
-import type { BridgeToExtension } from "@sidra/protocol";
+import { BRIDGE_PAYLOAD_TOO_LARGE_CODE, type BridgeToExtension } from "@sidra/protocol";
 import { createBridge, type AgentProvider, type AgentSession } from "./index.js";
 import { runNativeMessagingBridge } from "./native-messaging.js";
+import { BRIDGE_HARD_PAYLOAD_BYTE_LIMIT } from "./payload-limit.js";
 
 describe("mock bridge chat path", () => {
   it("starts a session and emits a mock assistant response for a prompt", async () => {
@@ -128,6 +129,120 @@ describe("mock bridge chat path", () => {
         version: 1,
         message: "providerId must be codex",
         code: "invalid_message"
+      }
+    ]);
+  });
+
+  it("emits_invalid_message_bridge_error_for_non_json_serializable_direct_input", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const bridge = createBridge({ emit: (message) => emitted.push(message) });
+    const circularInput: Record<string, unknown> = { type: "session.send" };
+    circularInput.self = circularInput;
+
+    await bridge.handleMessage(circularInput);
+    await bridge.handleMessage(undefined);
+    await bridge.handleMessage(1n);
+
+    expect(emitted).toEqual([
+      { type: "bridge.error", version: 1, message: "Message must be valid JSON", code: "invalid_message" },
+      { type: "bridge.error", version: 1, message: "Message must be valid JSON", code: "invalid_message" },
+      { type: "bridge.error", version: 1, message: "Message must be valid JSON", code: "invalid_message" }
+    ]);
+  });
+
+  it("rejects_oversized_direct_bridge_payload_with_payload_too_large_error", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const bridge = createBridge({ emit: (message) => emitted.push(message) }, undefined, { hardPayloadByteLimit: 100 });
+
+    await bridge.handleMessage({
+      type: "session.send",
+      version: 1,
+      clientSessionId: "page-1",
+      prompt: "x".repeat(200)
+    });
+
+    expect(emitted).toEqual([
+      {
+        type: "bridge.error",
+        version: 1,
+        message: "Payload is too large.",
+        code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
+      }
+    ]);
+  });
+
+  it("oversized_direct_bridge_payload_error_does_not_echo_prompt_or_page_content", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const bridge = createBridge({ emit: (message) => emitted.push(message) }, undefined, { hardPayloadByteLimit: 100 });
+
+    await bridge.handleMessage({
+      type: "session.send",
+      version: 1,
+      clientSessionId: "page-1",
+      prompt: "Sensitive prompt text",
+      pageContext: {
+        kind: "readable",
+        metadata: {
+          url: "https://example.com/article",
+          capturedAt: "2026-05-10T12:00:00.000Z"
+        },
+        text: "Sensitive captured page content",
+        textLength: "Sensitive captured page content".length,
+        extractionMethod: "readability"
+      }
+    });
+
+    expect(JSON.stringify(emitted)).not.toContain("Sensitive prompt text");
+    expect(JSON.stringify(emitted)).not.toContain("Sensitive captured page content");
+    expect(emitted).toContainEqual(
+      expect.objectContaining({ type: "bridge.error", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE })
+    );
+  });
+
+  it("default_bridge_rejects_oversized_payload_with_the_hard_payload_limit", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const bridge = createBridge({ emit: (message) => emitted.push(message) });
+
+    await bridge.handleMessage({
+      type: "session.send",
+      version: 1,
+      clientSessionId: "page-1",
+      prompt: "x".repeat(BRIDGE_HARD_PAYLOAD_BYTE_LIMIT)
+    });
+
+    expect(emitted).toEqual([
+      {
+        type: "bridge.error",
+        version: 1,
+        message: "Payload is too large.",
+        code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
+      }
+    ]);
+  });
+
+  it("native_messaging_custom_limit_is_used_by_default_inner_bridge", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 2);
+
+    runNativeMessagingBridge(input, output, { hardPayloadByteLimit: 2_000_000 });
+    input.write(
+      encodeNativeMessage({
+        type: "session.send",
+        version: 1,
+        clientSessionId: "page-1",
+        prompt: "x".repeat(BRIDGE_HARD_PAYLOAD_BYTE_LIMIT + 1)
+      })
+    );
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.ready", version: 1 },
+      {
+        type: "session.error",
+        version: 1,
+        clientSessionId: "page-1",
+        message: "Session has not been started",
+        code: "session_not_started"
       }
     ]);
   });

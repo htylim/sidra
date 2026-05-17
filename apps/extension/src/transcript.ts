@@ -3,6 +3,7 @@ export type TranscriptEntry = { id?: string; role: "user" | "assistant" | "statu
 export type ContextAttachmentMarker =
   | { kind: "page_context_attached"; text: "Page context attached" }
   | { kind: "page_metadata_attached"; text: "Page metadata attached" }
+  | { kind: "page_metadata_content_too_large"; text: "Page metadata attached; content too large" }
   | { kind: "capture_unavailable"; text: "Could not capture this page" };
 
 export function addUserPrompt(

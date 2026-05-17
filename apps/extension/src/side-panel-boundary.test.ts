@@ -1,9 +1,22 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 function readSource(relativePath: string): string {
   return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
+}
+
+function productionSourceFiles(relativeDirectory = "."): string[] {
+  const directoryUrl = new URL(relativeDirectory, import.meta.url);
+  return readdirSync(fileURLToPath(directoryUrl), { withFileTypes: true }).flatMap((entry) => {
+    const relativePath = `${relativeDirectory}/${entry.name}`;
+    if (entry.isDirectory()) return productionSourceFiles(relativePath);
+    if (!entry.isFile()) return [];
+    if (!/\.(ts|tsx)$/.test(entry.name)) return [];
+    if (entry.name.endsWith(".test.ts") || entry.name.endsWith(".test.tsx")) return [];
+    if (entry.name === "chrome.d.ts") return [];
+    return [relativePath];
+  });
 }
 
 describe("side panel architecture boundary", () => {
@@ -94,5 +107,27 @@ describe("active page tracking boundary", () => {
     expect(viewSource).not.toContain("CaptureService");
     expect(viewSource).not.toContain("chrome.scripting");
     expect(viewSource).not.toContain("session.send");
+  });
+
+  it("keeps_readable_size_policy_inside_capture_service", () => {
+    const captureServiceSource = readSource("./capture-service.ts");
+    const viewSource = readSource("./side-panel-view.tsx");
+    const controllerSource = readSource("./side-panel-controller.ts");
+    const urlSessionStoreSource = readSource("./url-session-store.ts");
+
+    expect(captureServiceSource).toContain("readableContentLimitCharacters");
+    expect(viewSource).not.toContain("readableContentLimitCharacters");
+    expect(controllerSource).not.toContain("readableContentLimitCharacters");
+    expect(urlSessionStoreSource).not.toContain("readableContentLimitCharacters");
+  });
+});
+
+describe("settings storage boundary", () => {
+  it("keeps_runtime_settings_storage_access_inside_settings_store", () => {
+    const filesWithStorageAccess = productionSourceFiles()
+      .filter((relativePath) => readSource(relativePath).includes("chrome.storage"))
+      .sort();
+
+    expect(filesWithStorageAccess).toEqual(["./settings-store.ts"]);
   });
 });

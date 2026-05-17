@@ -1,4 +1,5 @@
 import { createBridge } from "./index.js";
+import { BRIDGE_HARD_PAYLOAD_BYTE_LIMIT, exceedsPayloadByteLimit, payloadTooLargeError } from "./payload-limit.js";
 
 type NativeMessagingBridge = {
   handleMessage(message: unknown): Promise<void>;
@@ -6,6 +7,7 @@ type NativeMessagingBridge = {
 
 type RunNativeMessagingBridgeOptions = {
   bridge?: NativeMessagingBridge;
+  hardPayloadByteLimit?: number;
 };
 
 export function runNativeMessagingBridge(
@@ -13,8 +15,12 @@ export function runNativeMessagingBridge(
   output: NodeJS.WritableStream = process.stdout,
   options: RunNativeMessagingBridgeOptions = {}
 ) {
-  const bridge = options.bridge ?? createBridge({ emit: (message) => writeNativeMessage(output, message) });
+  const hardPayloadByteLimit = options.hardPayloadByteLimit ?? BRIDGE_HARD_PAYLOAD_BYTE_LIMIT;
+  const bridge =
+    options.bridge ??
+    createBridge({ emit: (message) => writeNativeMessage(output, message) }, undefined, { hardPayloadByteLimit });
   let buffer = Buffer.alloc(0);
+  let oversizedBytesToDiscard = 0;
 
   writeNativeMessage(output, { type: "bridge.ready", version: 1 });
 
@@ -39,16 +45,57 @@ export function runNativeMessagingBridge(
   }
 
   input.on("data", (chunk: Buffer) => {
-    buffer = Buffer.concat([buffer, chunk]);
+    let nextChunk = chunk;
+    let chunkOffset = 0;
+
+    if (oversizedBytesToDiscard > 0) {
+      const bytesToDiscard = Math.min(oversizedBytesToDiscard, nextChunk.length);
+      nextChunk = nextChunk.subarray(bytesToDiscard);
+      oversizedBytesToDiscard -= bytesToDiscard;
+      if (nextChunk.length === 0) return;
+    }
 
     // Chrome Native Messaging frames each JSON message as a 4-byte
     // little-endian byte length followed by the UTF-8 JSON payload.
-    while (buffer.length >= 4) {
+    while (chunkOffset < nextChunk.length || buffer.length > 0) {
+      if (oversizedBytesToDiscard > 0) {
+        const bytesToDiscard = Math.min(oversizedBytesToDiscard, nextChunk.length - chunkOffset);
+        chunkOffset += bytesToDiscard;
+        oversizedBytesToDiscard -= bytesToDiscard;
+        if (oversizedBytesToDiscard > 0 || chunkOffset >= nextChunk.length) return;
+        continue;
+      }
+
+      if (buffer.length < 4) {
+        const headerBytesNeeded = 4 - buffer.length;
+        const availableHeaderBytes = Math.min(headerBytesNeeded, nextChunk.length - chunkOffset);
+        buffer = Buffer.concat([buffer, nextChunk.subarray(chunkOffset, chunkOffset + availableHeaderBytes)]);
+        chunkOffset += availableHeaderBytes;
+        if (buffer.length < 4) return;
+      }
+
       const messageLength = buffer.readUInt32LE(0);
+      if (exceedsPayloadByteLimit(messageLength, hardPayloadByteLimit)) {
+        writeNativeMessage(output, payloadTooLargeError);
+        buffer = Buffer.alloc(0);
+        const payloadBytesInChunk = Math.min(messageLength, nextChunk.length - chunkOffset);
+        chunkOffset += payloadBytesInChunk;
+        oversizedBytesToDiscard = messageLength - payloadBytesInChunk;
+        if (oversizedBytesToDiscard > 0 || chunkOffset >= nextChunk.length) return;
+        continue;
+      }
+
+      const messageBytesNeeded = messageLength + 4 - buffer.length;
+      const availableMessageBytes = Math.min(messageBytesNeeded, nextChunk.length - chunkOffset);
+      if (availableMessageBytes > 0) {
+        buffer = Buffer.concat([buffer, nextChunk.subarray(chunkOffset, chunkOffset + availableMessageBytes)]);
+        chunkOffset += availableMessageBytes;
+      }
+
       if (buffer.length < messageLength + 4) return;
 
       const raw = buffer.subarray(4, messageLength + 4).toString("utf8");
-      buffer = buffer.subarray(messageLength + 4);
+      buffer = Buffer.alloc(0);
       enqueueRawMessage(raw);
     }
   });

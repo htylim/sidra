@@ -379,4 +379,19 @@ describe("SidePanelView Capture + Send", () => {
 
     expect(markup).toContain("Context attached");
   });
+
+  it("renders_content_too_large_context_state_in_page_card", () => {
+    const markup = renderPageSnapshot(
+      snapshotForPage({
+        contextState: {
+          status: "content_too_large",
+          label: "Content too large",
+          capturedAt: "2026-05-10T12:00:00.000Z",
+          reason: "content_too_large"
+        }
+      })
+    );
+
+    expect(markup).toContain("Content too large");
+  });
 });

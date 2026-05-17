@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from "vitest";
-import { CaptureService, type CaptureGateway, type CapturedTabDocument } from "./capture-service";
+import {
+  CaptureService,
+  type CaptureGateway,
+  type CaptureSettingsSource,
+  type CapturedTabDocument
+} from "./capture-service";
 import { captureCurrentDocumentSnapshot } from "./capture-script";
 
 describe("CaptureService", () => {
@@ -134,6 +139,142 @@ describe("CaptureService", () => {
     });
   });
 
+  it("keeps_readable_page_context_when_selected_text_is_within_configured_limit", async () => {
+    const text = longText("Readable article text");
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway({
+        document: capturedDocument({ html: articleHtml({ text }) })
+      }),
+      settings: new FakeCaptureSettings({ readableContentLimitCharacters: text.length + 100 })
+    });
+
+    const result = await service.captureActivePageContext();
+
+    expect(result.status).toBe("captured");
+    if (result.status !== "captured") throw new Error("expected captured result");
+    expect(result.pageContext).toMatchObject({
+      kind: "readable",
+      extractionMethod: "readability"
+    });
+  });
+
+  it("returns_content_too_large_metadata_only_when_readability_exceeds_limit_even_if_body_text_is_under_limit", async () => {
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway({
+        document: capturedDocument({
+          html: articleHtml({ text: longText("Oversized readability article text") }),
+          bodyInnerText: textOfLength("body fallback", 100)
+        })
+      }),
+      settings: new FakeCaptureSettings({ readableContentLimitCharacters: 120 })
+    });
+
+    const result = await service.captureActivePageContext();
+
+    expect(result.status).toBe("captured");
+    if (result.status !== "captured") throw new Error("expected captured result");
+    expect(result.pageContext).toEqual(
+      expect.objectContaining({
+        kind: "metadata_only",
+        reason: "content_too_large"
+      })
+    );
+    expect(result.pageContext).not.toHaveProperty("text");
+  });
+
+  it("returns_content_too_large_metadata_only_when_body_fallback_text_exceeds_limit", async () => {
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway({
+        document: capturedDocument({
+          html: articleHtml({ text: "Too short" }),
+          bodyInnerText: longText("Oversized body fallback text")
+        })
+      }),
+      settings: new FakeCaptureSettings({ readableContentLimitCharacters: 120 })
+    });
+
+    const result = await service.captureActivePageContext();
+
+    expect(result.status).toBe("captured");
+    if (result.status !== "captured") throw new Error("expected captured result");
+    expect(result.pageContext).toEqual(
+      expect.objectContaining({
+        kind: "metadata_only",
+        reason: "content_too_large"
+      })
+    );
+    expect(result.pageContext).not.toHaveProperty("text");
+  });
+
+  it("waits_for_initial_settings_load_before_capture_size_decision", async () => {
+    const settings = new FakeCaptureSettings({ readableContentLimitCharacters: 1_000 }, { delayReady: true });
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway({
+        document: capturedDocument({ html: articleHtml({ text: longText("Readable article text") }) })
+      }),
+      settings
+    });
+
+    const capturePromise = service.captureActivePageContext();
+    await flushPromises();
+    expect(settings.readyWaitCount).toBe(1);
+
+    settings.setLimit(120);
+    settings.resolveReady();
+    const result = await capturePromise;
+
+    expect(result.status).toBe("captured");
+    if (result.status !== "captured") throw new Error("expected captured result");
+    expect(result.pageContext).toMatchObject({ kind: "metadata_only", reason: "content_too_large" });
+  });
+
+  it("keeps_click_time_page_identity_when_settings_load_is_delayed", async () => {
+    const settings = new FakeCaptureSettings({ readableContentLimitCharacters: 1_000 }, { delayReady: true });
+    const gateway = new FakeCaptureGateway({
+      document: capturedDocument({
+        canonicalUrl: undefined,
+        documentUrl: "https://example.com/click-time"
+      })
+    });
+    const service = new CaptureService({ gateway, settings });
+
+    const capturePromise = service.captureActivePageContext();
+    await flushPromises();
+    gateway.nextDocument = capturedDocument({
+      canonicalUrl: undefined,
+      documentUrl: "https://example.com/later"
+    });
+    settings.resolveReady();
+
+    const result = await capturePromise;
+
+    expect(result.status).toBe("captured");
+    if (result.status !== "captured") throw new Error("expected captured result");
+    expect(result.pageIdentity).toMatchObject({ pageKey: "https://example.com/click-time" });
+  });
+
+  it("uses_latest_readable_limit_for_later_capture_calls", async () => {
+    const settings = new FakeCaptureSettings({ readableContentLimitCharacters: 1_000 });
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway({
+        document: capturedDocument({ html: articleHtml({ text: longText("Readable article text") }) })
+      }),
+      settings
+    });
+
+    await expect(service.captureActivePageContext()).resolves.toMatchObject({
+      status: "captured",
+      pageContext: { kind: "readable" }
+    });
+
+    settings.setLimit(120);
+
+    await expect(service.captureActivePageContext()).resolves.toMatchObject({
+      status: "captured",
+      pageContext: { kind: "metadata_only", reason: "content_too_large" }
+    });
+  });
+
   it("returns_capture_unavailable_when_active_tab_cannot_be_captured", async () => {
     const missingTabService = new CaptureService({ gateway: new FakeCaptureGateway({ tab: undefined }) });
     const failedReadService = new CaptureService({
@@ -218,12 +359,12 @@ class FakeCaptureGateway implements CaptureGateway {
   queryCount = 0;
   readCount = 0;
   private readonly tab?: { id?: number; url?: string; title?: string };
-  private readonly document: CapturedTabDocument;
+  nextDocument: CapturedTabDocument;
   private readonly readError?: Error;
 
   constructor(options: { tab?: { id?: number; url?: string; title?: string }; document?: CapturedTabDocument; readError?: Error } = {}) {
     this.tab = "tab" in options ? options.tab : { id: 7, url: "https://example.com/current", title: "Tab title" };
-    this.document = options.document ?? capturedDocument();
+    this.nextDocument = options.document ?? capturedDocument();
     this.readError = options.readError;
   }
 
@@ -235,7 +376,40 @@ class FakeCaptureGateway implements CaptureGateway {
   async readTabDocument() {
     this.readCount += 1;
     if (this.readError) throw this.readError;
-    return this.document;
+    return this.nextDocument;
+  }
+}
+
+class FakeCaptureSettings implements CaptureSettingsSource {
+  readyWaitCount = 0;
+  private readyPromise?: Promise<void>;
+  private resolveReadyPromise?: () => void;
+  private readableContentLimitCharacters: number;
+
+  constructor(settings: { readableContentLimitCharacters: number }, options: { delayReady?: boolean } = {}) {
+    this.readableContentLimitCharacters = settings.readableContentLimitCharacters;
+    if (options.delayReady) {
+      this.readyPromise = new Promise((resolve) => {
+        this.resolveReadyPromise = resolve;
+      });
+    }
+  }
+
+  getSnapshot() {
+    return { readableContentLimitCharacters: this.readableContentLimitCharacters };
+  }
+
+  async whenReady(): Promise<void> {
+    this.readyWaitCount += 1;
+    await this.readyPromise;
+  }
+
+  setLimit(readableContentLimitCharacters: number): void {
+    this.readableContentLimitCharacters = readableContentLimitCharacters;
+  }
+
+  resolveReady(): void {
+    this.resolveReadyPromise?.();
   }
 }
 
@@ -261,4 +435,14 @@ function articleHtml(input: { text: string }) {
 
 function longText(seed: string) {
   return `${seed} `.repeat(12).trim();
+}
+
+function textOfLength(seed: string, length: number) {
+  return seed.repeat(Math.ceil(length / seed.length)).slice(0, length);
+}
+
+async function flushPromises() {
+  for (let index = 0; index < 5; index += 1) {
+    await Promise.resolve();
+  }
 }

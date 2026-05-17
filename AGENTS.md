@@ -1,6 +1,6 @@
 - Read [ENGINEERING-GUIDELINES.md](docs/ENGINEERING-GUIDELINES.md)
 - Read [ARCHITECTURE.md](docs/ARCHITECTURE.md). Treat it as the source of truth for Sidra-specific ownership boundaries.
-- Read [NATIVE-MESSAGING-MANUAL-E2E.md](docs/NATIVE-MESSAGING-MANUAL-E2E.md) before manual extension E2E testing with the local bridge.
+- Read [MANUAL-E2E-RUNBOOK.md](docs/MANUAL-E2E-RUNBOOK.md) before any manual extension E2E, browser launch, unpacked-extension verification, or local Native Messaging bridge test.
 - Keep docs current when code ownership or product behavior changes.
 - Prefer concise current-state docs over long history logs.
 - Treat `docs/issues` and `docs/specs` as planning work product, not durable reference docs. They may contain historical plans, completed checklists, or implementation notes, and they do not need to stay current after the work is done.

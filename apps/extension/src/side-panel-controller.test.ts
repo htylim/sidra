@@ -1,9 +1,12 @@
-import type { BridgeToExtension, ExtensionToBridge } from "@sidra/protocol";
+// @vitest-environment jsdom
+
+import { BRIDGE_PAYLOAD_TOO_LARGE_CODE, type BridgeToExtension, type ExtensionToBridge } from "@sidra/protocol";
 import { describe, expect, it, vi } from "vitest";
 import type { PageIdentity, PageKey } from "./page-key";
 import { type NativeBridgePort, SIDRA_NATIVE_HOST } from "./bridge/connection";
 import { createSidePanelController } from "./side-panel-controller";
-import type { CaptureResult } from "./capture-service";
+import type { CaptureGateway, CaptureResult, CapturedTabDocument } from "./capture-service";
+import type { SettingsStore } from "./settings-store";
 
 class FakePort implements NativeBridgePort {
   readonly postedMessages: ExtensionToBridge[] = [];
@@ -43,6 +46,8 @@ type HarnessOptions = {
   initialPage?: PageIdentity;
   clientSessionIds?: string[];
   captureService?: FakeCaptureService;
+  captureGateway?: CaptureGateway;
+  settingsStore?: Pick<SettingsStore, "start" | "getSnapshot" | "whenReady">;
 };
 
 class FakeCaptureService {
@@ -107,7 +112,9 @@ function createHarnessWithOptions(options: HarnessOptions = {}) {
       return clientSessionId;
     },
     activePageTracker: activePage,
-    captureService: options.captureService
+    captureService: options.captureService,
+    captureGateway: options.captureGateway,
+    settingsStore: options.settingsStore
   });
 
   return { controller, connectNative, ports, activePage };
@@ -173,6 +180,80 @@ function metadataOnlyPageContext() {
     },
     reason: "no_usable_text" as const
   };
+}
+
+function contentTooLargePageContext() {
+  return {
+    kind: "metadata_only" as const,
+    metadata: {
+      url: "https://example.com/large",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    reason: "content_too_large" as const
+  };
+}
+
+function capturedDocument(overrides: Partial<CapturedTabDocument> = {}): CapturedTabDocument {
+  return {
+    documentUrl: "https://example.com/current",
+    title: "Captured title",
+    html: articleHtml({ text: longText("Readable article text") }),
+    bodyInnerText: longText("Fallback body text"),
+    capturedAt: "2026-05-10T12:00:00.000Z",
+    canonicalUrl: undefined,
+    siteName: "Example Site",
+    excerpt: "Captured excerpt",
+    byline: "Captured Author",
+    language: "en",
+    ...overrides
+  };
+}
+
+function articleHtml(input: { text: string }) {
+  return `<!doctype html><html><head><title>HTML title</title></head><body><article><h1>Article</h1><p>${input.text}</p></article></body></html>`;
+}
+
+function longText(seed: string) {
+  return `${seed} `.repeat(12).trim();
+}
+
+function textOfLength(seed: string, length: number) {
+  return seed.repeat(Math.ceil(length / seed.length)).slice(0, length);
+}
+
+class FakeControllerCaptureGateway implements CaptureGateway {
+  constructor(private readonly document: CapturedTabDocument) {}
+
+  async queryActiveTab() {
+    return { id: 7, url: this.document.documentUrl, title: this.document.title };
+  }
+
+  async readTabDocument() {
+    return this.document;
+  }
+}
+
+class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" | "whenReady"> {
+  startCount = 0;
+  private readableContentLimitCharacters: number;
+
+  constructor(readableContentLimitCharacters: number) {
+    this.readableContentLimitCharacters = readableContentLimitCharacters;
+  }
+
+  async start(): Promise<void> {
+    this.startCount += 1;
+  }
+
+  async whenReady(): Promise<void> {}
+
+  getSnapshot() {
+    return { readableContentLimitCharacters: this.readableContentLimitCharacters };
+  }
+
+  setLimit(readableContentLimitCharacters: number): void {
+    this.readableContentLimitCharacters = readableContentLimitCharacters;
+  }
 }
 
 function unsupportedPageIdentity(url: string): PageIdentity {
@@ -491,6 +572,27 @@ describe("SidePanelController", () => {
       setupError: "bridge failed",
       canUseChat: false,
       availability: { status: "error", message: "bridge failed", code: undefined }
+    });
+  });
+
+  it("surfaces_payload_too_large_bridge_error_without_marking_page_context_too_large", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage({
+      type: "bridge.error",
+      version: 1,
+      message: "Payload is too large.",
+      code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
+    });
+
+    expect(controller.getSnapshot().bridge.availability).toEqual({
+      status: "error",
+      message: "Payload is too large.",
+      code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
+    });
+    expect(controller.getSnapshot().activeSession.contextState).toEqual({
+      status: "none",
+      label: "No context sent yet"
     });
   });
 });
@@ -869,6 +971,76 @@ describe("SidePanelController Capture + Send", () => {
       expect.objectContaining({ role: "status", text: "Page metadata attached" }),
       expect.objectContaining({ role: "user", text: "describe" })
     ]);
+  });
+
+  it("capture_and_send_marks_content_too_large_without_sending_raw_page_text", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/large"),
+      pageContext: contentTooLargePageContext()
+    };
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+
+    await controller.captureAndSend("describe");
+
+    expect(controller.getSnapshot().activeSession.contextState).toMatchObject({
+      status: "content_too_large",
+      label: "Content too large"
+    });
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([
+      expect.objectContaining({ role: "status", text: "Page metadata attached; content too large" }),
+      expect.objectContaining({ role: "user", text: "describe" })
+    ]);
+    expect(controller.getSnapshot().activeSession.transcript.map((entry) => entry.text).join("\n")).not.toContain(
+      "Raw oversized article text"
+    );
+  });
+
+  it("capture_and_send_uses_initial_stored_readable_limit_from_composed_settings_store", async () => {
+    const oversizedText = textOfLength("Oversized readable article text. ", 1_100);
+    const settingsStore = new FakeSettingsStore(1_000);
+    const { controller, ports } = createHarnessWithOptions({
+      captureGateway: new FakeControllerCaptureGateway(capturedDocument({ html: articleHtml({ text: oversizedText }) })),
+      settingsStore
+    });
+    ports[0].emitMessage(bridgeReady());
+
+    await controller.captureAndSend("summarize");
+    ports[0].emitMessage(sessionStarted());
+
+    expect(settingsStore.startCount).toBe(1);
+    expect(controller.getSnapshot().activeSession.contextState.status).toBe("content_too_large");
+    const sendMessage = ports[0].postedMessages.find((message) => message.type === "session.send");
+    expect(sendMessage).toEqual(
+      expect.objectContaining({
+        type: "session.send",
+        pageContext: expect.objectContaining({
+          kind: "metadata_only",
+          reason: "content_too_large"
+        })
+      })
+    );
+    expect(sendMessage).not.toHaveProperty("pageContext.text");
+  });
+
+  it("capture_and_send_uses_live_readable_limit_from_composed_settings_store", async () => {
+    const selectedText = textOfLength("Readable article text. ", 1_100);
+    const settingsStore = new FakeSettingsStore(1_200);
+    const { controller, ports } = createHarnessWithOptions({
+      captureGateway: new FakeControllerCaptureGateway(capturedDocument({ html: articleHtml({ text: selectedText }) })),
+      settingsStore
+    });
+    ports[0].emitMessage(bridgeReady());
+
+    await controller.captureAndSend("first");
+    expect(controller.getSnapshot().activeSession.contextState.status).toBe("attached");
+
+    settingsStore.setLimit(1_000);
+    await controller.captureAndSend("second");
+
+    expect(controller.getSnapshot().activeSession.contextState.status).toBe("content_too_large");
   });
 
   it("capture_and_send_reports_capture_unavailable_without_posting_prompt", async () => {

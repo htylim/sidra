@@ -27,12 +27,13 @@ class FakeTransport implements ProtocolTransport {
   }
 }
 
-function createHarness(providerId: ProviderId = "codex") {
+function createHarness(providerId: ProviderId = "codex", hardPayloadByteLimit?: number) {
   const transport = new FakeTransport();
   const coordinator = new BridgeSessionCoordinator({
     clientSessionId: "client-1",
     providerId,
-    transport
+    transport,
+    hardPayloadByteLimit
   });
 
   return { coordinator, transport };
@@ -70,6 +71,18 @@ function metadataOnlyPageContext(): NonNullable<PromptSubmission["pageContext"]>
       capturedAt: "2026-05-10T12:00:00.000Z"
     },
     reason: "no_usable_text"
+  };
+}
+
+function contentTooLargePageContext(): NonNullable<PromptSubmission["pageContext"]> {
+  return {
+    kind: "metadata_only",
+    metadata: {
+      url: "https://example.com/large",
+      title: "Large",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    reason: "content_too_large"
   };
 }
 
@@ -165,6 +178,47 @@ describe("BridgeSessionCoordinator", () => {
     ]);
   });
 
+  it("rejects_oversized_prompt_before_starting_the_bridge_session", () => {
+    const { coordinator, transport } = createHarness("codex", 80);
+
+    const accepted = coordinator.sendPrompt("x".repeat(100));
+
+    expect(accepted).toBe(false);
+    expect(transport.postedMessages).toEqual([]);
+    expect(coordinator.getSnapshot()).toMatchObject({
+      pendingPromptCount: 0,
+      sessionStarted: false,
+      starting: false,
+      lastError: "Payload is too large."
+    });
+    expect(coordinator.getSnapshot().transcript).toEqual([{ role: "status", text: "Payload is too large." }]);
+  });
+
+  it("rejects_oversized_started_session_prompt_without_resetting_provider_state", () => {
+    const { coordinator, transport } = createHarness("codex", 160);
+
+    coordinator.sendPrompt("first");
+    transport.emitMessage(sessionStarted());
+    const accepted = coordinator.sendPrompt("x".repeat(200));
+
+    expect(accepted).toBe(false);
+    expect(transport.postedMessages).toEqual([
+      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "first" }
+    ]);
+    expect(coordinator.getSnapshot()).toMatchObject({
+      pendingPromptCount: 0,
+      sessionStarted: true,
+      starting: false,
+      lastError: "Payload is too large."
+    });
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      { role: "user", text: "first" },
+      { role: "status", text: "Session started" },
+      { role: "status", text: "Payload is too large." }
+    ]);
+  });
+
   it("ignores session.started for another clientSessionId", () => {
     const { coordinator, transport } = createHarness();
 
@@ -257,6 +311,25 @@ describe("BridgeSessionCoordinator page context", () => {
     ]);
     expect(coordinator.getSnapshot().transcript.map((entry) => entry.text).join("\n")).not.toContain(
       "Secret captured body text"
+    );
+  });
+
+  it("adds_content_too_large_marker_before_user_prompt_without_dumping_page_text", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt({
+      prompt: "summarize",
+      pageContext: contentTooLargePageContext()
+    });
+    transport.emitMessage(sessionStarted());
+
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      expect.objectContaining({ role: "status", text: "Page metadata attached; content too large" }),
+      expect.objectContaining({ role: "user", text: "summarize" }),
+      expect.objectContaining({ role: "status", text: "Session started" })
+    ]);
+    expect(coordinator.getSnapshot().transcript.map((entry) => entry.text).join("\n")).not.toContain(
+      "Captured readable page text"
     );
   });
 

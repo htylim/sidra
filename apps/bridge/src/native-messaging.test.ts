@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { PassThrough } from "node:stream";
+import { BRIDGE_PAYLOAD_TOO_LARGE_CODE } from "@sidra/protocol";
 import { runNativeMessagingBridge } from "./native-messaging.js";
+import { BRIDGE_HARD_PAYLOAD_BYTE_LIMIT } from "./payload-limit.js";
 
 describe("native messaging dispatch", () => {
   it("dispatches later session messages while an earlier provider stream is still open", async () => {
@@ -131,6 +133,124 @@ describe("native messaging dispatch", () => {
     await expect(messages).resolves.toEqual([
       { type: "bridge.ready", version: 1 },
       { type: "bridge.error", version: 1, message: "Unknown command", code: "invalid_message" }
+    ]);
+  });
+
+  it("rejects_oversized_native_message_before_json_parsing", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 2);
+    const invalidOversizedJson = "{".padEnd(101, "x");
+
+    runNativeMessagingBridge(input, output, { hardPayloadByteLimit: 100 });
+    input.write(encodeRawNativeMessage(invalidOversizedJson));
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.ready", version: 1 },
+      { type: "bridge.error", version: 1, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE }
+    ]);
+  });
+
+  it("continues_after_rejecting_oversized_native_message_frame", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 3);
+
+    runNativeMessagingBridge(input, output, { hardPayloadByteLimit: 100 });
+    input.write(
+      Buffer.concat([
+        encodeRawNativeMessage("x".repeat(101)),
+        encodeNativeMessage({
+          type: "session.delete",
+          version: 1,
+          clientSessionId: "page-1"
+        })
+      ])
+    );
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.ready", version: 1 },
+      { type: "bridge.error", version: 1, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
+      { type: "bridge.error", version: 1, message: "Unknown command", code: "invalid_message" }
+    ]);
+  });
+
+  it("discards_chunked_oversized_native_message_without_buffering_payload", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 3);
+    const oversizedFrame = encodeRawNativeMessage("x".repeat(101));
+    const nextFrame = encodeNativeMessage({
+      type: "session.delete",
+      version: 1,
+      clientSessionId: "page-1"
+    });
+
+    runNativeMessagingBridge(input, output, { hardPayloadByteLimit: 100 });
+    input.write(oversizedFrame.subarray(0, 10));
+    input.write(Buffer.concat([oversizedFrame.subarray(10), nextFrame]));
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.ready", version: 1 },
+      { type: "bridge.error", version: 1, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
+      { type: "bridge.error", version: 1, message: "Unknown command", code: "invalid_message" }
+    ]);
+  });
+
+  it("discards_later_oversized_chunks_before_buffering_them_for_parsing", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 3);
+    const oversizedFrame = encodeRawNativeMessage("x".repeat(101));
+    const nextFrame = encodeNativeMessage({
+      type: "session.delete",
+      version: 1,
+      clientSessionId: "page-1"
+    });
+
+    runNativeMessagingBridge(input, output, { hardPayloadByteLimit: 100 });
+    input.write(oversizedFrame.subarray(0, 4));
+    input.write(Buffer.concat([oversizedFrame.subarray(4), nextFrame]));
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.ready", version: 1 },
+      { type: "bridge.error", version: 1, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
+      { type: "bridge.error", version: 1, message: "Unknown command", code: "invalid_message" }
+    ]);
+  });
+
+  it("rejects_header_plus_oversized_payload_in_one_chunk_without_parsing_payload_bytes", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 3);
+    const oversizedFrame = encodeRawNativeMessage("{".repeat(101));
+    const nextFrame = encodeNativeMessage({
+      type: "session.delete",
+      version: 1,
+      clientSessionId: "page-1"
+    });
+
+    runNativeMessagingBridge(input, output, { hardPayloadByteLimit: 100 });
+    input.write(Buffer.concat([oversizedFrame, nextFrame]));
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.ready", version: 1 },
+      { type: "bridge.error", version: 1, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
+      { type: "bridge.error", version: 1, message: "Unknown command", code: "invalid_message" }
+    ]);
+  });
+
+  it("default_native_messaging_bridge_rejects_oversized_frames_with_the_hard_payload_limit", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 2);
+
+    runNativeMessagingBridge(input, output);
+    input.write(encodeRawNativeMessage("x".repeat(BRIDGE_HARD_PAYLOAD_BYTE_LIMIT + 1)));
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.ready", version: 1 },
+      { type: "bridge.error", version: 1, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE }
     ]);
   });
 });
