@@ -17,10 +17,12 @@ function SidePanel() {
       snapshot={snapshot}
       onSendPrompt={sidePanelController.sendPrompt}
       onCaptureAndSend={sidePanelController.captureAndSend}
+      onQuickAction={sidePanelController.sendQuickAction}
       onDraftPromptChange={sidePanelController.updateDraftPrompt}
       onCaptureModeChange={sidePanelController.updateCaptureMode}
       onNewChat={sidePanelController.newChat}
       onRetryBridge={sidePanelController.retryBridge}
+      onOpenSettings={sidePanelController.openSettings}
     />
   );
 }

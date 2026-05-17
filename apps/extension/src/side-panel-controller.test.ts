@@ -13,7 +13,11 @@ import { createSidePanelController } from "./side-panel-controller";
 import type { CaptureDocumentResult, CaptureGateway, CaptureResult, CapturedTabDocument } from "./capture-service";
 import type { CaptureMode } from "./capture-mode";
 import {
+  DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT,
+  DEFAULT_QUICK_ACTIONS_SETTINGS,
   DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+  type QuickActionsSettings,
+  type SidraSettings,
   type SettingsStore
 } from "./settings-store";
 
@@ -56,7 +60,8 @@ type HarnessOptions = {
   clientSessionIds?: string[];
   captureService?: FakeCaptureService;
   captureGateway?: CaptureGateway;
-  settingsStore?: Pick<SettingsStore, "start" | "getSnapshot" | "whenReady">;
+  settingsStore?: Pick<SettingsStore, "start" | "getSnapshot" | "whenReady" | "subscribe">;
+  openOptionsPage?: () => void;
 };
 
 class FakeCaptureService {
@@ -149,10 +154,16 @@ function createHarnessWithOptions(options: HarnessOptions = {}) {
     activePageTracker: activePage,
     captureService: options.captureService,
     captureGateway: options.captureGateway,
-    settingsStore: options.settingsStore
+    settingsStore: options.settingsStore,
+    openOptionsPage: options.openOptionsPage
   });
 
   return { controller, connectNative, ports, activePage };
+}
+
+async function waitForControllerSettings(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 function createUnavailableBridgeHarness(options: HarnessOptions = {}) {
@@ -291,35 +302,75 @@ class FakeControllerCaptureGateway implements CaptureGateway {
   }
 }
 
-class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" | "whenReady"> {
+class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" | "whenReady" | "subscribe"> {
   startCount = 0;
+  private readonly listeners = new Set<() => void>();
+  private readyPromise: Promise<void> = Promise.resolve();
+  private resolveReady: (() => void) | undefined;
   private readableContentLimitCharacters: number;
   private domContentLimitCharacters: number;
+  private quickActions: QuickActionsSettings;
 
-  constructor(readableContentLimitCharacters: number, domContentLimitCharacters = DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS) {
+  constructor(
+    readableContentLimitCharacters: number,
+    domContentLimitCharacters = DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+    quickActions: QuickActionsSettings = DEFAULT_QUICK_ACTIONS_SETTINGS
+  ) {
     this.readableContentLimitCharacters = readableContentLimitCharacters;
     this.domContentLimitCharacters = domContentLimitCharacters;
+    this.quickActions = quickActions;
   }
 
   async start(): Promise<void> {
     this.startCount += 1;
   }
 
-  async whenReady(): Promise<void> {}
+  async whenReady(): Promise<void> {
+    await this.readyPromise;
+  }
 
-  getSnapshot() {
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  getSnapshot(): SidraSettings {
     return {
       readableContentLimitCharacters: this.readableContentLimitCharacters,
-      domContentLimitCharacters: this.domContentLimitCharacters
+      domContentLimitCharacters: this.domContentLimitCharacters,
+      quickActions: this.quickActions
     };
   }
 
   setLimit(readableContentLimitCharacters: number): void {
     this.readableContentLimitCharacters = readableContentLimitCharacters;
+    this.emit();
   }
 
   setDomLimit(domContentLimitCharacters: number): void {
     this.domContentLimitCharacters = domContentLimitCharacters;
+    this.emit();
+  }
+
+  setQuickActions(quickActions: QuickActionsSettings): void {
+    this.quickActions = quickActions;
+    this.emit();
+  }
+
+  holdReadiness(): void {
+    this.readyPromise = new Promise((resolve) => {
+      this.resolveReady = resolve;
+    });
+  }
+
+  resolveReadiness(): void {
+    this.resolveReady?.();
+  }
+
+  private emit(): void {
+    for (const listener of this.listeners) listener();
   }
 }
 
@@ -1416,5 +1467,149 @@ describe("SidePanelController Capture + Send", () => {
       prompt: "plain"
     });
     expect(captureService.captureCalls).toBe(0);
+  });
+});
+
+describe("SidePanelController quick actions", () => {
+  it("exposes_default_quick_actions_for_empty_sessions", async () => {
+    const { controller, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    expect(controller.getSnapshot().activeSession.quickActions).toEqual([
+      { id: "summarize-page", label: "Summarize this page" }
+    ]);
+  });
+
+  it("does_not_expose_quick_actions_when_settings_disable_them", async () => {
+    const settingsStore = new FakeSettingsStore(1_000, DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS, {
+      enabled: false,
+      actions: DEFAULT_QUICK_ACTIONS_SETTINGS.actions
+    });
+    const { controller, ports } = createHarnessWithOptions({ settingsStore });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    expect(controller.getSnapshot().activeSession.quickActions).toEqual([]);
+  });
+
+  it("exposes_custom_quick_actions_from_settings", async () => {
+    const settingsStore = new FakeSettingsStore(1_000, DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS, {
+      enabled: true,
+      actions: [
+        { id: "explain", label: "Explain", prompt: "Explain this" },
+        { id: "questions", label: "Find questions", prompt: "Find open questions" }
+      ]
+    });
+    const { controller, ports } = createHarnessWithOptions({ settingsStore });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    expect(controller.getSnapshot().activeSession.quickActions).toEqual([
+      { id: "explain", label: "Explain" },
+      { id: "questions", label: "Find questions" }
+    ]);
+  });
+
+  it("updates_quick_actions_when_settings_change_live", async () => {
+    const settingsStore = new FakeSettingsStore(1_000);
+    const { controller, ports } = createHarnessWithOptions({ settingsStore });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    settingsStore.setQuickActions({
+      enabled: true,
+      actions: [{ id: "translate", label: "Translate", prompt: "Translate this" }]
+    });
+
+    expect(controller.getSnapshot().activeSession.quickActions).toEqual([
+      { id: "translate", label: "Translate" }
+    ]);
+  });
+
+  it("does_not_expose_quick_actions_before_initial_settings_load", async () => {
+    const settingsStore = new FakeSettingsStore(1_000);
+    settingsStore.holdReadiness();
+    const { controller, ports } = createHarnessWithOptions({ settingsStore });
+    ports[0].emitMessage(bridgeReady());
+
+    expect(controller.getSnapshot().activeSession.quickActions).toEqual([]);
+
+    settingsStore.resolveReadiness();
+    await waitForControllerSettings();
+
+    expect(controller.getSnapshot().activeSession.quickActions).toEqual([
+      { id: "summarize-page", label: "Summarize this page" }
+    ]);
+  });
+
+  it("does_not_expose_quick_actions_when_the_active_session_has_transcript", async () => {
+    const { controller, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    controller.sendPrompt("hello");
+
+    expect(controller.getSnapshot().activeSession.quickActions).toEqual([]);
+  });
+
+  it("sendQuickAction_sends_the_configured_prompt_through_capture_and_send", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    await expect(controller.sendQuickAction("summarize-page")).resolves.toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        clientSessionId: "client-1",
+        prompt: DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT
+      })
+    );
+    expect(captureService.captureCalls).toBe(1);
+  });
+
+  it("sendQuickAction_returns_false_for_unknown_or_hidden_action", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    await expect(controller.sendQuickAction("missing")).resolves.toBe(false);
+    controller.sendPrompt("hello");
+    await expect(controller.sendQuickAction("summarize-page")).resolves.toBe(false);
+
+    expect(captureService.captureCalls).toBe(0);
+  });
+
+  it("quick_action_capture_and_send_uses_active_session_capture_mode", async () => {
+    const captureService = new FakeCaptureService();
+    const document = capturedDocument({ html: "<html><body>Full DOM</body></html>" });
+    captureService.nextDocumentResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/full-dom"),
+      capturedDocument: document
+    };
+    captureService.nextBuiltPageContext = fullDomPageContext(document.html);
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+    controller.updateCaptureMode("full_dom");
+
+    await controller.sendQuickAction("summarize-page");
+
+    expect(captureService.buildCalls.at(-1)).toEqual({ document, mode: "full_dom" });
+  });
+
+  it("openSettings_opens_the_extension_options_page_through_the_controller_boundary", () => {
+    const openOptionsPage = vi.fn();
+    const { controller } = createHarnessWithOptions({ openOptionsPage });
+
+    controller.openSettings();
+
+    expect(openOptionsPage).toHaveBeenCalledTimes(1);
   });
 });

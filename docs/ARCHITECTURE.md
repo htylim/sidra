@@ -7,7 +7,7 @@ This document records project-level decisions that should guide future implement
 Use this map to decide where behavior belongs. It is not a file catalog.
 
 - `apps/extension`: Browser extension UI and browser-side application state.
-  - Owns side panel rendering, active page tracking, URL Session mapping, Draft Prompt state, capture orchestration, settings, and bridge-facing application commands.
+  - Owns side panel rendering, options-page rendering, active page tracking, URL Session mapping, Draft Prompt state, capture orchestration, settings, quick-action configuration, and bridge-facing application commands.
   - Must not own provider lifecycle, low-level bridge protocol sequencing, or raw Native Messaging IO.
 - `apps/extension/src/bridge`: Extension-side bridge boundary.
   - Owns Chrome Native Messaging connection state, bridge readiness, reconnect/disconnect behavior, and session-start coordination before prompts are sent.
@@ -88,9 +88,9 @@ Decision:
   - `BridgeConnection`: Chrome Native Messaging connection, reconnect, disconnect, raw protocol IO, and bridge availability.
   - `ActivePageTracker`: active tab URL/title metadata reads and tab/window change subscriptions. It must not use scripting or page content extraction.
   - `UrlSessionStore`: page-keyed URL sessions, session-scoped `CaptureMode`, Draft Prompt, Context State, running state, and Client Session IDs. Transcript and provider-session state are derived from each session's coordinator.
-  - `SidePanelController`: application commands, active-page selection, bridge availability composition, and derived UI snapshots.
+  - `SidePanelController`: application commands, active-page selection, bridge availability composition, quick-action command routing, and derived UI snapshots.
   - `CaptureService`: active-tab capture, extraction, size decisions, and page-context construction.
-  - `SettingsStore`: persisted extension settings and live settings updates.
+  - `SettingsStore`: persisted extension settings, quick-action validation, quick-action writes, and live settings updates.
 - The bridge must manage provider sessions behind a session manager. A raw message switch must not accumulate provider lifecycle, cancellation, reset, close, heartbeat, or permission logic.
 - Bridge modules should separate at least these responsibilities before related behavior expands:
   - `NativeMessagingTransport`: frame parsing/writing and process IO only.

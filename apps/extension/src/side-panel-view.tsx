@@ -6,10 +6,12 @@ export function SidePanelView(props: {
   snapshot: SidePanelSnapshot;
   onSendPrompt(prompt: string): boolean;
   onCaptureAndSend(prompt: string): boolean | Promise<boolean>;
+  onQuickAction(actionId: string): boolean | Promise<boolean>;
   onDraftPromptChange(text: string): void;
   onCaptureModeChange(captureMode: CaptureMode): void;
   onNewChat(): void;
   onRetryBridge(): void;
+  onOpenSettings(): void;
 }) {
   const [promptOptionsOpen, setPromptOptionsOpen] = useState(false);
   const bridgeBlocked = props.snapshot.bridge.availability.status !== "ready";
@@ -38,6 +40,9 @@ export function SidePanelView(props: {
       <header className="header">
         <div className="brand-mark">S</div>
         <h1>Sidra</h1>
+        <button type="button" className="toolbar-button" aria-label="Settings" onClick={props.onOpenSettings}>
+          ⚙
+        </button>
         <button type="button" className="toolbar-button" aria-label="New chat" onClick={props.onNewChat}>
           +
         </button>
@@ -66,10 +71,24 @@ export function SidePanelView(props: {
           <div className="empty-state">
             <div className="empty-icon">✦</div>
             <h2>Ask anything about this page</h2>
-            <p>Use the action below or ask your own question.</p>
-            <button type="button" onClick={() => props.onDraftPromptChange("Summarize this page")}>
-              Summarize this page
-            </button>
+            <p>Use the actions below or ask your own question.</p>
+            {props.snapshot.activeSession.quickActions.length > 0 ? (
+              <div className="quick-action-grid" role="group" aria-label="Quick actions">
+                {props.snapshot.activeSession.quickActions.map((action) => (
+                  <button
+                    type="button"
+                    className="quick-action-button"
+                    key={action.id}
+                    onClick={() => {
+                      void props.onQuickAction(action.id);
+                    }}
+                  >
+                    <span aria-hidden="true">✦</span>
+                    <span>{action.label}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : (
           props.snapshot.activeSession.transcript.map((message, index) => (

@@ -8,6 +8,10 @@
   "side_panel": {
     "default_path": "side-panel.html"
   },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "action": {
     "default_title": "Sidra"
   },

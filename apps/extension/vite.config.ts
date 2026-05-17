@@ -12,7 +12,8 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        sidePanel: fileURLToPath(new URL("side-panel.html", import.meta.url))
+        sidePanel: fileURLToPath(new URL("side-panel.html", import.meta.url)),
+        options: fileURLToPath(new URL("options.html", import.meta.url))
       }
     }
   }

@@ -44,6 +44,7 @@ declare namespace chrome {
     };
 
     function connectNative(application: string): Port;
+    function openOptionsPage(): void;
   }
 
   namespace scripting {
@@ -73,6 +74,7 @@ declare namespace chrome {
 
     type StorageArea = {
       get(key: string): Promise<Record<string, unknown>>;
+      set(values: Record<string, unknown>): Promise<void>;
     };
 
     const local: StorageArea;

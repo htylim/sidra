@@ -19,6 +19,7 @@ type SnapshotOptions = {
   captureMode?: SidePanelSnapshot["activeSession"]["captureMode"];
   draftPrompt?: string;
   transcript?: SidePanelSnapshot["activeSession"]["transcript"];
+  quickActions?: SidePanelSnapshot["activeSession"]["quickActions"];
 };
 
 function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
@@ -39,7 +40,8 @@ function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
       transcript: options.transcript ?? [],
       pendingPromptCount: 0,
       sessionStarted: false,
-      starting: false
+      starting: false,
+      quickActions: options.quickActions ?? []
     }
   };
 }
@@ -71,10 +73,12 @@ function renderSnapshot(bridge: SidePanelSnapshot["bridge"]): string {
       snapshot={createSnapshot(bridge)}
       onSendPrompt={() => false}
       onCaptureAndSend={() => false}
+      onQuickAction={() => false}
       onDraftPromptChange={() => undefined}
       onCaptureModeChange={() => undefined}
       onNewChat={() => undefined}
       onRetryBridge={() => undefined}
+      onOpenSettings={() => undefined}
     />
   );
 }
@@ -85,10 +89,12 @@ function renderPageSnapshot(snapshot: SidePanelSnapshot): string {
       snapshot={snapshot}
       onSendPrompt={() => false}
       onCaptureAndSend={() => false}
+      onQuickAction={() => false}
       onDraftPromptChange={() => undefined}
       onCaptureModeChange={() => undefined}
       onNewChat={() => undefined}
       onRetryBridge={() => undefined}
+      onOpenSettings={() => undefined}
     />
   );
 }
@@ -97,9 +103,11 @@ function renderInteractiveSnapshot(
   snapshot: SidePanelSnapshot,
   overrides: Partial<{
     onSendPrompt(prompt: string): boolean;
-    onCaptureAndSend(prompt: string): boolean | Promise<boolean>;
-    onDraftPromptChange(text: string): void;
-    onCaptureModeChange(captureMode: SidePanelSnapshot["activeSession"]["captureMode"]): void;
+  onCaptureAndSend(prompt: string): boolean | Promise<boolean>;
+  onQuickAction(actionId: string): boolean | Promise<boolean>;
+  onDraftPromptChange(text: string): void;
+  onCaptureModeChange(captureMode: SidePanelSnapshot["activeSession"]["captureMode"]): void;
+  onOpenSettings(): void;
   }> = {}
 ) {
   let currentSnapshot = snapshot;
@@ -111,6 +119,7 @@ function renderInteractiveSnapshot(
         snapshot={currentSnapshot}
         onSendPrompt={overrides.onSendPrompt ?? (() => false)}
         onCaptureAndSend={overrides.onCaptureAndSend ?? (() => false)}
+        onQuickAction={overrides.onQuickAction ?? (() => false)}
         onDraftPromptChange={(text) => {
           currentSnapshot = {
             ...currentSnapshot,
@@ -129,6 +138,7 @@ function renderInteractiveSnapshot(
         }}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
+        onOpenSettings={overrides.onOpenSettings ?? (() => undefined)}
       />
     );
   }
@@ -139,6 +149,7 @@ function renderInteractiveSnapshot(
         snapshot={currentSnapshot}
         onSendPrompt={overrides.onSendPrompt ?? (() => false)}
         onCaptureAndSend={overrides.onCaptureAndSend ?? (() => false)}
+        onQuickAction={overrides.onQuickAction ?? (() => false)}
         onDraftPromptChange={(text) => {
           currentSnapshot = {
             ...currentSnapshot,
@@ -157,6 +168,7 @@ function renderInteractiveSnapshot(
         }}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
+        onOpenSettings={overrides.onOpenSettings ?? (() => undefined)}
       />
     );
   }
@@ -253,6 +265,127 @@ describe("SidePanelView bridge setup", () => {
 });
 
 describe("SidePanelView URL sessions", () => {
+  it("renders_centered_empty_state_heading_helper_and_quick_action_grid", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        quickActions: [{ id: "summarize-page", label: "Summarize this page" }]
+      })
+    );
+
+    expect(screen.getByText("Ask anything about this page")).not.toBeNull();
+    expect(screen.getByText("Use the actions below or ask your own question.")).not.toBeNull();
+    expect(screen.getByRole("group", { name: "Quick actions" })).not.toBeNull();
+  });
+
+  it("renders_default_quick_action_in_empty_session", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        quickActions: [{ id: "summarize-page", label: "Summarize this page" }]
+      })
+    );
+
+    expect(screen.getByRole("button", { name: "Summarize this page" })).not.toBeNull();
+  });
+
+  it("renders_custom_quick_actions_from_snapshot", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        quickActions: [
+          { id: "explain", label: "Explain" },
+          { id: "questions", label: "Find questions" }
+        ]
+      })
+    );
+
+    expect(screen.getByRole("button", { name: "Explain" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Find questions" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Summarize this page" })).toBeNull();
+  });
+
+  it("hides_quick_actions_when_disabled", () => {
+    renderInteractiveSnapshot(snapshotForPage({ quickActions: [] }));
+
+    expect(screen.queryByRole("group", { name: "Quick actions" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Summarize this page" })).toBeNull();
+  });
+
+  it("hides_quick_actions_when_active_session_has_transcript", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        quickActions: [{ id: "summarize-page", label: "Summarize this page" }],
+        transcript: [{ role: "user", text: "hello" }]
+      })
+    );
+
+    expect(screen.queryByRole("button", { name: "Summarize this page" })).toBeNull();
+  });
+
+  it("does_not_show_quick_actions_when_bridge_is_blocked", () => {
+    renderInteractiveSnapshot({
+      ...snapshotForPage({ quickActions: [{ id: "summarize-page", label: "Summarize this page" }] }),
+      bridge: checkingBridge
+    });
+
+    expect(screen.queryByRole("button", { name: "Summarize this page" })).toBeNull();
+  });
+
+  it("does_not_show_quick_actions_for_unsupported_pages", () => {
+    renderInteractiveSnapshot({
+      ...snapshotForUnsupportedPage(),
+      activeSession: {
+        ...snapshotForUnsupportedPage().activeSession,
+        quickActions: [{ id: "summarize-page", label: "Summarize this page" }]
+      }
+    });
+
+    expect(screen.queryByRole("button", { name: "Summarize this page" })).toBeNull();
+  });
+
+  it("clicking_quick_action_calls_onQuickAction with_the_action_id", async () => {
+    const user = userEvent.setup();
+    const onQuickAction = vi.fn(() => true);
+    renderInteractiveSnapshot(
+      snapshotForPage({ quickActions: [{ id: "summarize-page", label: "Summarize this page" }] }),
+      { onQuickAction }
+    );
+
+    await user.click(screen.getByRole("button", { name: "Summarize this page" }));
+
+    expect(onQuickAction).toHaveBeenCalledWith("summarize-page");
+  });
+
+  it("clicking_quick_action_does_not_write_the_prompt_to_the_draft", async () => {
+    const user = userEvent.setup();
+    const onDraftPromptChange = vi.fn();
+    renderInteractiveSnapshot(
+      snapshotForPage({ quickActions: [{ id: "summarize-page", label: "Summarize this page" }] }),
+      { onDraftPromptChange }
+    );
+
+    await user.click(screen.getByRole("button", { name: "Summarize this page" }));
+
+    expect(onDraftPromptChange).not.toHaveBeenCalled();
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("header_settings_button_calls_onOpenSettings", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    renderInteractiveSnapshot(snapshotForPage(), { onOpenSettings });
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("does_not_receive_quick_action_prompts_in_the_snapshot", () => {
+    const snapshot = snapshotForPage({
+      quickActions: [{ id: "summarize-page", label: "Summarize this page" }]
+    });
+
+    expect(JSON.stringify(snapshot.activeSession.quickActions)).not.toContain("prompt");
+  });
+
   it("renders_active_page_title_and_context_state_from_snapshot", () => {
     const markup = renderPageSnapshot(
       snapshotForPage({
@@ -275,10 +408,12 @@ describe("SidePanelView URL sessions", () => {
         snapshot={snapshotForUnsupportedPage()}
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
+        onQuickAction={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
+        onOpenSettings={() => undefined}
       />
     );
     expect(screen.getByText("chrome://extensions")).not.toBeNull();
@@ -292,10 +427,12 @@ describe("SidePanelView URL sessions", () => {
         snapshot={snapshotForUnsupportedPage()}
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
+        onQuickAction={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
+        onOpenSettings={() => undefined}
       />
     );
 
@@ -365,10 +502,12 @@ describe("SidePanelView Capture + Send", () => {
         snapshot={snapshotForUnsupportedPage()}
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
+        onQuickAction={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
+        onOpenSettings={() => undefined}
       />
     );
 
@@ -507,10 +646,12 @@ describe("SidePanelView prompt options", () => {
         snapshot={snapshotForUnsupportedPage()}
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
+        onQuickAction={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
+        onOpenSettings={() => undefined}
       />
     );
 
@@ -525,10 +666,12 @@ describe("SidePanelView prompt options", () => {
         snapshot={initialSnapshot}
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
+        onQuickAction={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
+        onOpenSettings={() => undefined}
       />
     );
 
@@ -543,10 +686,12 @@ describe("SidePanelView prompt options", () => {
         }}
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
+        onQuickAction={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
+        onOpenSettings={() => undefined}
       />
     );
 

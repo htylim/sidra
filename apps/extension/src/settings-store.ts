@@ -1,6 +1,18 @@
 export type SidraSettings = {
   readableContentLimitCharacters: number;
   domContentLimitCharacters: number;
+  quickActions: QuickActionsSettings;
+};
+
+export type QuickAction = {
+  id: string;
+  label: string;
+  prompt: string;
+};
+
+export type QuickActionsSettings = {
+  enabled: boolean;
+  actions: QuickAction[];
 };
 
 export type SettingsStorageArea = "local" | "sync" | "managed" | "session";
@@ -12,6 +24,7 @@ export type SettingsStorageChange = {
 
 export type SettingsStorageGateway = {
   get(key: string): Promise<Record<string, unknown>>;
+  set(values: Record<string, unknown>): Promise<void>;
   subscribeToChanges(listener: (changes: Record<string, SettingsStorageChange>, areaName: SettingsStorageArea) => void): () => void;
 };
 
@@ -24,6 +37,24 @@ export const DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS = 300_000;
 export const MIN_DOM_CONTENT_LIMIT_CHARACTERS = 1_000;
 export const MAX_DOM_CONTENT_LIMIT_CHARACTERS = 750_000;
 export const SIDRA_SETTINGS_STORAGE_KEY = "sidra.settings.v1";
+export const DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT = `Summarize this article following the instructions below.
+
+- Make the response in the same language of the article. If the article is in Spanish, use Spanish, if it's in English, use English.
+- For doing the summary create a bullet PER PARAGRAPH of the article. If the article has 10 paragraph, create 10 bullets. Each bullet should be the summary of that paragraph. Make each paragraph summary precise and concise to capture the main points of that paragraph.
+- Focus on main ideas, key events, important people, and impactful statistics.
+- Ensure sentences are short and clear for better speech quality.
+- Avoid complex punctuation; prefer commas and periods.
+- Note that the supplied page content may include more than just the article we want summarized. If that's the case ignore anything but the article.`;
+export const DEFAULT_QUICK_ACTIONS_SETTINGS: QuickActionsSettings = {
+  enabled: true,
+  actions: [
+    {
+      id: "summarize-page",
+      label: "Summarize this page",
+      prompt: DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT
+    }
+  ]
+};
 
 export class SettingsStore {
   private readonly storage: SettingsStorageGateway;
@@ -71,6 +102,15 @@ export class SettingsStore {
     this.loadGeneration += 1;
   }
 
+  async saveQuickActions(nextQuickActions: QuickActionsSettings): Promise<void> {
+    const nextSnapshot = {
+      ...this.getSnapshot(),
+      quickActions: normalizeQuickActionsSettings(nextQuickActions, DEFAULT_QUICK_ACTIONS_SETTINGS)
+    };
+    await this.storage.set({ [SIDRA_SETTINGS_STORAGE_KEY]: cloneSettings(nextSnapshot) });
+    this.setSnapshot(nextSnapshot);
+  }
+
   private async loadInitialSettings(loadGeneration: number): Promise<void> {
     const generationAtLoadStart = this.liveChangeGeneration;
     let stored: unknown;
@@ -95,7 +135,8 @@ export class SettingsStore {
   private setSnapshot(nextSnapshot: SidraSettings): void {
     if (
       nextSnapshot.readableContentLimitCharacters === this.snapshot.readableContentLimitCharacters &&
-      nextSnapshot.domContentLimitCharacters === this.snapshot.domContentLimitCharacters
+      nextSnapshot.domContentLimitCharacters === this.snapshot.domContentLimitCharacters &&
+      quickActionsMatch(nextSnapshot.quickActions, this.snapshot.quickActions)
     ) {
       return;
     }
@@ -115,6 +156,7 @@ export function createChromeSettingsStore(): SettingsStore {
   return new SettingsStore({
     storage: {
       get: (key) => chrome.storage.local.get(key),
+      set: (values) => chrome.storage.local.set(values),
       subscribeToChanges(listener) {
         chrome.storage.onChanged.addListener(listener);
         return () => chrome.storage.onChanged.removeListener(listener);
@@ -136,22 +178,98 @@ function parseStoredSettings(value: unknown): SidraSettings {
       : defaults.readableContentLimitCharacters,
     domContentLimitCharacters: isValidDomContentLimit(domContentLimitCharacters)
       ? domContentLimitCharacters
-      : defaults.domContentLimitCharacters
+      : defaults.domContentLimitCharacters,
+    quickActions: parseQuickActionsSettings(value.quickActions)
   };
 }
 
 function defaultSidraSettings(): SidraSettings {
   return {
     readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
-    domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS
+    domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+    quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS
   };
 }
 
 function cloneSettings(settings: SidraSettings): SidraSettings {
   return {
     readableContentLimitCharacters: settings.readableContentLimitCharacters,
-    domContentLimitCharacters: settings.domContentLimitCharacters
+    domContentLimitCharacters: settings.domContentLimitCharacters,
+    quickActions: cloneQuickActionsSettings(settings.quickActions)
   };
+}
+
+function parseQuickActionsSettings(value: unknown): QuickActionsSettings {
+  if (!isRecord(value)) return cloneQuickActionsSettings(DEFAULT_QUICK_ACTIONS_SETTINGS);
+  return normalizeQuickActionsSettings(value, DEFAULT_QUICK_ACTIONS_SETTINGS);
+}
+
+function normalizeQuickActionsSettings(value: unknown, fallback: QuickActionsSettings): QuickActionsSettings {
+  if (!isRecord(value)) return cloneQuickActionsSettings(fallback);
+
+  const enabled = typeof value.enabled === "boolean" ? value.enabled : fallback.enabled;
+  if (!Array.isArray(value.actions)) return { enabled, actions: cloneQuickActions(fallback.actions) };
+
+  return {
+    enabled,
+    actions: normalizeQuickActions(value.actions)
+  };
+}
+
+function normalizeQuickActions(values: unknown[]): QuickAction[] {
+  const usedIds = new Set<string>();
+  const actions: QuickAction[] = [];
+
+  values.forEach((value, sourceIndex) => {
+    if (!isRecord(value)) return;
+
+    const label = normalizeRequiredText(value.label);
+    const prompt = normalizeRequiredText(value.prompt);
+    if (!label || !prompt) return;
+
+    const storedId = normalizeRequiredText(value.id);
+    const id = storedId && !usedIds.has(storedId) ? storedId : createDeterministicQuickActionId(sourceIndex, usedIds);
+    usedIds.add(id);
+    actions.push({ id, label, prompt });
+  });
+
+  return actions;
+}
+
+function createDeterministicQuickActionId(sourceIndex: number, usedIds: Set<string>): string {
+  let candidate = `quick-action-${sourceIndex}`;
+  let suffix = sourceIndex + 1;
+  while (usedIds.has(candidate)) {
+    candidate = `quick-action-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function normalizeRequiredText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function cloneQuickActionsSettings(settings: QuickActionsSettings): QuickActionsSettings {
+  return {
+    enabled: settings.enabled,
+    actions: cloneQuickActions(settings.actions)
+  };
+}
+
+function cloneQuickActions(actions: QuickAction[]): QuickAction[] {
+  return actions.map((action) => ({ ...action }));
+}
+
+function quickActionsMatch(first: QuickActionsSettings, second: QuickActionsSettings): boolean {
+  if (first.enabled !== second.enabled) return false;
+  if (first.actions.length !== second.actions.length) return false;
+  return first.actions.every((action, index) => {
+    const otherAction = second.actions[index];
+    return action.id === otherAction.id && action.label === otherAction.label && action.prompt === otherAction.prompt;
+  });
 }
 
 function isValidReadableContentLimit(value: unknown): value is number {

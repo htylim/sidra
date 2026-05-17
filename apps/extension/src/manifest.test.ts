@@ -9,6 +9,7 @@ describe("extension manifest", () => {
       manifest_version: number;
       permissions: string[];
       side_panel?: { default_path?: string };
+      options_ui?: { page?: string; open_in_tab?: boolean };
     };
 
     expect(manifest.manifest_version).toBe(3);
@@ -16,5 +17,17 @@ describe("extension manifest", () => {
     expect(manifest.permissions).toEqual(
       expect.arrayContaining(["sidePanel", "nativeMessaging", "storage", "tabs", "scripting"])
     );
+  });
+
+  it("declares_the_extension_options_page", () => {
+    const manifestPath = fileURLToPath(new URL("../public/manifest.json", import.meta.url));
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+      options_ui?: { page?: string; open_in_tab?: boolean };
+    };
+
+    expect(manifest.options_ui).toEqual({
+      page: "options.html",
+      open_in_tab: true
+    });
   });
 });

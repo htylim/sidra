@@ -74,6 +74,24 @@ describe("side panel New Chat wiring", () => {
     expect(viewSource).toContain('aria-label="Prompt options"');
     expect(viewSource).toContain("Send Full DOM");
   });
+
+  it("passes_controller_quick_action_and_settings_commands_into_the_view", () => {
+    const sidePanelSource = readSource("./side-panel.tsx");
+    const viewSource = readSource("./side-panel-view.tsx");
+
+    expect(sidePanelSource).toContain("onQuickAction={sidePanelController.sendQuickAction}");
+    expect(sidePanelSource).toContain("onOpenSettings={sidePanelController.openSettings}");
+    expect(viewSource).toContain("onQuickAction(actionId: string)");
+    expect(viewSource).toContain("onOpenSettings(): void");
+  });
+
+  it("keeps_quick_action_settings_storage_and_prompts_out_of_the_react_view", () => {
+    const viewSource = readSource("./side-panel-view.tsx");
+
+    expect(viewSource).not.toContain("DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT");
+    expect(viewSource).not.toContain("chrome.storage");
+    expect(viewSource).not.toContain("SIDRA_SETTINGS_STORAGE_KEY");
+  });
 });
 
 describe("active page tracking boundary", () => {

@@ -14,6 +14,7 @@ body {
 }
 
 button,
+input,
 textarea {
   font: inherit;
 }
@@ -188,7 +189,7 @@ textarea {
   font-size: 13px;
 }
 
-.empty-state button,
+.quick-action-button,
 .send-button {
   border: 1px solid #087c71;
   border-radius: 6px;
@@ -197,8 +198,27 @@ textarea {
   font-weight: 650;
 }
 
-.empty-state button {
+.quick-action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 8px;
+  width: min(100%, 320px);
+}
+
+.quick-action-button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
   padding: 8px 10px;
+  text-align: left;
+}
+
+.quick-action-button span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
 }
 
 .message {
@@ -285,7 +305,109 @@ textarea {
   padding: 0 12px;
 }
 
+.options-page {
+  min-height: 100vh;
+  background: #f6f8f7;
+}
+
+.options-header,
+.options-section {
+  width: min(720px, calc(100% - 24px));
+  margin: 0 auto;
+}
+
+.options-header {
+  padding: 18px 0 12px;
+}
+
+.options-header h1 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.options-section {
+  display: grid;
+  gap: 14px;
+  padding: 16px 0 24px;
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.settings-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #087c71;
+}
+
+.action-list {
+  display: grid;
+  gap: 10px;
+}
+
+.action-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #d8e1dd;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.action-row label {
+  display: grid;
+  gap: 4px;
+  color: #62716d;
+  font-size: 12px;
+}
+
+.action-row input,
+.action-row textarea {
+  width: 100%;
+  border: 1px solid #cfd9d5;
+  border-radius: 6px;
+  padding: 8px;
+  color: #17201f;
+  font-size: 13px;
+}
+
+.action-row textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.options-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-error {
+  border: 1px solid #efd2c3;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #9a3412;
+  background: #fff7ed;
+  font-size: 13px;
+}
+
+.secondary-button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #cfd9d5;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #17201f;
+  font-weight: 650;
+}
+
 button:disabled,
+input:disabled,
 textarea:disabled {
   cursor: not-allowed;
   opacity: 0.58;
