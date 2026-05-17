@@ -58,7 +58,7 @@ export class BridgeSessionManager {
     if (!session) {
       this.options.emit({
         type: "session.error",
-        version: 1,
+        version: 2,
         clientSessionId,
         message: "Session has not been started",
         code: "session_not_started"
@@ -69,7 +69,7 @@ export class BridgeSessionManager {
     if (session.inFlight) {
       this.options.emit({
         type: "session.error",
-        version: 1,
+        version: 2,
         clientSessionId,
         message: "A turn is already in flight for this session",
         code: "turn_in_flight"
@@ -102,7 +102,7 @@ export class BridgeSessionManager {
     if (!session?.inFlight) {
       this.options.emit({
         type: "session.error",
-        version: 1,
+        version: 2,
         clientSessionId,
         message: "No in-flight turn to cancel",
         code: "no_in_flight_turn"
@@ -115,7 +115,7 @@ export class BridgeSessionManager {
     await inFlight.done;
     this.options.emit({
       type: "agent.event",
-      version: 1,
+      version: 2,
       clientSessionId,
       event: { type: "assistant.cancelled" }
     });
@@ -159,7 +159,7 @@ export class BridgeSessionManager {
     if (providerId !== this.options.provider.id) {
       this.options.emit({
         type: "session.error",
-        version: 1,
+        version: 2,
         clientSessionId,
         message: "Provider is not available",
         code: "provider_unavailable"
@@ -176,7 +176,7 @@ export class BridgeSessionManager {
     this.sessions.set(clientSessionId, { providerSession, providerId });
     this.options.emit({
       type: "session.started",
-      version: 1,
+      version: 2,
       clientSessionId,
       bridgeSessionId: `mock-${this.nextBridgeSessionId++}`
     });
@@ -199,13 +199,13 @@ export class BridgeSessionManager {
     try {
       for await (const event of providerSession.send(input, controller.signal)) {
         if (controller.signal.aborted) return;
-        this.options.emit({ type: "agent.event", version: 1, clientSessionId, event });
+        this.options.emit({ type: "agent.event", version: 2, clientSessionId, event });
       }
     } catch {
       if (controller.signal.aborted) return;
       this.options.emit({
         type: "session.error",
-        version: 1,
+        version: 2,
         clientSessionId,
         message: "Provider send failed",
         code: "provider_error"

@@ -10,7 +10,7 @@ export { BRIDGE_HARD_PAYLOAD_BYTE_LIMIT, exceedsPayloadByteLimit, serializedJson
 
 export const payloadTooLargeError = {
   type: "bridge.error",
-  version: 1,
+  version: 2,
   message: BRIDGE_PAYLOAD_TOO_LARGE_MESSAGE,
   code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
 } as const;

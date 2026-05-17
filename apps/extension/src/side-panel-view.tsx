@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import type { CaptureMode } from "./capture-mode";
 import type { SidePanelSnapshot } from "./side-panel-controller";
 
 export function SidePanelView(props: {
@@ -5,13 +7,20 @@ export function SidePanelView(props: {
   onSendPrompt(prompt: string): boolean;
   onCaptureAndSend(prompt: string): boolean | Promise<boolean>;
   onDraftPromptChange(text: string): void;
+  onCaptureModeChange(captureMode: CaptureMode): void;
   onNewChat(): void;
   onRetryBridge(): void;
 }) {
+  const [promptOptionsOpen, setPromptOptionsOpen] = useState(false);
   const bridgeBlocked = props.snapshot.bridge.availability.status !== "ready";
   const pageUnsupported = props.snapshot.activePage.status === "unsupported";
   const promptControlsDisabled = !props.snapshot.bridge.canUseChat || pageUnsupported;
   const draftPrompt = props.snapshot.activeSession.draftPrompt;
+  const sendFullDom = props.snapshot.activeSession.captureMode === "full_dom";
+
+  useEffect(() => {
+    if (promptControlsDisabled) setPromptOptionsOpen(false);
+  }, [promptControlsDisabled]);
 
   function sendPrompt() {
     if (promptControlsDisabled) return;
@@ -85,9 +94,33 @@ export function SidePanelView(props: {
           }}
         />
         <div className="composer-actions">
-          <button type="button" className="options-button" aria-label="Prompt options" disabled={promptControlsDisabled}>
+          <button
+            type="button"
+            className="options-button"
+            aria-label="Prompt options"
+            aria-expanded={promptOptionsOpen}
+            aria-controls="prompt-options-popover"
+            disabled={promptControlsDisabled}
+            onClick={() => setPromptOptionsOpen((open) => !open)}
+          >
             ⚙
           </button>
+          {promptOptionsOpen && !promptControlsDisabled ? (
+            <div className="prompt-options-popover" id="prompt-options-popover" role="group" aria-label="Prompt options">
+              <label className="prompt-option-toggle">
+                <input
+                  type="checkbox"
+                  checked={sendFullDom}
+                  disabled={promptControlsDisabled}
+                  onChange={(event) => {
+                    if (promptControlsDisabled) return;
+                    props.onCaptureModeChange(event.currentTarget.checked ? "full_dom" : "readable");
+                  }}
+                />
+                <span>Send Full DOM</span>
+              </label>
+            </div>
+          ) : null}
           <button type="button" className="send-button" onClick={sendPrompt} disabled={promptControlsDisabled}>
             Capture + Send
           </button>

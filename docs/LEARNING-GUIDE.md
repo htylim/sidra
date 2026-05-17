@@ -190,19 +190,23 @@ Type "Summarize this page" and press Capture + Send.
 
 Then trace the code:
 
-1. `SidePanelView.sendPrompt` trims the draft and calls `onSendPrompt`.
-2. `SidePanelController.sendPrompt` delegates to `BridgeSessionCoordinator`.
-3. `BridgeSessionCoordinator.sendPrompt` sends `session.start` if needed.
-4. `BridgeConnection.post` opens the Native Messaging port and posts the message.
-5. `packages/protocol.parseExtensionToBridge` validates the message in the bridge.
-6. `createBridge.handleValidatedMessage` dispatches `session.start`.
-7. `BridgeSessionManager.startSession` creates a provider session.
-8. The bridge emits `session.started`.
-9. The extension receives `session.started` and flushes pending prompts as `session.send`.
-10. The mock provider yields `assistant.text.delta` and `assistant.done`.
-11. The extension receives `assistant.text.delta`.
-12. `addAssistantTextDelta` updates the transcript.
-13. React re-renders from the latest snapshot.
+1. `SidePanelView.sendPrompt` trims the draft and calls `onCaptureAndSend`.
+2. `SidePanelController.captureAndSend` reads the active tab at click time.
+3. `CaptureService.captureActivePageDocument` captures the page document and resolves the canonical URL session.
+4. `UrlSessionStore` selects that URL session and supplies its session-scoped `captureMode`.
+5. `CaptureService.buildPageContextForCapturedDocument` builds readable context by default, or full-DOM context when `Send Full DOM` is enabled.
+6. `UrlSessionStore.sendPromptWithContext` delegates to `BridgeSessionCoordinator`.
+7. `BridgeSessionCoordinator.sendPrompt` sends `session.start` if needed.
+8. `BridgeConnection.post` opens the Native Messaging port and posts the message.
+9. `packages/protocol.parseExtensionToBridge` validates the message in the bridge.
+10. `createBridge.handleValidatedMessage` dispatches `session.start`.
+11. `BridgeSessionManager.startSession` creates a provider session.
+12. The bridge emits `session.started`.
+13. The extension receives `session.started` and flushes pending prompts as `session.send`.
+14. The mock provider yields `assistant.text.delta` and `assistant.done`.
+15. The extension receives `assistant.text.delta`.
+16. `addAssistantTextDelta` updates the transcript.
+17. React re-renders from the latest snapshot.
 
 ## 4. Exercises
 

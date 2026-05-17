@@ -129,7 +129,7 @@ export class BridgeSessionCoordinator {
       this.setSnapshot({ ...this.snapshot, starting: true, lastError: undefined });
       const result = this.transport.post({
         type: "session.start",
-        version: 1,
+        version: 2,
         clientSessionId: this.clientSessionId,
         providerId: this.providerId
       });
@@ -175,7 +175,7 @@ export class BridgeSessionCoordinator {
 
     const result = this.transport.post({
       type: "session.reset",
-      version: 1,
+      version: 2,
       clientSessionId: this.clientSessionId
     });
 
@@ -293,7 +293,7 @@ export class BridgeSessionCoordinator {
   private createSessionSendMessage(submission: PreparedPromptSubmission): ExtensionToBridge {
     return {
       type: "session.send",
-      version: 1,
+      version: 2,
       clientSessionId: this.snapshot.clientSessionId,
       prompt: submission.prompt,
       ...(submission.pageContext ? { pageContext: submission.pageContext } : {})
@@ -431,11 +431,18 @@ let nextTranscriptEntryId = 0;
 function markerForPageContext(pageContext: PageContext | undefined): ContextAttachmentMarker | undefined {
   if (!pageContext) return undefined;
   if (pageContext.kind === "metadata_only") {
+    if (pageContext.reason === "full_dom_too_large") {
+      return { kind: "full_dom_too_large", text: "Full DOM skipped; content too large" };
+    }
+
     if (pageContext.reason === "content_too_large") {
       return { kind: "page_metadata_content_too_large", text: "Page metadata attached; content too large" };
     }
 
     return { kind: "page_metadata_attached", text: "Page metadata attached" };
+  }
+  if (pageContext.kind === "full_dom") {
+    return { kind: "full_dom_attached", text: "Full DOM attached" };
   }
   return { kind: "page_context_attached", text: "Page context attached" };
 }

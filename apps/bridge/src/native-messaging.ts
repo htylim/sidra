@@ -22,14 +22,14 @@ export function runNativeMessagingBridge(
   let buffer = Buffer.alloc(0);
   let oversizedBytesToDiscard = 0;
 
-  writeNativeMessage(output, { type: "bridge.ready", version: 1 });
+  writeNativeMessage(output, { type: "bridge.ready", version: 2 });
 
   function enqueueRawMessage(raw: string) {
     let message: unknown;
     try {
       message = JSON.parse(raw);
     } catch {
-      writeNativeMessage(output, { type: "bridge.error", version: 1, message: "Invalid JSON", code: "invalid_message" });
+      writeNativeMessage(output, { type: "bridge.error", version: 2, message: "Invalid JSON", code: "invalid_message" });
       return;
     }
 
@@ -40,7 +40,7 @@ export function runNativeMessagingBridge(
     try {
       await bridge.handleMessage(message);
     } catch {
-      writeNativeMessage(output, { type: "bridge.error", version: 1, message: "Bridge message failed", code: "internal_error" });
+      writeNativeMessage(output, { type: "bridge.error", version: 2, message: "Bridge message failed", code: "internal_error" });
     }
   }
 

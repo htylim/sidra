@@ -1,12 +1,21 @@
 // @vitest-environment jsdom
 
-import { BRIDGE_PAYLOAD_TOO_LARGE_CODE, type BridgeToExtension, type ExtensionToBridge } from "@sidra/protocol";
+import {
+  BRIDGE_PAYLOAD_TOO_LARGE_CODE,
+  type BridgeToExtension,
+  type ExtensionToBridge,
+  type PageContext
+} from "@sidra/protocol";
 import { describe, expect, it, vi } from "vitest";
 import type { PageIdentity, PageKey } from "./page-key";
 import { type NativeBridgePort, SIDRA_NATIVE_HOST } from "./bridge/connection";
 import { createSidePanelController } from "./side-panel-controller";
-import type { CaptureGateway, CaptureResult, CapturedTabDocument } from "./capture-service";
-import type { SettingsStore } from "./settings-store";
+import type { CaptureDocumentResult, CaptureGateway, CaptureResult, CapturedTabDocument } from "./capture-service";
+import type { CaptureMode } from "./capture-mode";
+import {
+  DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+  type SettingsStore
+} from "./settings-store";
 
 class FakePort implements NativeBridgePort {
   readonly postedMessages: ExtensionToBridge[] = [];
@@ -52,6 +61,10 @@ type HarnessOptions = {
 
 class FakeCaptureService {
   captureCalls = 0;
+  buildCalls: Array<{ document: CapturedTabDocument; mode?: CaptureMode }> = [];
+  onBuildPageContext?: () => void;
+  nextDocumentResult: CaptureDocumentResult | undefined;
+  nextBuiltPageContext: PageContext | undefined;
   nextResult: CaptureResult = {
     status: "captured",
     pageIdentity: pageIdentity("https://example.com/captured"),
@@ -61,6 +74,28 @@ class FakeCaptureService {
   async captureActivePageContext(): Promise<CaptureResult> {
     this.captureCalls += 1;
     return this.nextResult;
+  }
+
+  async captureActivePageDocument(): Promise<CaptureDocumentResult> {
+    this.captureCalls += 1;
+    if (this.nextDocumentResult) return this.nextDocumentResult;
+    if (this.nextResult.status === "unavailable") return this.nextResult;
+    return (
+      {
+        status: "captured",
+        pageIdentity: this.nextResult.pageIdentity,
+        capturedDocument: capturedDocument()
+      }
+    );
+  }
+
+  async buildPageContextForCapturedDocument(
+    document: CapturedTabDocument,
+    mode?: CaptureMode
+  ): Promise<PageContext> {
+    this.buildCalls.push({ document, mode });
+    this.onBuildPageContext?.();
+    return this.nextBuiltPageContext ?? (this.nextResult.status === "captured" ? this.nextResult.pageContext : readablePageContext());
   }
 }
 
@@ -193,6 +228,29 @@ function contentTooLargePageContext() {
   };
 }
 
+function fullDomPageContext(html = "<html><body><main>Full DOM content</main></body></html>") {
+  return {
+    kind: "full_dom" as const,
+    metadata: {
+      url: "https://example.com/full-dom",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    html,
+    htmlLength: html.length
+  };
+}
+
+function fullDomTooLargePageContext() {
+  return {
+    kind: "metadata_only" as const,
+    metadata: {
+      url: "https://example.com/large-dom",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    reason: "full_dom_too_large" as const
+  };
+}
+
 function capturedDocument(overrides: Partial<CapturedTabDocument> = {}): CapturedTabDocument {
   return {
     documentUrl: "https://example.com/current",
@@ -236,9 +294,11 @@ class FakeControllerCaptureGateway implements CaptureGateway {
 class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" | "whenReady"> {
   startCount = 0;
   private readableContentLimitCharacters: number;
+  private domContentLimitCharacters: number;
 
-  constructor(readableContentLimitCharacters: number) {
+  constructor(readableContentLimitCharacters: number, domContentLimitCharacters = DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS) {
     this.readableContentLimitCharacters = readableContentLimitCharacters;
+    this.domContentLimitCharacters = domContentLimitCharacters;
   }
 
   async start(): Promise<void> {
@@ -248,11 +308,18 @@ class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" |
   async whenReady(): Promise<void> {}
 
   getSnapshot() {
-    return { readableContentLimitCharacters: this.readableContentLimitCharacters };
+    return {
+      readableContentLimitCharacters: this.readableContentLimitCharacters,
+      domContentLimitCharacters: this.domContentLimitCharacters
+    };
   }
 
   setLimit(readableContentLimitCharacters: number): void {
     this.readableContentLimitCharacters = readableContentLimitCharacters;
+  }
+
+  setDomLimit(domContentLimitCharacters: number): void {
+    this.domContentLimitCharacters = domContentLimitCharacters;
   }
 }
 
@@ -263,20 +330,20 @@ function unsupportedPageIdentity(url: string): PageIdentity {
 function sessionStarted(clientSessionId = "client-1"): BridgeToExtension {
   return {
     type: "session.started",
-    version: 1,
+    version: 2,
     clientSessionId,
     bridgeSessionId: "bridge-1"
   };
 }
 
 function bridgeReady(): BridgeToExtension {
-  return { type: "bridge.ready", version: 1 };
+  return { type: "bridge.ready", version: 2 };
 }
 
 function agentTextDelta(clientSessionId: string, text: string): BridgeToExtension {
   return {
     type: "agent.event",
-    version: 1,
+    version: 2,
     clientSessionId,
     event: { type: "assistant.text.delta", text }
   };
@@ -340,7 +407,7 @@ describe("SidePanelController", () => {
   it("does not send prompts while bridge reports a blocking error", () => {
     const { controller, ports } = createHarness();
 
-    ports[0].emitMessage({ type: "bridge.error", version: 1, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 2, message: "bridge failed" });
 
     expect(controller.sendPrompt("hello")).toBe(false);
     expect(ports[0].postedMessages).toEqual([]);
@@ -350,7 +417,7 @@ describe("SidePanelController", () => {
   it("clears the blocking bridge error after retry succeeds", () => {
     const { controller, ports } = createHarness();
 
-    ports[0].emitMessage({ type: "bridge.error", version: 1, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 2, message: "bridge failed" });
     controller.retryBridge();
     ports[1].emitMessage(bridgeReady());
 
@@ -366,7 +433,7 @@ describe("SidePanelController", () => {
 
     ports[0].emitMessage(bridgeReady());
     expect(controller.sendPrompt("unsent")).toBe(true);
-    ports[0].emitMessage({ type: "bridge.error", version: 1, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 2, message: "bridge failed" });
 
     expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
 
@@ -376,7 +443,7 @@ describe("SidePanelController", () => {
     expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
     expect(controller.sendPrompt("after retry")).toBe(true);
     expect(ports[1].postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
     ]);
   });
 
@@ -397,7 +464,7 @@ describe("SidePanelController", () => {
 
     expect(controller.sendPrompt("second")).toBe(true);
     expect(ports[1].postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
     ]);
   });
 
@@ -455,7 +522,7 @@ describe("SidePanelController", () => {
     expect(controller.sendPrompt("hello")).toBe(true);
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
     ]);
     expect(controller.getSnapshot().activeSession).toMatchObject({
       pendingPromptCount: 1,
@@ -466,8 +533,8 @@ describe("SidePanelController", () => {
     ports[0].emitMessage(sessionStarted());
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "hello" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "hello" }
     ]);
   });
 
@@ -480,9 +547,9 @@ describe("SidePanelController", () => {
     ports[0].emitMessage(sessionStarted());
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "first" },
-      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "second" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "second" }
     ]);
   });
 
@@ -498,14 +565,14 @@ describe("SidePanelController", () => {
     controller.sendPrompt("second");
 
     expect(ports[1].postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
     ]);
 
     ports[1].emitMessage(sessionStarted());
 
     expect(ports[1].postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "second" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "second" }
     ]);
   });
 
@@ -517,7 +584,7 @@ describe("SidePanelController", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 1,
+      version: 2,
       clientSessionId: "client-1",
       event: { type: "assistant.text.delta", text: "Hi" }
     });
@@ -564,7 +631,7 @@ describe("SidePanelController", () => {
 
     ports[0].emitMessage(bridgeReady());
     controller.sendPrompt("hello");
-    ports[0].emitMessage({ type: "bridge.error", version: 1, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 2, message: "bridge failed" });
 
     expect(controller.getSnapshot().bridge).toEqual({
       connected: true,
@@ -580,7 +647,7 @@ describe("SidePanelController", () => {
 
     ports[0].emitMessage({
       type: "bridge.error",
-      version: 1,
+      version: 2,
       message: "Payload is too large.",
       code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
     });
@@ -613,8 +680,8 @@ describe("SidePanelController newChat", () => {
       transcript: []
     });
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.reset", version: 1, clientSessionId: "client-1" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.reset", version: 2, clientSessionId: "client-1" }
     ]);
   });
 
@@ -628,7 +695,7 @@ describe("SidePanelController newChat", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.reset",
-      version: 1,
+      version: 2,
       clientSessionId: "client-1"
     });
   });
@@ -645,7 +712,7 @@ describe("SidePanelController newChat", () => {
   it("keeps bridge connection state when clearing local session state", () => {
     const { controller, ports } = createHarness();
 
-    ports[0].emitMessage({ type: "bridge.ready", version: 1 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 2 });
     controller.sendPrompt("first");
     controller.newChat();
 
@@ -668,18 +735,18 @@ describe("SidePanelController newChat", () => {
     controller.sendPrompt("after reset");
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "first" },
-      { type: "session.reset", version: 1, clientSessionId: "client-1" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.reset", version: 2, clientSessionId: "client-1" }
     ]);
 
     ports[0].emitMessage(sessionStarted());
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "first" },
-      { type: "session.reset", version: 1, clientSessionId: "client-1" },
-      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "after reset" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.reset", version: 2, clientSessionId: "client-1" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "after reset" }
     ]);
   });
 
@@ -793,7 +860,7 @@ describe("SidePanelController URL sessions", () => {
     controller.sendPrompt("hello");
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.start",
-      version: 1,
+      version: 2,
       clientSessionId: "client-a",
       providerId: "codex"
     });
@@ -856,18 +923,36 @@ describe("SidePanelController URL sessions", () => {
     controller.newChat();
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.reset",
-      version: 1,
+      version: 2,
       clientSessionId: "client-b"
     });
     expect(ports[0].postedMessages).not.toContainEqual({
       type: "session.reset",
-      version: 1,
+      version: 2,
       clientSessionId: "client-a"
     });
   });
 });
 
 describe("SidePanelController Capture + Send", () => {
+  it("exposes_readable_capture_mode_by_default", () => {
+    const { controller } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/a")
+    });
+
+    expect(controller.getSnapshot().activeSession.captureMode).toBe("readable");
+  });
+
+  it("updates_capture_mode_for_the_active_session", () => {
+    const { controller } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/a")
+    });
+
+    controller.updateCaptureMode("full_dom");
+
+    expect(controller.getSnapshot().activeSession.captureMode).toBe("full_dom");
+  });
+
   it("does_not_capture_on_controller_creation_or_active_page_changes", async () => {
     const captureService = new FakeCaptureService();
     const { activePage } = createHarnessWithOptions({ captureService });
@@ -888,7 +973,7 @@ describe("SidePanelController Capture + Send", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 1,
+      version: 2,
       clientSessionId: "client-1",
       prompt: "summarize",
       pageContext: captureService.nextResult.status === "captured" ? captureService.nextResult.pageContext : undefined
@@ -915,6 +1000,197 @@ describe("SidePanelController Capture + Send", () => {
         pageContext: expect.objectContaining({ extractionMethod: "body_inner_text" })
       })
     );
+  });
+
+  it("capture_and_send_posts_full_dom_context_when_capture_mode_is_full_dom", async () => {
+    const captureService = new FakeCaptureService();
+    const document = capturedDocument({ html: "<html><body>Full DOM</body></html>" });
+    const pageContext = fullDomPageContext(document.html);
+    captureService.nextDocumentResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/full-dom"),
+      capturedDocument: document
+    };
+    captureService.nextBuiltPageContext = pageContext;
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+    controller.updateCaptureMode("full_dom");
+
+    await controller.captureAndSend("summarize");
+    ports[0].emitMessage(sessionStarted());
+
+    expect(captureService.buildCalls).toEqual([{ document, mode: "full_dom" }]);
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.send",
+      version: 2,
+      clientSessionId: "client-1",
+      prompt: "summarize",
+      pageContext
+    });
+    expect(controller.getSnapshot().activeSession.contextState.status).toBe("full_dom_attached");
+  });
+
+  it("capture_and_send_returns_to_readable_context_after_full_dom_is_disabled", async () => {
+    const captureService = new FakeCaptureService();
+    const document = capturedDocument();
+    captureService.nextDocumentResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/readable"),
+      capturedDocument: document
+    };
+    captureService.nextBuiltPageContext = readablePageContext();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+    controller.updateCaptureMode("full_dom");
+    controller.updateCaptureMode("readable");
+
+    await controller.captureAndSend("summarize");
+
+    expect(captureService.buildCalls.at(-1)).toEqual({ document, mode: "readable" });
+    expect(controller.getSnapshot().activeSession.contextState.status).toBe("attached");
+  });
+
+  it("capture_and_send_marks_full_dom_too_large_without_sending_raw_html", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextDocumentResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/large-dom"),
+      capturedDocument: capturedDocument({ html: "<html>Raw oversized DOM</html>" })
+    };
+    captureService.nextBuiltPageContext = fullDomTooLargePageContext();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+    controller.updateCaptureMode("full_dom");
+
+    await controller.captureAndSend("describe");
+
+    expect(controller.getSnapshot().activeSession.contextState).toMatchObject({
+      status: "full_dom_too_large",
+      label: "Full DOM skipped: too large"
+    });
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([
+      expect.objectContaining({ role: "status", text: "Full DOM skipped; content too large" }),
+      expect.objectContaining({ role: "user", text: "describe" })
+    ]);
+    expect(controller.getSnapshot().activeSession.transcript.map((entry) => entry.text).join("\n")).not.toContain(
+      "Raw oversized DOM"
+    );
+  });
+
+  it("capture_and_send_uses_live_dom_limit_from_composed_settings_store", async () => {
+    const html = "<html><body>Full DOM content</body></html>";
+    const settingsStore = new FakeSettingsStore(1_000, html.length);
+    const { controller, ports } = createHarnessWithOptions({
+      captureGateway: new FakeControllerCaptureGateway(capturedDocument({ html })),
+      settingsStore
+    });
+    ports[0].emitMessage(bridgeReady());
+    controller.updateCaptureMode("full_dom");
+
+    await controller.captureAndSend("first");
+    expect(controller.getSnapshot().activeSession.contextState.status).toBe("full_dom_attached");
+
+    settingsStore.setDomLimit(html.length - 1);
+    await controller.captureAndSend("second");
+
+    expect(controller.getSnapshot().activeSession.contextState.status).toBe("full_dom_too_large");
+  });
+
+  it("keeps_full_dom_capture_mode_scoped_to_the_url_session", async () => {
+    const { controller, ports, activePage } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/a"),
+      clientSessionIds: ["client-a", "client-b"]
+    });
+    ports[0].emitMessage(bridgeReady());
+    controller.updateCaptureMode("full_dom");
+    activePage.emit(pageIdentity("https://example.com/b"));
+
+    expect(controller.getSnapshot().activeSession.captureMode).toBe("readable");
+
+    activePage.emit(pageIdentity("https://example.com/a"));
+    expect(controller.getSnapshot().activeSession.captureMode).toBe("full_dom");
+  });
+
+  it("capture_and_send_uses_capture_mode_from_the_captured_canonical_url_session", async () => {
+    const captureService = new FakeCaptureService();
+    const existingDocument = capturedDocument({ html: "<html>Existing canonical DOM</html>" });
+    captureService.nextDocumentResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/canonical"),
+      capturedDocument: existingDocument
+    };
+    const { controller, ports, activePage } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/canonical"),
+      captureService
+    });
+    ports[0].emitMessage(bridgeReady());
+    controller.updateCaptureMode("full_dom");
+    activePage.emit(pageIdentity("https://example.com/stale"));
+    controller.updateCaptureMode("readable");
+
+    await controller.captureAndSend("summarize");
+
+    expect(captureService.buildCalls.at(-1)).toEqual({ document: existingDocument, mode: "full_dom" });
+  });
+
+  it("capture_and_send_carries_full_dom_mode_to_new_canonical_url_session", async () => {
+    const captureService = new FakeCaptureService();
+    const canonicalDocument = capturedDocument({ html: "<html>New canonical DOM</html>" });
+    captureService.nextDocumentResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/canonical-new"),
+      capturedDocument: canonicalDocument
+    };
+    const { controller, ports } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/pre-capture"),
+      captureService
+    });
+    ports[0].emitMessage(bridgeReady());
+    controller.updateCaptureMode("full_dom");
+
+    await controller.captureAndSend("summarize");
+
+    expect(captureService.buildCalls.at(-1)).toEqual({ document: canonicalDocument, mode: "full_dom" });
+    expect(controller.getSnapshot().activeSession).toMatchObject({
+      pageKey: "https://example.com/canonical-new",
+      captureMode: "full_dom"
+    });
+  });
+
+  it("capture_and_send_keeps_sending_to_the_captured_session_when_active_page_changes_during_context_build", async () => {
+    const captureService = new FakeCaptureService();
+    const capturedDocumentSnapshot = capturedDocument({ html: "<html>Captured page</html>" });
+    captureService.nextDocumentResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/captured-during-build"),
+      capturedDocument: capturedDocumentSnapshot
+    };
+    captureService.nextBuiltPageContext = readablePageContext();
+    const { controller, ports, activePage } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/captured-during-build"),
+      clientSessionIds: ["client-captured", "client-other"],
+      captureService
+    });
+    ports[0].emitMessage(bridgeReady());
+    captureService.onBuildPageContext = () => {
+      activePage.emit(pageIdentity("https://example.com/other"));
+    };
+
+    await controller.captureAndSend("summarize");
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.start",
+      version: 2,
+      clientSessionId: "client-captured",
+      providerId: "codex"
+    });
+    expect(ports[0].postedMessages).not.toContainEqual({
+      type: "session.start",
+      version: 2,
+      clientSessionId: "client-other",
+      providerId: "codex"
+    });
+    expect(controller.getSnapshot().activeSession.pageKey).toBe("https://example.com/captured-during-build");
   });
 
   it("capture_and_send_recomputes_the_url_session_from_captured_canonical_url", async () => {
@@ -1135,7 +1411,7 @@ describe("SidePanelController Capture + Send", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 1,
+      version: 2,
       clientSessionId: "client-1",
       prompt: "plain"
     });

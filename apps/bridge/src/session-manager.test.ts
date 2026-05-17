@@ -15,13 +15,13 @@ describe("BridgeSessionManager", () => {
     expect(emitted).toEqual([
       {
         type: "session.started",
-        version: 1,
+        version: 2,
         clientSessionId: "page-1",
         bridgeSessionId: expect.any(String)
       },
       {
         type: "session.started",
-        version: 1,
+        version: 2,
         clientSessionId: "page-2",
         bridgeSessionId: expect.any(String)
       }
@@ -76,7 +76,7 @@ describe("BridgeSessionManager", () => {
     expect(emitted).toEqual([
       {
         type: "session.error",
-        version: 1,
+        version: 2,
         clientSessionId: "page-1",
         message: "Session has not been started",
         code: "session_not_started"
@@ -97,13 +97,13 @@ describe("BridgeSessionManager", () => {
     expect(emitted.slice(1)).toEqual([
       {
         type: "agent.event",
-        version: 1,
+        version: 2,
         clientSessionId: "page-1",
         event: { type: "assistant.text.delta", text: "hello" }
       },
       {
         type: "agent.event",
-        version: 1,
+        version: 2,
         clientSessionId: "page-1",
         event: { type: "assistant.done" }
       }
@@ -127,7 +127,7 @@ describe("BridgeSessionManager", () => {
     expect(session?.sentInputs).toEqual([{ prompt: "First" }]);
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 1,
+      version: 2,
       clientSessionId: "page-1",
       message: "A turn is already in flight for this session",
       code: "turn_in_flight"
@@ -162,7 +162,7 @@ describe("BridgeSessionManager", () => {
 
     expect(emitted).toContainEqual({
       type: "agent.event",
-      version: 1,
+      version: 2,
       clientSessionId: "page-2",
       event: { type: "assistant.text.delta", text: "second" }
     });
@@ -191,7 +191,7 @@ describe("BridgeSessionManager", () => {
     expect(provider.createdSessions[0]?.sendSignals[0]?.aborted).toBe(true);
     expect(emitted).not.toContainEqual({
       type: "agent.event",
-      version: 1,
+      version: 2,
       clientSessionId: "page-1",
       event: { type: "assistant.text.delta", text: "stale" }
     });
@@ -268,7 +268,7 @@ describe("BridgeSessionManager cancellation", () => {
 
     expect(emitted).toContainEqual({
       type: "agent.event",
-      version: 1,
+      version: 2,
       clientSessionId: "page-1",
       event: { type: "assistant.cancelled" }
     });
@@ -327,7 +327,7 @@ describe("BridgeSessionManager cancellation", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 1,
+      version: 2,
       clientSessionId: "page-1",
       message: "No in-flight turn to cancel",
       code: "no_in_flight_turn"
@@ -350,13 +350,13 @@ describe("BridgeSessionManager reset and close", () => {
     expect(emitted).toEqual([
       {
         type: "session.started",
-        version: 1,
+        version: 2,
         clientSessionId: "page-1",
         bridgeSessionId: expect.any(String)
       },
       {
         type: "session.started",
-        version: 1,
+        version: 2,
         clientSessionId: "page-1",
         bridgeSessionId: expect.any(String)
       }
@@ -413,7 +413,7 @@ describe("BridgeSessionManager reset and close", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 1,
+      version: 2,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -469,7 +469,7 @@ describe("BridgeSessionManager reset and close", () => {
     expect(secondSession.sentInputs).toEqual([]);
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 1,
+      version: 2,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"

@@ -16,6 +16,7 @@ type SnapshotOptions = {
   title?: string;
   contextLabel?: string;
   contextState?: SidePanelSnapshot["activeSession"]["contextState"];
+  captureMode?: SidePanelSnapshot["activeSession"]["captureMode"];
   draftPrompt?: string;
   transcript?: SidePanelSnapshot["activeSession"]["transcript"];
 };
@@ -32,6 +33,7 @@ function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
     activeSession: {
       pageKey: "https://example.com/article" as SidePanelSnapshot["activeSession"]["pageKey"],
       clientSessionId: "client-1",
+      captureMode: options.captureMode ?? "readable",
       draftPrompt: options.draftPrompt ?? "",
       contextState: options.contextState ?? { status: "none", label: "No context sent yet" },
       transcript: options.transcript ?? [],
@@ -70,6 +72,7 @@ function renderSnapshot(bridge: SidePanelSnapshot["bridge"]): string {
       onSendPrompt={() => false}
       onCaptureAndSend={() => false}
       onDraftPromptChange={() => undefined}
+      onCaptureModeChange={() => undefined}
       onNewChat={() => undefined}
       onRetryBridge={() => undefined}
     />
@@ -83,6 +86,7 @@ function renderPageSnapshot(snapshot: SidePanelSnapshot): string {
       onSendPrompt={() => false}
       onCaptureAndSend={() => false}
       onDraftPromptChange={() => undefined}
+      onCaptureModeChange={() => undefined}
       onNewChat={() => undefined}
       onRetryBridge={() => undefined}
     />
@@ -95,6 +99,7 @@ function renderInteractiveSnapshot(
     onSendPrompt(prompt: string): boolean;
     onCaptureAndSend(prompt: string): boolean | Promise<boolean>;
     onDraftPromptChange(text: string): void;
+    onCaptureModeChange(captureMode: SidePanelSnapshot["activeSession"]["captureMode"]): void;
   }> = {}
 ) {
   let currentSnapshot = snapshot;
@@ -112,6 +117,14 @@ function renderInteractiveSnapshot(
             activeSession: { ...currentSnapshot.activeSession, draftPrompt: text }
           };
           overrides.onDraftPromptChange?.(text);
+          renderedView.rerender(viewElement());
+        }}
+        onCaptureModeChange={(captureMode) => {
+          currentSnapshot = {
+            ...currentSnapshot,
+            activeSession: { ...currentSnapshot.activeSession, captureMode }
+          };
+          overrides.onCaptureModeChange?.(captureMode);
           renderedView.rerender(viewElement());
         }}
         onNewChat={() => undefined}
@@ -132,6 +145,14 @@ function renderInteractiveSnapshot(
             activeSession: { ...currentSnapshot.activeSession, draftPrompt: text }
           };
           overrides.onDraftPromptChange?.(text);
+          renderedView.rerender(viewElement());
+        }}
+        onCaptureModeChange={(captureMode) => {
+          currentSnapshot = {
+            ...currentSnapshot,
+            activeSession: { ...currentSnapshot.activeSession, captureMode }
+          };
+          overrides.onCaptureModeChange?.(captureMode);
           renderedView.rerender(viewElement());
         }}
         onNewChat={() => undefined}
@@ -255,6 +276,7 @@ describe("SidePanelView URL sessions", () => {
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
         onDraftPromptChange={() => undefined}
+        onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
       />
@@ -271,6 +293,7 @@ describe("SidePanelView URL sessions", () => {
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
         onDraftPromptChange={() => undefined}
+        onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
       />
@@ -343,6 +366,7 @@ describe("SidePanelView Capture + Send", () => {
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
         onDraftPromptChange={() => undefined}
+        onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
       />
@@ -393,5 +417,151 @@ describe("SidePanelView Capture + Send", () => {
     );
 
     expect(markup).toContain("Content too large");
+  });
+
+  it("renders_full_dom_attached_context_state_in_page_card", () => {
+    const markup = renderPageSnapshot(
+      snapshotForPage({
+        contextState: {
+          status: "full_dom_attached",
+          label: "Full DOM attached",
+          capturedAt: "2026-05-10T12:00:00.000Z"
+        }
+      })
+    );
+
+    expect(markup).toContain("Full DOM attached");
+  });
+
+  it("renders_full_dom_too_large_context_state_in_page_card", () => {
+    const markup = renderPageSnapshot(
+      snapshotForPage({
+        contextState: {
+          status: "full_dom_too_large",
+          label: "Full DOM skipped: too large",
+          capturedAt: "2026-05-10T12:00:00.000Z",
+          reason: "full_dom_too_large"
+        }
+      })
+    );
+
+    expect(markup).toContain("Full DOM skipped: too large");
+  });
+});
+
+describe("SidePanelView prompt options", () => {
+  it("opens_a_compact_prompt_options_popover_from_the_composer_button", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(snapshotForPage());
+
+    await user.click(screen.getByRole("button", { name: "Prompt options" }));
+
+    expect(screen.getByRole("group", { name: "Prompt options" })).not.toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Send Full DOM" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("renders_send_full_dom_toggle_off_for_readable_capture_mode", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(snapshotForPage({ captureMode: "readable" }));
+
+    await user.click(screen.getByRole("button", { name: "Prompt options" }));
+
+    expect(screen.getByRole("checkbox", { name: "Send Full DOM" })).toHaveProperty("checked", false);
+  });
+
+  it("renders_send_full_dom_toggle_on_for_full_dom_capture_mode", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(snapshotForPage({ captureMode: "full_dom" }));
+
+    await user.click(screen.getByRole("button", { name: "Prompt options" }));
+
+    expect(screen.getByRole("checkbox", { name: "Send Full DOM" })).toHaveProperty("checked", true);
+  });
+
+  it("calls_onCaptureModeChange_with_full_dom_when_toggle_is_enabled", async () => {
+    const user = userEvent.setup();
+    const onCaptureModeChange = vi.fn();
+    renderInteractiveSnapshot(snapshotForPage(), { onCaptureModeChange });
+
+    await user.click(screen.getByRole("button", { name: "Prompt options" }));
+    await user.click(screen.getByRole("checkbox", { name: "Send Full DOM" }));
+
+    expect(onCaptureModeChange).toHaveBeenCalledWith("full_dom");
+  });
+
+  it("calls_onCaptureModeChange_with_readable_when_toggle_is_disabled", async () => {
+    const user = userEvent.setup();
+    const onCaptureModeChange = vi.fn();
+    renderInteractiveSnapshot(snapshotForPage({ captureMode: "full_dom" }), { onCaptureModeChange });
+
+    await user.click(screen.getByRole("button", { name: "Prompt options" }));
+    await user.click(screen.getByRole("checkbox", { name: "Send Full DOM" }));
+
+    expect(onCaptureModeChange).toHaveBeenCalledWith("readable");
+  });
+
+  it("disables_prompt_options_when_chat_controls_are_disabled", () => {
+    render(
+      <SidePanelView
+        snapshot={snapshotForUnsupportedPage()}
+        onSendPrompt={() => false}
+        onCaptureAndSend={() => false}
+        onDraftPromptChange={() => undefined}
+        onCaptureModeChange={() => undefined}
+        onNewChat={() => undefined}
+        onRetryBridge={() => undefined}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Prompt options" })).toHaveProperty("disabled", true);
+  });
+
+  it("closes_prompt_options_when_chat_controls_become_disabled", async () => {
+    const user = userEvent.setup();
+    const initialSnapshot = snapshotForPage();
+    const renderedView = render(
+      <SidePanelView
+        snapshot={initialSnapshot}
+        onSendPrompt={() => false}
+        onCaptureAndSend={() => false}
+        onDraftPromptChange={() => undefined}
+        onCaptureModeChange={() => undefined}
+        onNewChat={() => undefined}
+        onRetryBridge={() => undefined}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Prompt options" }));
+    expect(screen.getByRole("checkbox", { name: "Send Full DOM" })).not.toBeNull();
+
+    renderedView.rerender(
+      <SidePanelView
+        snapshot={{
+          ...initialSnapshot,
+          bridge: { ...initialSnapshot.bridge, canUseChat: false, availability: { status: "checking", message: "Checking" } }
+        }}
+        onSendPrompt={() => false}
+        onCaptureAndSend={() => false}
+        onDraftPromptChange={() => undefined}
+        onCaptureModeChange={() => undefined}
+        onNewChat={() => undefined}
+        onRetryBridge={() => undefined}
+      />
+    );
+
+    expect(screen.queryByRole("checkbox", { name: "Send Full DOM" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Prompt options" })).toHaveProperty("disabled", true);
+  });
+
+  it("does_not_send_prompt_when_only_toggling_full_dom", async () => {
+    const user = userEvent.setup();
+    const onCaptureAndSend = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "summarize" }), { onCaptureAndSend });
+
+    await user.click(screen.getByRole("button", { name: "Prompt options" }));
+    await user.click(screen.getByRole("checkbox", { name: "Send Full DOM" }));
+
+    expect(onCaptureAndSend).not.toHaveBeenCalled();
   });
 });

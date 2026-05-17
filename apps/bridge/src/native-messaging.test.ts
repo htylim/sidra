@@ -36,13 +36,13 @@ describe("native messaging dispatch", () => {
       Buffer.concat([
         encodeNativeMessage({
           type: "session.send",
-          version: 1,
+          version: 2,
           clientSessionId: "page-1",
           prompt: "Long prompt"
         }),
         encodeNativeMessage({
           type: "session.send",
-          version: 1,
+          version: 2,
           clientSessionId: "page-2",
           prompt: "Independent prompt"
         })
@@ -55,13 +55,13 @@ describe("native messaging dispatch", () => {
     expect(handled).toEqual([
       {
         type: "session.send",
-        version: 1,
+        version: 2,
         clientSessionId: "page-1",
         prompt: "Long prompt"
       },
       {
         type: "session.send",
-        version: 1,
+        version: 2,
         clientSessionId: "page-2",
         prompt: "Independent prompt"
       }
@@ -93,13 +93,13 @@ describe("native messaging dispatch", () => {
       Buffer.concat([
         encodeNativeMessage({
           type: "session.send",
-          version: 1,
+          version: 2,
           clientSessionId: "page-1",
           prompt: "Long prompt"
         }),
         encodeNativeMessage({
           type: "session.cancel",
-          version: 1,
+          version: 2,
           clientSessionId: "page-1"
         })
       ])
@@ -117,8 +117,8 @@ describe("native messaging dispatch", () => {
     input.write(encodeRawNativeMessage("{"));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 1 },
-      { type: "bridge.error", version: 1, message: "Invalid JSON", code: "invalid_message" }
+      { type: "bridge.ready", version: 2 },
+      { type: "bridge.error", version: 2, message: "Invalid JSON", code: "invalid_message" }
     ]);
   });
 
@@ -128,11 +128,11 @@ describe("native messaging dispatch", () => {
     const messages = collectNativeMessages(output, 2);
 
     runNativeMessagingBridge(input, output);
-    input.write(encodeNativeMessage({ type: "session.delete", version: 1, clientSessionId: "page-1" }));
+    input.write(encodeNativeMessage({ type: "session.delete", version: 2, clientSessionId: "page-1" }));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 1 },
-      { type: "bridge.error", version: 1, message: "Unknown command", code: "invalid_message" }
+      { type: "bridge.ready", version: 2 },
+      { type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }
     ]);
   });
 
@@ -146,8 +146,8 @@ describe("native messaging dispatch", () => {
     input.write(encodeRawNativeMessage(invalidOversizedJson));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 1 },
-      { type: "bridge.error", version: 1, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE }
+      { type: "bridge.ready", version: 2 },
+      { type: "bridge.error", version: 2, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE }
     ]);
   });
 
@@ -162,16 +162,16 @@ describe("native messaging dispatch", () => {
         encodeRawNativeMessage("x".repeat(101)),
         encodeNativeMessage({
           type: "session.delete",
-          version: 1,
+          version: 2,
           clientSessionId: "page-1"
         })
       ])
     );
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 1 },
-      { type: "bridge.error", version: 1, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
-      { type: "bridge.error", version: 1, message: "Unknown command", code: "invalid_message" }
+      { type: "bridge.ready", version: 2 },
+      { type: "bridge.error", version: 2, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
+      { type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }
     ]);
   });
 
@@ -182,7 +182,7 @@ describe("native messaging dispatch", () => {
     const oversizedFrame = encodeRawNativeMessage("x".repeat(101));
     const nextFrame = encodeNativeMessage({
       type: "session.delete",
-      version: 1,
+      version: 2,
       clientSessionId: "page-1"
     });
 
@@ -191,9 +191,9 @@ describe("native messaging dispatch", () => {
     input.write(Buffer.concat([oversizedFrame.subarray(10), nextFrame]));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 1 },
-      { type: "bridge.error", version: 1, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
-      { type: "bridge.error", version: 1, message: "Unknown command", code: "invalid_message" }
+      { type: "bridge.ready", version: 2 },
+      { type: "bridge.error", version: 2, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
+      { type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }
     ]);
   });
 
@@ -204,7 +204,7 @@ describe("native messaging dispatch", () => {
     const oversizedFrame = encodeRawNativeMessage("x".repeat(101));
     const nextFrame = encodeNativeMessage({
       type: "session.delete",
-      version: 1,
+      version: 2,
       clientSessionId: "page-1"
     });
 
@@ -213,9 +213,9 @@ describe("native messaging dispatch", () => {
     input.write(Buffer.concat([oversizedFrame.subarray(4), nextFrame]));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 1 },
-      { type: "bridge.error", version: 1, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
-      { type: "bridge.error", version: 1, message: "Unknown command", code: "invalid_message" }
+      { type: "bridge.ready", version: 2 },
+      { type: "bridge.error", version: 2, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
+      { type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }
     ]);
   });
 
@@ -226,7 +226,7 @@ describe("native messaging dispatch", () => {
     const oversizedFrame = encodeRawNativeMessage("{".repeat(101));
     const nextFrame = encodeNativeMessage({
       type: "session.delete",
-      version: 1,
+      version: 2,
       clientSessionId: "page-1"
     });
 
@@ -234,9 +234,9 @@ describe("native messaging dispatch", () => {
     input.write(Buffer.concat([oversizedFrame, nextFrame]));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 1 },
-      { type: "bridge.error", version: 1, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
-      { type: "bridge.error", version: 1, message: "Unknown command", code: "invalid_message" }
+      { type: "bridge.ready", version: 2 },
+      { type: "bridge.error", version: 2, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
+      { type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }
     ]);
   });
 
@@ -249,8 +249,8 @@ describe("native messaging dispatch", () => {
     input.write(encodeRawNativeMessage("x".repeat(BRIDGE_HARD_PAYLOAD_BYTE_LIMIT + 1)));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 1 },
-      { type: "bridge.error", version: 1, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE }
+      { type: "bridge.ready", version: 2 },
+      { type: "bridge.error", version: 2, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE }
     ]);
   });
 });

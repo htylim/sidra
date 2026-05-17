@@ -56,7 +56,7 @@ function pageIdentity(pageKey: string): PageIdentity {
 function agentTextDelta(clientSessionId: string, text: string): BridgeToExtension {
   return {
     type: "agent.event",
-    version: 1,
+    version: 2,
     clientSessionId,
     event: { type: "assistant.text.delta", text }
   };
@@ -98,6 +98,31 @@ function contentTooLargePageContext(): PageContext {
       capturedAt: "2026-05-10T12:00:00.000Z"
     },
     reason: "content_too_large"
+  };
+}
+
+function fullDomPageContext(): PageContext {
+  const html = "<html><body><main>Full DOM content</main></body></html>";
+
+  return {
+    kind: "full_dom",
+    metadata: {
+      url: "https://example.com/full-dom",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    html,
+    htmlLength: html.length
+  };
+}
+
+function fullDomTooLargePageContext(): PageContext {
+  return {
+    kind: "metadata_only",
+    metadata: {
+      url: "https://example.com/large-dom",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    reason: "full_dom_too_large"
   };
 }
 
@@ -209,12 +234,12 @@ describe("UrlSessionStore", () => {
     harness.store.newChat();
     expect(harness.transport.postedMessages).toContainEqual({
       type: "session.reset",
-      version: 1,
+      version: 2,
       clientSessionId: "client-2"
     });
     expect(harness.transport.postedMessages).not.toContainEqual({
       type: "session.reset",
-      version: 1,
+      version: 2,
       clientSessionId: "client-1"
     });
   });
@@ -259,6 +284,33 @@ describe("UrlSessionStore context state", () => {
       label: "Content too large",
       capturedAt: "2026-05-10T12:00:00.000Z",
       reason: "content_too_large"
+    });
+  });
+
+  it("updates_context_state_for_full_dom_context_send", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.sendPromptWithContext({ prompt: "describe", pageContext: fullDomPageContext() })).toBe(true);
+
+    expect(store.getSnapshot().activeSession.contextState).toEqual({
+      status: "full_dom_attached",
+      label: "Full DOM attached",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    });
+  });
+
+  it("updates_context_state_for_full_dom_too_large_metadata_only_send", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.sendPromptWithContext({ prompt: "describe", pageContext: fullDomTooLargePageContext() })).toBe(true);
+
+    expect(store.getSnapshot().activeSession.contextState).toEqual({
+      status: "full_dom_too_large",
+      label: "Full DOM skipped: too large",
+      capturedAt: "2026-05-10T12:00:00.000Z",
+      reason: "full_dom_too_large"
     });
   });
 
@@ -321,5 +373,49 @@ describe("UrlSessionStore context state", () => {
     expect(store.getSnapshot().activeSession.transcript).toEqual([
       expect.objectContaining({ role: "status", text: "Could not capture this page" })
     ]);
+  });
+});
+
+describe("UrlSessionStore capture mode state", () => {
+  it("new_url_sessions_default_to_readable_capture_mode", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.getSnapshot().activeSession.captureMode).toBe("readable");
+  });
+
+  it("updates_capture_mode_for_the_active_url_session", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    store.updateActiveCaptureMode("full_dom");
+
+    expect(store.getSnapshot().activeSession.captureMode).toBe("full_dom");
+  });
+
+  it("keeps_capture_mode_scoped_to_the_url_session", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.updateActiveCaptureMode("full_dom");
+    store.selectPage(pageIdentity("https://example.com/b"));
+
+    expect(store.getSnapshot().activeSession.captureMode).toBe("readable");
+
+    store.selectPage(pageIdentity("https://example.com/a"));
+    expect(store.getSnapshot().activeSession.captureMode).toBe("full_dom");
+  });
+
+  it("resets_capture_mode_to_readable_on_new_chat_for_the_active_session_only", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.updateActiveCaptureMode("full_dom");
+    store.selectPage(pageIdentity("https://example.com/b"));
+    store.updateActiveCaptureMode("full_dom");
+
+    store.newChat();
+
+    expect(store.getSnapshot().activeSession.captureMode).toBe("readable");
+    store.selectPage(pageIdentity("https://example.com/a"));
+    expect(store.getSnapshot().activeSession.captureMode).toBe("full_dom");
   });
 });

@@ -26,7 +26,7 @@ export function createBridge(
   async function handleMessage(input: unknown): Promise<void> {
     const payloadSize = serializedJsonByteLength(input);
     if (!payloadSize.ok) {
-      runtime.emit({ type: "bridge.error", version: 1, message: "Message must be valid JSON", code: "invalid_message" });
+      runtime.emit({ type: "bridge.error", version: 2, message: "Message must be valid JSON", code: "invalid_message" });
       return;
     }
 
@@ -37,7 +37,7 @@ export function createBridge(
 
     const parsed = parseExtensionToBridge(input);
     if (!parsed.ok) {
-      runtime.emit({ type: "bridge.error", version: 1, message: parsed.error, code: "invalid_message" });
+      runtime.emit({ type: "bridge.error", version: 2, message: parsed.error, code: "invalid_message" });
       return;
     }
 

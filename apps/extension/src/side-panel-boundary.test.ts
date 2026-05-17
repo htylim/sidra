@@ -64,6 +64,16 @@ describe("side panel New Chat wiring", () => {
     expect(viewSource).toContain('aria-label="New chat"');
     expect(viewSource).toContain("onClick={props.onNewChat}");
   });
+
+  it("passes_controller_updateCaptureMode_into_the_prompt_options_path", () => {
+    const sidePanelSource = readSource("./side-panel.tsx");
+    const viewSource = readSource("./side-panel-view.tsx");
+
+    expect(sidePanelSource).toContain("onCaptureModeChange={sidePanelController.updateCaptureMode}");
+    expect(viewSource).toContain("onCaptureModeChange(captureMode: CaptureMode): void");
+    expect(viewSource).toContain('aria-label="Prompt options"');
+    expect(viewSource).toContain("Send Full DOM");
+  });
 });
 
 describe("active page tracking boundary", () => {
@@ -111,14 +121,24 @@ describe("active page tracking boundary", () => {
 
   it("keeps_readable_size_policy_inside_capture_service", () => {
     const captureServiceSource = readSource("./capture-service.ts");
-    const viewSource = readSource("./side-panel-view.tsx");
-    const controllerSource = readSource("./side-panel-controller.ts");
-    const urlSessionStoreSource = readSource("./url-session-store.ts");
+    const filesWithReadablePolicy = productionSourceFiles()
+      .filter((relativePath) => readSource(relativePath).includes("readableContentLimitCharacters"))
+      .sort();
 
     expect(captureServiceSource).toContain("readableContentLimitCharacters");
-    expect(viewSource).not.toContain("readableContentLimitCharacters");
-    expect(controllerSource).not.toContain("readableContentLimitCharacters");
-    expect(urlSessionStoreSource).not.toContain("readableContentLimitCharacters");
+    expect(filesWithReadablePolicy).toEqual(["./capture-service.ts", "./settings-store.ts"]);
+  });
+
+  it("keeps_dom_size_policy_inside_capture_service", () => {
+    const captureServiceSource = readSource("./capture-service.ts");
+    const settingsStoreSource = readSource("./settings-store.ts");
+    const filesWithDomPolicy = productionSourceFiles()
+      .filter((relativePath) => readSource(relativePath).includes("domContentLimitCharacters"))
+      .sort();
+
+    expect(captureServiceSource).toContain("domContentLimitCharacters");
+    expect(settingsStoreSource).toContain("domContentLimitCharacters");
+    expect(filesWithDomPolicy).toEqual(["./capture-service.ts", "./settings-store.ts"]);
   });
 });
 

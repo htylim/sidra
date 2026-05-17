@@ -142,6 +142,8 @@ Context states include:
 - `Context attached`
 - `Metadata attached`
 - `Content too large`
+- `Full DOM attached`
+- `Full DOM skipped: too large`
 - `Capture unavailable`
 
 This card is session-specific. When the active tab/page changes, the card updates with that URL session.
@@ -301,7 +303,8 @@ If full DOM exceeds its configured limit:
 
 - Do not send partial DOM.
 - Skip full DOM.
-- Show a clear marker such as `Full DOM skipped: too large`.
+- Show a clear page-card state such as `Full DOM skipped: too large`.
+- Show a clear transcript marker such as `Full DOM skipped; content too large`.
 
 Codex/provider errors for oversized payloads must be surfaced separately.
 
@@ -337,6 +340,11 @@ Page context attached
 ```
 
 If only metadata was attached or full DOM was included/skipped, the marker should say that clearly.
+
+Current full-DOM markers:
+
+- `Full DOM attached`
+- `Full DOM skipped; content too large`
 
 ## Quick Actions
 
@@ -390,29 +398,49 @@ The bridge validates every message with schemas and rejects unknown commands or 
 Extension to bridge messages:
 
 ```ts
+type PageContext =
+  | {
+      kind: "readable";
+      metadata: PageContextMetadata;
+      text: string;
+      textLength: number;
+      extractionMethod: "readability" | "body_inner_text";
+    }
+  | {
+      kind: "full_dom";
+      metadata: PageContextMetadata;
+      html: string;
+      htmlLength: number;
+    }
+  | {
+      kind: "metadata_only";
+      metadata: PageContextMetadata;
+      reason: "no_usable_text" | "content_too_large" | "full_dom_too_large";
+    };
+
 type ExtensionToBridge =
-  | { type: "session.start"; version: 1; clientSessionId: string; providerId: "codex" }
-  | { type: "session.send"; version: 1; clientSessionId: string; prompt: string; pageContext?: PageContext }
-  | { type: "session.cancel"; version: 1; clientSessionId: string }
-  | { type: "session.reset"; version: 1; clientSessionId: string }
-  | { type: "session.close"; version: 1; clientSessionId: string }
-  | { type: "permission.respond"; version: 1; clientSessionId: string; requestId: string; decision: "allow_once" | "allow_session" | "deny" }
-  | { type: "heartbeat"; version: 1 };
+  | { type: "session.start"; version: 2; clientSessionId: string; providerId: "codex" }
+  | { type: "session.send"; version: 2; clientSessionId: string; prompt: string; pageContext?: PageContext }
+  | { type: "session.cancel"; version: 2; clientSessionId: string }
+  | { type: "session.reset"; version: 2; clientSessionId: string }
+  | { type: "session.close"; version: 2; clientSessionId: string }
+  | { type: "heartbeat"; version: 2 };
 ```
 
 Bridge to extension messages:
 
 ```ts
 type BridgeToExtension =
-  | { type: "session.started"; version: 1; clientSessionId: string; bridgeSessionId: string }
-  | { type: "agent.event"; version: 1; clientSessionId: string; event: AgentEvent }
-  | { type: "permission.request"; version: 1; clientSessionId: string; request: PermissionRequest }
-  | { type: "session.error"; version: 1; clientSessionId: string; message: string; code?: string }
-  | { type: "bridge.ready"; version: 1 }
-  | { type: "bridge.error"; version: 1; message: string; code?: string };
+  | { type: "session.started"; version: 2; clientSessionId: string; bridgeSessionId: string }
+  | { type: "agent.event"; version: 2; clientSessionId: string; event: AgentEvent }
+  | { type: "session.error"; version: 2; clientSessionId: string; message: string; code?: string }
+  | { type: "bridge.ready"; version: 2 }
+  | { type: "bridge.error"; version: 2; message: string; code?: string };
 ```
 
 The exact schemas should live in `packages/protocol`.
+
+Permission request and response messages are future V1 protocol work. The current protocol rejects them.
 
 ## Agent Provider Interface
 

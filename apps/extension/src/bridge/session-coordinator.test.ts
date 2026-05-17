@@ -42,7 +42,7 @@ function createHarness(providerId: ProviderId = "codex", hardPayloadByteLimit?: 
 function sessionStarted(clientSessionId = "client-1"): BridgeToExtension {
   return {
     type: "session.started",
-    version: 1,
+    version: 2,
     clientSessionId,
     bridgeSessionId: "bridge-1"
   };
@@ -86,6 +86,31 @@ function contentTooLargePageContext(): NonNullable<PromptSubmission["pageContext
   };
 }
 
+function fullDomPageContext(html = "<html><body><main>Secret DOM text</main></body></html>"): NonNullable<PromptSubmission["pageContext"]> {
+  return {
+    kind: "full_dom",
+    metadata: {
+      url: "https://example.com/full-dom",
+      title: "Full DOM",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    html,
+    htmlLength: html.length
+  };
+}
+
+function fullDomTooLargePageContext(): NonNullable<PromptSubmission["pageContext"]> {
+  return {
+    kind: "metadata_only",
+    metadata: {
+      url: "https://example.com/large-dom",
+      title: "Large DOM",
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    reason: "full_dom_too_large"
+  };
+}
+
 describe("BridgeSessionCoordinator", () => {
   it("posts session.start before the first session.send", () => {
     const { coordinator, transport } = createHarness();
@@ -94,8 +119,8 @@ describe("BridgeSessionCoordinator", () => {
     transport.emitMessage(sessionStarted());
 
     expect(transport.postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "hello" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "hello" }
     ]);
   });
 
@@ -106,7 +131,7 @@ describe("BridgeSessionCoordinator", () => {
     coordinator.sendPrompt("second");
 
     expect(transport.postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
     ]);
     expect(coordinator.getSnapshot()).toMatchObject({ pendingPromptCount: 2, starting: true });
   });
@@ -137,9 +162,9 @@ describe("BridgeSessionCoordinator", () => {
     transport.emitMessage(sessionStarted());
 
     expect(transport.postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "first" },
-      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "second" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "second" }
     ]);
     expect(coordinator.getSnapshot().pendingPromptCount).toBe(0);
   });
@@ -152,9 +177,9 @@ describe("BridgeSessionCoordinator", () => {
     coordinator.sendPrompt("second");
 
     expect(transport.postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "first" },
-      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "second" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "second" }
     ]);
   });
 
@@ -203,8 +228,8 @@ describe("BridgeSessionCoordinator", () => {
 
     expect(accepted).toBe(false);
     expect(transport.postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 1, clientSessionId: "client-1", prompt: "first" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" }
     ]);
     expect(coordinator.getSnapshot()).toMatchObject({
       pendingPromptCount: 0,
@@ -227,7 +252,7 @@ describe("BridgeSessionCoordinator", () => {
 
     expect(coordinator.getSnapshot()).toMatchObject({ pendingPromptCount: 1, sessionStarted: false });
     expect(transport.postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
     ]);
   });
 
@@ -238,7 +263,7 @@ describe("BridgeSessionCoordinator", () => {
     transport.emitMessage(sessionStarted());
     transport.emitMessage({
       type: "agent.event",
-      version: 1,
+      version: 2,
       clientSessionId: "client-1",
       event: { type: "assistant.text.delta", text: "Hi" }
     });
@@ -255,7 +280,7 @@ describe("BridgeSessionCoordinator", () => {
 
     coordinator.sendPrompt("first");
     coordinator.sendPrompt("second");
-    transport.emitMessage({ type: "bridge.error", version: 1, message: "bridge failed" });
+    transport.emitMessage({ type: "bridge.error", version: 2, message: "bridge failed" });
 
     expect(coordinator.getSnapshot()).toMatchObject({
       pendingPromptCount: 0,
@@ -288,7 +313,7 @@ describe("BridgeSessionCoordinator page context", () => {
 
     expect(transport.postedMessages).toContainEqual({
       type: "session.send",
-      version: 1,
+      version: 2,
       clientSessionId: "client-1",
       prompt: "summarize",
       pageContext
@@ -333,6 +358,44 @@ describe("BridgeSessionCoordinator page context", () => {
     );
   });
 
+  it("adds_full_dom_attached_marker_before_user_prompt_without_dumping_html", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt({
+      prompt: "summarize",
+      pageContext: fullDomPageContext("<html><body>Secret DOM content</body></html>")
+    });
+    transport.emitMessage(sessionStarted());
+
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      expect.objectContaining({ role: "status", text: "Full DOM attached" }),
+      expect.objectContaining({ role: "user", text: "summarize" }),
+      expect.objectContaining({ role: "status", text: "Session started" })
+    ]);
+    expect(coordinator.getSnapshot().transcript.map((entry) => entry.text).join("\n")).not.toContain(
+      "Secret DOM content"
+    );
+  });
+
+  it("adds_full_dom_too_large_marker_before_user_prompt_without_dumping_html", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt({
+      prompt: "summarize",
+      pageContext: fullDomTooLargePageContext()
+    });
+    transport.emitMessage(sessionStarted());
+
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      expect.objectContaining({ role: "status", text: "Full DOM skipped; content too large" }),
+      expect.objectContaining({ role: "user", text: "summarize" }),
+      expect.objectContaining({ role: "status", text: "Session started" })
+    ]);
+    expect(coordinator.getSnapshot().transcript.map((entry) => entry.text).join("\n")).not.toContain(
+      "<html"
+    );
+  });
+
   it("queues_context_submissions_until_session_started", () => {
     const { coordinator, transport } = createHarness();
     const pageContext = metadataOnlyPageContext();
@@ -340,7 +403,7 @@ describe("BridgeSessionCoordinator page context", () => {
     coordinator.sendPrompt({ prompt: "what is this", pageContext });
 
     expect(transport.postedMessages).toEqual([
-      { type: "session.start", version: 1, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
     ]);
     expect(coordinator.getSnapshot().pendingPromptCount).toBe(1);
 
@@ -348,7 +411,7 @@ describe("BridgeSessionCoordinator page context", () => {
 
     expect(transport.postedMessages).toContainEqual({
       type: "session.send",
-      version: 1,
+      version: 2,
       clientSessionId: "client-1",
       prompt: "what is this",
       pageContext
@@ -372,7 +435,7 @@ describe("BridgeSessionCoordinator page context", () => {
     coordinator.sendPrompt({ prompt: "summarize", pageContext: readablePageContext() });
     transport.emitMessage({
       type: "session.error",
-      version: 1,
+      version: 2,
       clientSessionId: "client-1",
       message: "session failed"
     });
@@ -402,7 +465,7 @@ describe("BridgeSessionCoordinator page context", () => {
     transport.emitMessage(sessionStarted());
     coordinator.markBridgeDisconnected();
     coordinator.sendPrompt({ prompt: "duplicate", pageContext: readablePageContext() });
-    transport.emitMessage({ type: "bridge.error", version: 1, message: "bridge failed" });
+    transport.emitMessage({ type: "bridge.error", version: 2, message: "bridge failed" });
 
     expect(coordinator.getSnapshot().transcript).toEqual([
       expect.objectContaining({ role: "user", text: "duplicate" }),

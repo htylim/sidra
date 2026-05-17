@@ -1,5 +1,6 @@
 export type SidraSettings = {
   readableContentLimitCharacters: number;
+  domContentLimitCharacters: number;
 };
 
 export type SettingsStorageArea = "local" | "sync" | "managed" | "session";
@@ -19,6 +20,9 @@ type Listener = () => void;
 export const DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS = 120_000;
 export const MIN_READABLE_CONTENT_LIMIT_CHARACTERS = 1_000;
 export const MAX_READABLE_CONTENT_LIMIT_CHARACTERS = 500_000;
+export const DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS = 300_000;
+export const MIN_DOM_CONTENT_LIMIT_CHARACTERS = 1_000;
+export const MAX_DOM_CONTENT_LIMIT_CHARACTERS = 750_000;
 export const SIDRA_SETTINGS_STORAGE_KEY = "sidra.settings.v1";
 
 export class SettingsStore {
@@ -28,6 +32,7 @@ export class SettingsStore {
   private startPromise?: Promise<void>;
   private unsubscribeFromStorage?: () => void;
   private liveChangeGeneration = 0;
+  private loadGeneration = 0;
 
   constructor(options: { storage: SettingsStorageGateway }) {
     this.storage = options.storage;
@@ -43,7 +48,8 @@ export class SettingsStore {
     this.unsubscribeFromStorage = this.storage.subscribeToChanges((changes, areaName) => {
       this.applyStorageChanges(changes, areaName);
     });
-    this.startPromise = this.loadInitialSettings();
+    this.loadGeneration += 1;
+    this.startPromise = this.loadInitialSettings(this.loadGeneration);
     return this.startPromise;
   }
 
@@ -62,9 +68,10 @@ export class SettingsStore {
     this.unsubscribeFromStorage?.();
     this.unsubscribeFromStorage = undefined;
     this.startPromise = undefined;
+    this.loadGeneration += 1;
   }
 
-  private async loadInitialSettings(): Promise<void> {
+  private async loadInitialSettings(loadGeneration: number): Promise<void> {
     const generationAtLoadStart = this.liveChangeGeneration;
     let stored: unknown;
     try {
@@ -73,7 +80,7 @@ export class SettingsStore {
       stored = undefined;
     }
 
-    if (this.liveChangeGeneration !== generationAtLoadStart) return;
+    if (this.loadGeneration !== loadGeneration || this.liveChangeGeneration !== generationAtLoadStart) return;
     this.setSnapshot(parseStoredSettings(stored));
   }
 
@@ -86,7 +93,12 @@ export class SettingsStore {
   }
 
   private setSnapshot(nextSnapshot: SidraSettings): void {
-    if (nextSnapshot.readableContentLimitCharacters === this.snapshot.readableContentLimitCharacters) return;
+    if (
+      nextSnapshot.readableContentLimitCharacters === this.snapshot.readableContentLimitCharacters &&
+      nextSnapshot.domContentLimitCharacters === this.snapshot.domContentLimitCharacters
+    ) {
+      return;
+    }
     this.snapshot = nextSnapshot;
     for (const listener of this.listeners) listener();
   }
@@ -115,19 +127,31 @@ function parseStoredSettings(value: unknown): SidraSettings {
   if (!isRecord(value)) return defaultSidraSettings();
 
   const readableContentLimitCharacters = value.readableContentLimitCharacters;
-  if (!isValidReadableContentLimit(readableContentLimitCharacters)) {
-    return defaultSidraSettings();
-  }
+  const domContentLimitCharacters = value.domContentLimitCharacters;
+  const defaults = defaultSidraSettings();
 
-  return { readableContentLimitCharacters };
+  return {
+    readableContentLimitCharacters: isValidReadableContentLimit(readableContentLimitCharacters)
+      ? readableContentLimitCharacters
+      : defaults.readableContentLimitCharacters,
+    domContentLimitCharacters: isValidDomContentLimit(domContentLimitCharacters)
+      ? domContentLimitCharacters
+      : defaults.domContentLimitCharacters
+  };
 }
 
 function defaultSidraSettings(): SidraSettings {
-  return { readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS };
+  return {
+    readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
+    domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS
+  };
 }
 
 function cloneSettings(settings: SidraSettings): SidraSettings {
-  return { readableContentLimitCharacters: settings.readableContentLimitCharacters };
+  return {
+    readableContentLimitCharacters: settings.readableContentLimitCharacters,
+    domContentLimitCharacters: settings.domContentLimitCharacters
+  };
 }
 
 function isValidReadableContentLimit(value: unknown): value is number {
@@ -136,6 +160,15 @@ function isValidReadableContentLimit(value: unknown): value is number {
     Number.isInteger(value) &&
     value >= MIN_READABLE_CONTENT_LIMIT_CHARACTERS &&
     value <= MAX_READABLE_CONTENT_LIMIT_CHARACTERS
+  );
+}
+
+function isValidDomContentLimit(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= MIN_DOM_CONTENT_LIMIT_CHARACTERS &&
+    value <= MAX_DOM_CONTENT_LIMIT_CHARACTERS
   );
 }
 

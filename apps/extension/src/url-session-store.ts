@@ -1,5 +1,6 @@
 import type { PageContext } from "@sidra/protocol";
 import type { BridgeSessionCoordinatorSnapshot } from "./bridge/session-coordinator";
+import type { CaptureMode } from "./capture-mode";
 import type { PageIdentity, PageKey } from "./page-key";
 import type { TranscriptEntry } from "./transcript";
 
@@ -18,11 +19,19 @@ export type ContextState =
       capturedAt: string;
       reason: "content_too_large";
     }
+  | { status: "full_dom_attached"; label: "Full DOM attached"; capturedAt: string }
+  | {
+      status: "full_dom_too_large";
+      label: "Full DOM skipped: too large";
+      capturedAt: string;
+      reason: "full_dom_too_large";
+    }
   | { status: "capture_unavailable"; label: "Capture unavailable"; message: string };
 
 export type UrlSessionSnapshot = {
   pageKey: PageKey;
   clientSessionId: string;
+  captureMode: CaptureMode;
   draftPrompt: string;
   contextState: ContextState;
   transcript: TranscriptEntry[];
@@ -34,6 +43,7 @@ export type UrlSessionSnapshot = {
 type UrlSessionRecord = {
   pageIdentity: Extract<PageIdentity, { status: "ready" }>;
   clientSessionId: string;
+  captureMode: CaptureMode;
   draftPrompt: string;
   contextState: ContextState;
   coordinator: UrlSessionCoordinator;
@@ -95,24 +105,27 @@ export class UrlSessionStore {
     };
   }
 
-  selectPage(identity: PageIdentity): void {
+  selectPage(identity: PageIdentity, options: { initialCaptureMode?: CaptureMode } = {}): boolean {
     if (identity.status !== "ready") {
-      if (this.activePageKey === undefined) return;
+      if (this.activePageKey === undefined) return false;
       this.activePageKey = undefined;
       this.emit();
-      return;
+      return false;
     }
 
     const existingRecord = this.recordsByPageKey.get(identity.pageKey);
+    let created = false;
     if (existingRecord) {
       existingRecord.pageIdentity = identity;
     } else {
-      this.recordsByPageKey.set(identity.pageKey, this.createRecord(identity));
+      this.recordsByPageKey.set(identity.pageKey, this.createRecord(identity, options.initialCaptureMode));
+      created = true;
     }
 
-    if (this.activePageKey === identity.pageKey) return;
+    if (this.activePageKey === identity.pageKey) return created;
     this.activePageKey = identity.pageKey;
     this.emit();
+    return created;
   }
 
   updateActiveDraftPrompt(text: string): void {
@@ -120,6 +133,14 @@ export class UrlSessionStore {
     if (!activeRecord || activeRecord.draftPrompt === text) return;
 
     activeRecord.draftPrompt = text;
+    this.emit();
+  }
+
+  updateActiveCaptureMode(captureMode: CaptureMode): void {
+    const activeRecord = this.getActiveRecord();
+    if (!activeRecord || activeRecord.captureMode === captureMode) return;
+
+    activeRecord.captureMode = captureMode;
     this.emit();
   }
 
@@ -168,6 +189,7 @@ export class UrlSessionStore {
 
     activeRecord.draftPrompt = "";
     activeRecord.contextState = INITIAL_CONTEXT_STATE;
+    activeRecord.captureMode = "readable";
     activeRecord.coordinator.newChat();
     this.emit();
   }
@@ -180,12 +202,16 @@ export class UrlSessionStore {
     this.emit();
   }
 
-  private createRecord(identity: Extract<PageIdentity, { status: "ready" }>): UrlSessionRecord {
+  private createRecord(
+    identity: Extract<PageIdentity, { status: "ready" }>,
+    initialCaptureMode: CaptureMode = "readable"
+  ): UrlSessionRecord {
     const clientSessionId = this.createClientSessionId();
     const coordinator = this.createCoordinator(clientSessionId);
     const record: UrlSessionRecord = {
       pageIdentity: identity,
       clientSessionId,
+      captureMode: initialCaptureMode,
       draftPrompt: "",
       contextState: INITIAL_CONTEXT_STATE,
       coordinator
@@ -208,6 +234,7 @@ export class UrlSessionStore {
     return {
       pageKey: record.pageIdentity.pageKey,
       clientSessionId: record.clientSessionId,
+      captureMode: record.captureMode,
       draftPrompt: record.draftPrompt,
       contextState: record.contextState,
       transcript: coordinatorSnapshot.transcript,
@@ -234,6 +261,7 @@ function createEmptySessionSnapshot(): UrlSessionSnapshot {
   return {
     pageKey: EMPTY_PAGE_KEY,
     clientSessionId: "",
+    captureMode: "readable",
     draftPrompt: "",
     contextState: INITIAL_CONTEXT_STATE,
     transcript: [],
@@ -245,6 +273,15 @@ function createEmptySessionSnapshot(): UrlSessionSnapshot {
 
 function contextStateForPageContext(pageContext: PageContext): ContextState {
   if (pageContext.kind === "metadata_only") {
+    if (pageContext.reason === "full_dom_too_large") {
+      return {
+        status: "full_dom_too_large",
+        label: "Full DOM skipped: too large",
+        capturedAt: pageContext.metadata.capturedAt,
+        reason: pageContext.reason
+      };
+    }
+
     if (pageContext.reason === "content_too_large") {
       return {
         status: "content_too_large",
@@ -259,6 +296,14 @@ function contextStateForPageContext(pageContext: PageContext): ContextState {
       label: "Metadata attached",
       capturedAt: pageContext.metadata.capturedAt,
       reason: pageContext.reason
+    };
+  }
+
+  if (pageContext.kind === "full_dom") {
+    return {
+      status: "full_dom_attached",
+      label: "Full DOM attached",
+      capturedAt: pageContext.metadata.capturedAt
     };
   }
 

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from "vitest";
+import { Readability } from "@mozilla/readability";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CaptureService,
   type CaptureGateway,
@@ -8,6 +9,10 @@ import {
   type CapturedTabDocument
 } from "./capture-service";
 import { captureCurrentDocumentSnapshot } from "./capture-script";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("CaptureService", () => {
   it("does_not_query_or_execute_script_until_capture_is_called", async () => {
@@ -52,6 +57,159 @@ describe("CaptureService", () => {
     expect(result.pageContext.textLength).toBe(result.pageContext.text.length);
   });
 
+  it("builds_readable_context_by_default_when_no_mode_is_provided", async () => {
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway(),
+      settings: new FakeCaptureSettings({
+        readableContentLimitCharacters: 1_000,
+        domContentLimitCharacters: 1_000
+      })
+    });
+
+    const pageContext = await service.buildPageContextForCapturedDocument(capturedDocument());
+
+    expect(pageContext).toMatchObject({ kind: "readable", extractionMethod: "readability" });
+  });
+
+  it("builds_full_dom_context_when_full_dom_mode_is_requested", async () => {
+    const html = "<html><body><main>Full DOM content</main></body></html>";
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway(),
+      settings: new FakeCaptureSettings({
+        readableContentLimitCharacters: 1_000,
+        domContentLimitCharacters: html.length
+      })
+    });
+
+    const pageContext = await service.buildPageContextForCapturedDocument(capturedDocument({ html }), "full_dom");
+
+    expect(pageContext).toEqual({
+      kind: "full_dom",
+      metadata: {
+        url: "https://example.com/current",
+        canonicalUrl: "https://example.com/canonical",
+        title: "Captured title",
+        siteName: "Example Site",
+        excerpt: "Captured excerpt",
+        byline: "Captured Author",
+        language: "en",
+        capturedAt: "2026-05-10T12:00:00.000Z"
+      },
+      html,
+      htmlLength: html.length
+    });
+  });
+
+  it("does_not_run_readability_or_send_readable_text_when_full_dom_mode_is_requested", async () => {
+    const html = "<html><body><article><p>Short DOM</p></article></body></html>";
+    const parseSpy = vi.spyOn(Readability.prototype, "parse");
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway(),
+      settings: new FakeCaptureSettings({
+        readableContentLimitCharacters: 1,
+        domContentLimitCharacters: 1_000
+      })
+    });
+
+    const pageContext = await service.buildPageContextForCapturedDocument(
+      capturedDocument({
+        html,
+        bodyInnerText: longText("Readable fallback text")
+      }),
+      "full_dom"
+    );
+
+    expect(pageContext).toMatchObject({ kind: "full_dom", html });
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(pageContext).not.toHaveProperty("text");
+    expect(pageContext).not.toHaveProperty("extractionMethod");
+  });
+
+  it("returns_full_dom_too_large_metadata_only_when_html_exceeds_dom_limit", async () => {
+    const html = "<html><body>oversized</body></html>";
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway(),
+      settings: new FakeCaptureSettings({
+        readableContentLimitCharacters: 1_000,
+        domContentLimitCharacters: html.length - 1
+      })
+    });
+
+    const pageContext = await service.buildPageContextForCapturedDocument(capturedDocument({ html }), "full_dom");
+
+    expect(pageContext).toEqual({
+      kind: "metadata_only",
+      metadata: expect.objectContaining({
+        url: "https://example.com/current",
+        capturedAt: "2026-05-10T12:00:00.000Z"
+      }),
+      reason: "full_dom_too_large"
+    });
+    expect(pageContext).not.toHaveProperty("html");
+  });
+
+  it("keeps_full_dom_context_when_html_is_exactly_at_dom_limit", async () => {
+    const html = "<html><body>exact size</body></html>";
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway(),
+      settings: new FakeCaptureSettings({
+        readableContentLimitCharacters: 1_000,
+        domContentLimitCharacters: html.length
+      })
+    });
+
+    const pageContext = await service.buildPageContextForCapturedDocument(capturedDocument({ html }), "full_dom");
+
+    expect(pageContext).toMatchObject({
+      kind: "full_dom",
+      html,
+      htmlLength: html.length
+    });
+  });
+
+  it("waits_for_initial_settings_load_before_full_dom_size_decision", async () => {
+    const html = "<html><body>delayed settings</body></html>";
+    const settings = new FakeCaptureSettings(
+      {
+        readableContentLimitCharacters: 1_000,
+        domContentLimitCharacters: 1_000
+      },
+      { delayReady: true }
+    );
+    const service = new CaptureService({ gateway: new FakeCaptureGateway(), settings });
+
+    const contextPromise = service.buildPageContextForCapturedDocument(capturedDocument({ html }), "full_dom");
+    await flushPromises();
+    expect(settings.readyWaitCount).toBe(1);
+
+    settings.setDomLimit(html.length - 1);
+    settings.resolveReady();
+    await expect(contextPromise).resolves.toMatchObject({
+      kind: "metadata_only",
+      reason: "full_dom_too_large"
+    });
+  });
+
+  it("uses_latest_dom_limit_for_later_full_dom_context_builds", async () => {
+    const html = "<html><body>live dom limit</body></html>";
+    const settings = new FakeCaptureSettings({
+      readableContentLimitCharacters: 1_000,
+      domContentLimitCharacters: html.length
+    });
+    const service = new CaptureService({ gateway: new FakeCaptureGateway(), settings });
+
+    await expect(service.buildPageContextForCapturedDocument(capturedDocument({ html }), "full_dom")).resolves.toMatchObject({
+      kind: "full_dom"
+    });
+
+    settings.setDomLimit(html.length - 1);
+
+    await expect(service.buildPageContextForCapturedDocument(capturedDocument({ html }), "full_dom")).resolves.toMatchObject({
+      kind: "metadata_only",
+      reason: "full_dom_too_large"
+    });
+  });
+
   it("recomputes_page_identity_from_captured_canonical_url", async () => {
     const service = new CaptureService({
       gateway: new FakeCaptureGateway({
@@ -69,6 +227,99 @@ describe("CaptureService", () => {
     expect(result.pageIdentity).toMatchObject({
       status: "ready",
       pageKey: "https://example.com/canonical"
+    });
+  });
+
+  it("captureActivePageDocument_returns_captured_document_and_uses_the_active_tab_id", async () => {
+    const document = capturedDocument({ documentUrl: "https://example.com/document" });
+    const gateway = new FakeCaptureGateway({
+      tab: { id: 42, url: "https://example.com/tab", title: "Tab title" },
+      document
+    });
+    const service = new CaptureService({ gateway });
+
+    const result = await service.captureActivePageDocument();
+
+    expect(result).toEqual({
+      status: "captured",
+      pageIdentity: expect.objectContaining({
+        status: "ready",
+        pageKey: "https://example.com/canonical"
+      }),
+      capturedDocument: document
+    });
+    expect(gateway.lastReadTabId).toBe(42);
+  });
+
+  it("captureActivePageDocument_returns_unavailable_when_the_active_tab_has_no_id", async () => {
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway({
+        tab: { url: "https://example.com/no-id", title: "No ID" }
+      })
+    });
+
+    await expect(service.captureActivePageDocument()).resolves.toMatchObject({
+      status: "unavailable",
+      pageIdentity: {
+        status: "ready",
+        pageKey: "https://example.com/no-id"
+      },
+      message: "Could not capture this page."
+    });
+  });
+
+  it("captureActivePageDocument_returns_unavailable_when_active_tab_query_fails", async () => {
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway({
+        queryError: new Error("Cannot query tabs")
+      })
+    });
+
+    await expect(service.captureActivePageDocument()).resolves.toMatchObject({
+      status: "unavailable",
+      pageIdentity: {
+        status: "unsupported",
+        reason: "missing_url"
+      },
+      message: "Could not read the active browser tab."
+    });
+  });
+
+  it("captureActivePageDocument_returns_unavailable_when_document_capture_fails", async () => {
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway({
+        readError: new Error("Cannot access tab")
+      })
+    });
+
+    await expect(service.captureActivePageDocument()).resolves.toMatchObject({
+      status: "unavailable",
+      pageIdentity: {
+        status: "unsupported",
+        reason: "active_tab_unavailable"
+      },
+      message: "Could not capture this page."
+    });
+  });
+
+  it("captureActivePageDocument_returns_unavailable_when_the_captured_url_is_unsupported", async () => {
+    const service = new CaptureService({
+      gateway: new FakeCaptureGateway({
+        document: capturedDocument({
+          canonicalUrl: undefined,
+          documentUrl: "chrome://extensions"
+        })
+      })
+    });
+
+    await expect(service.captureActivePageDocument()).resolves.toMatchObject({
+      status: "unavailable",
+      pageIdentity: {
+        status: "unsupported",
+        reason: "unsupported_url",
+        url: "chrome://extensions"
+      },
+      message: "Could not capture this page."
     });
   });
 
@@ -145,7 +396,10 @@ describe("CaptureService", () => {
       gateway: new FakeCaptureGateway({
         document: capturedDocument({ html: articleHtml({ text }) })
       }),
-      settings: new FakeCaptureSettings({ readableContentLimitCharacters: text.length + 100 })
+      settings: new FakeCaptureSettings({
+        readableContentLimitCharacters: text.length + 100,
+        domContentLimitCharacters: 1_000
+      })
     });
 
     const result = await service.captureActivePageContext();
@@ -166,7 +420,10 @@ describe("CaptureService", () => {
           bodyInnerText: textOfLength("body fallback", 100)
         })
       }),
-      settings: new FakeCaptureSettings({ readableContentLimitCharacters: 120 })
+      settings: new FakeCaptureSettings({
+        readableContentLimitCharacters: 120,
+        domContentLimitCharacters: 1_000
+      })
     });
 
     const result = await service.captureActivePageContext();
@@ -190,7 +447,10 @@ describe("CaptureService", () => {
           bodyInnerText: longText("Oversized body fallback text")
         })
       }),
-      settings: new FakeCaptureSettings({ readableContentLimitCharacters: 120 })
+      settings: new FakeCaptureSettings({
+        readableContentLimitCharacters: 120,
+        domContentLimitCharacters: 1_000
+      })
     });
 
     const result = await service.captureActivePageContext();
@@ -207,7 +467,13 @@ describe("CaptureService", () => {
   });
 
   it("waits_for_initial_settings_load_before_capture_size_decision", async () => {
-    const settings = new FakeCaptureSettings({ readableContentLimitCharacters: 1_000 }, { delayReady: true });
+    const settings = new FakeCaptureSettings(
+      {
+        readableContentLimitCharacters: 1_000,
+        domContentLimitCharacters: 1_000
+      },
+      { delayReady: true }
+    );
     const service = new CaptureService({
       gateway: new FakeCaptureGateway({
         document: capturedDocument({ html: articleHtml({ text: longText("Readable article text") }) })
@@ -229,7 +495,13 @@ describe("CaptureService", () => {
   });
 
   it("keeps_click_time_page_identity_when_settings_load_is_delayed", async () => {
-    const settings = new FakeCaptureSettings({ readableContentLimitCharacters: 1_000 }, { delayReady: true });
+    const settings = new FakeCaptureSettings(
+      {
+        readableContentLimitCharacters: 1_000,
+        domContentLimitCharacters: 1_000
+      },
+      { delayReady: true }
+    );
     const gateway = new FakeCaptureGateway({
       document: capturedDocument({
         canonicalUrl: undefined,
@@ -254,7 +526,10 @@ describe("CaptureService", () => {
   });
 
   it("uses_latest_readable_limit_for_later_capture_calls", async () => {
-    const settings = new FakeCaptureSettings({ readableContentLimitCharacters: 1_000 });
+    const settings = new FakeCaptureSettings({
+      readableContentLimitCharacters: 1_000,
+      domContentLimitCharacters: 1_000
+    });
     const service = new CaptureService({
       gateway: new FakeCaptureGateway({
         document: capturedDocument({ html: articleHtml({ text: longText("Readable article text") }) })
@@ -358,23 +633,35 @@ describe("CaptureService", () => {
 class FakeCaptureGateway implements CaptureGateway {
   queryCount = 0;
   readCount = 0;
+  lastReadTabId?: number;
   private readonly tab?: { id?: number; url?: string; title?: string };
   nextDocument: CapturedTabDocument;
+  private readonly queryError?: Error;
   private readonly readError?: Error;
 
-  constructor(options: { tab?: { id?: number; url?: string; title?: string }; document?: CapturedTabDocument; readError?: Error } = {}) {
+  constructor(
+    options: {
+      tab?: { id?: number; url?: string; title?: string };
+      document?: CapturedTabDocument;
+      queryError?: Error;
+      readError?: Error;
+    } = {}
+  ) {
     this.tab = "tab" in options ? options.tab : { id: 7, url: "https://example.com/current", title: "Tab title" };
     this.nextDocument = options.document ?? capturedDocument();
+    this.queryError = options.queryError;
     this.readError = options.readError;
   }
 
   async queryActiveTab() {
     this.queryCount += 1;
+    if (this.queryError) throw this.queryError;
     return this.tab;
   }
 
-  async readTabDocument() {
+  async readTabDocument(tabId: number) {
     this.readCount += 1;
+    this.lastReadTabId = tabId;
     if (this.readError) throw this.readError;
     return this.nextDocument;
   }
@@ -385,9 +672,14 @@ class FakeCaptureSettings implements CaptureSettingsSource {
   private readyPromise?: Promise<void>;
   private resolveReadyPromise?: () => void;
   private readableContentLimitCharacters: number;
+  private domContentLimitCharacters: number;
 
-  constructor(settings: { readableContentLimitCharacters: number }, options: { delayReady?: boolean } = {}) {
+  constructor(
+    settings: { readableContentLimitCharacters: number; domContentLimitCharacters: number },
+    options: { delayReady?: boolean } = {}
+  ) {
     this.readableContentLimitCharacters = settings.readableContentLimitCharacters;
+    this.domContentLimitCharacters = settings.domContentLimitCharacters;
     if (options.delayReady) {
       this.readyPromise = new Promise((resolve) => {
         this.resolveReadyPromise = resolve;
@@ -396,7 +688,10 @@ class FakeCaptureSettings implements CaptureSettingsSource {
   }
 
   getSnapshot() {
-    return { readableContentLimitCharacters: this.readableContentLimitCharacters };
+    return {
+      readableContentLimitCharacters: this.readableContentLimitCharacters,
+      domContentLimitCharacters: this.domContentLimitCharacters
+    };
   }
 
   async whenReady(): Promise<void> {
@@ -406,6 +701,10 @@ class FakeCaptureSettings implements CaptureSettingsSource {
 
   setLimit(readableContentLimitCharacters: number): void {
     this.readableContentLimitCharacters = readableContentLimitCharacters;
+  }
+
+  setDomLimit(domContentLimitCharacters: number): void {
+    this.domContentLimitCharacters = domContentLimitCharacters;
   }
 
   resolveReady(): void {

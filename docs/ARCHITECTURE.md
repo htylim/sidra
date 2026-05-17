@@ -87,7 +87,7 @@ Decision:
 - Extension modules should separate at least these responsibilities before related behavior expands:
   - `BridgeConnection`: Chrome Native Messaging connection, reconnect, disconnect, raw protocol IO, and bridge availability.
   - `ActivePageTracker`: active tab URL/title metadata reads and tab/window change subscriptions. It must not use scripting or page content extraction.
-  - `UrlSessionStore`: page-keyed URL sessions, Draft Prompt, Context State, running state, and Client Session IDs. Transcript and provider-session state are derived from each session's coordinator.
+  - `UrlSessionStore`: page-keyed URL sessions, session-scoped `CaptureMode`, Draft Prompt, Context State, running state, and Client Session IDs. Transcript and provider-session state are derived from each session's coordinator.
   - `SidePanelController`: application commands, active-page selection, bridge availability composition, and derived UI snapshots.
   - `CaptureService`: active-tab capture, extraction, size decisions, and page-context construction.
   - `SettingsStore`: persisted extension settings and live settings updates.

@@ -1,6 +1,13 @@
-import type { ProviderId } from "@sidra/protocol";
+import type { PageContext, ProviderId } from "@sidra/protocol";
 import { createChromeActivePageTracker } from "./active-page";
-import { CaptureService, createChromeCaptureService, type CaptureGateway, type CaptureResult } from "./capture-service";
+import {
+  CaptureService,
+  createChromeCaptureService,
+  type CaptureDocumentResult,
+  type CaptureGateway,
+  type CapturedTabDocument
+} from "./capture-service";
+import type { CaptureMode } from "./capture-mode";
 import type { PageIdentity } from "./page-key";
 import { BridgeConnection, type BridgeAvailability, type NativeBridgePort } from "./bridge/connection";
 import { BridgeSessionCoordinator } from "./bridge/session-coordinator";
@@ -20,6 +27,7 @@ export type SidePanelSnapshot = {
   activeSession: {
     pageKey: string;
     clientSessionId: string;
+    captureMode: CaptureMode;
     draftPrompt: string;
     contextState: ContextState;
     transcript: TranscriptEntry[];
@@ -34,6 +42,7 @@ export type SidePanelController = {
   subscribe(listener: () => void): () => void;
   sendPrompt(prompt: string): boolean;
   captureAndSend(prompt: string): Promise<boolean>;
+  updateCaptureMode(captureMode: CaptureMode): void;
   updateDraftPrompt(text: string): void;
   newChat(): void;
   retryBridge(): void;
@@ -46,7 +55,11 @@ type ActivePageSource = {
 };
 
 type CaptureServiceLike = {
-  captureActivePageContext(): Promise<CaptureResult>;
+  captureActivePageDocument(): Promise<CaptureDocumentResult>;
+  buildPageContextForCapturedDocument(
+    capturedDocument: CapturedTabDocument,
+    mode?: CaptureMode
+  ): Promise<PageContext>;
 };
 
 type SidePanelControllerOptions = {
@@ -164,13 +177,21 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       refreshSnapshot();
       if (!snapshot.bridge.canUseChat) return false;
 
-      const captureResult = await captureService.captureActivePageContext();
+      const preCaptureMode = snapshot.activeSession.captureMode;
+      const captureResult = await captureService.captureActivePageDocument();
       if (captureResult.status === "captured") {
+        activePageSnapshot = captureResult.pageIdentity;
+        urlSessionStore.selectPage(captureResult.pageIdentity, { initialCaptureMode: preCaptureMode });
+        const capturedSessionMode = urlSessionStore.getSnapshot().activeSession.captureMode;
+        const pageContext = await captureService.buildPageContextForCapturedDocument(
+          captureResult.capturedDocument,
+          capturedSessionMode
+        );
         activePageSnapshot = captureResult.pageIdentity;
         urlSessionStore.selectPage(captureResult.pageIdentity);
         const accepted = urlSessionStore.sendPromptWithContext({
           prompt: normalizedPrompt,
-          pageContext: captureResult.pageContext
+          pageContext
         });
         emit();
         return accepted;
@@ -185,6 +206,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       emit();
       return false;
     },
+    updateCaptureMode: (captureMode) => urlSessionStore.updateActiveCaptureMode(captureMode),
     updateDraftPrompt: (text) => urlSessionStore.updateActiveDraftPrompt(text),
     newChat: () => urlSessionStore.newChat(),
     retryBridge: () => connection.retry()
@@ -209,6 +231,7 @@ function createSnapshot(
     activeSession: {
       pageKey: activeSession.pageKey,
       clientSessionId: activeSession.clientSessionId,
+      captureMode: activeSession.captureMode,
       draftPrompt: activeSession.draftPrompt,
       contextState: activeSession.contextState,
       transcript: activeSession.transcript,

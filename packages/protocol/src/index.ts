@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const BRIDGE_PAYLOAD_TOO_LARGE_CODE = "payload_too_large";
 export const BRIDGE_PAYLOAD_TOO_LARGE_MESSAGE = "Payload is too large.";
 export const BRIDGE_HARD_PAYLOAD_BYTE_LIMIT = 1_000_000;
@@ -20,7 +20,10 @@ export type PageContextMetadata = {
   capturedAt: string;
 };
 
-export type MetadataOnlyPageContextReason = "no_usable_text" | "content_too_large";
+export type MetadataOnlyPageContextReason =
+  | "no_usable_text"
+  | "content_too_large"
+  | "full_dom_too_large";
 
 export type PageContext =
   | {
@@ -31,6 +34,12 @@ export type PageContext =
       extractionMethod: "readability" | "body_inner_text";
     }
   | {
+      kind: "full_dom";
+      metadata: PageContextMetadata;
+      html: string;
+      htmlLength: number;
+    }
+  | {
       kind: "metadata_only";
       metadata: PageContextMetadata;
       reason: MetadataOnlyPageContextReason;
@@ -39,21 +48,21 @@ export type PageContext =
 export type ExtensionToBridge =
   | {
       type: "session.start";
-      version: 1;
+      version: 2;
       clientSessionId: string;
       providerId: ProviderId;
     }
   | {
       type: "session.send";
-      version: 1;
+      version: 2;
       clientSessionId: string;
       prompt: string;
       pageContext?: PageContext;
     }
-  | { type: "session.cancel"; version: 1; clientSessionId: string }
-  | { type: "session.reset"; version: 1; clientSessionId: string }
-  | { type: "session.close"; version: 1; clientSessionId: string }
-  | { type: "heartbeat"; version: 1 };
+  | { type: "session.cancel"; version: 2; clientSessionId: string }
+  | { type: "session.reset"; version: 2; clientSessionId: string }
+  | { type: "session.close"; version: 2; clientSessionId: string }
+  | { type: "heartbeat"; version: 2 };
 
 export type AgentEvent =
   | { type: "assistant.text.delta"; text: string }
@@ -63,19 +72,19 @@ export type AgentEvent =
 export type BridgeToExtension =
   | {
       type: "session.started";
-      version: 1;
+      version: 2;
       clientSessionId: string;
       bridgeSessionId: string;
     }
   | {
       type: "agent.event";
-      version: 1;
+      version: 2;
       clientSessionId: string;
       event: AgentEvent;
     }
-  | { type: "session.error"; version: 1; clientSessionId: string; message: string; code?: string }
-  | { type: "bridge.ready"; version: 1 }
-  | { type: "bridge.error"; version: 1; message: string; code?: string };
+  | { type: "session.error"; version: 2; clientSessionId: string; message: string; code?: string }
+  | { type: "bridge.ready"; version: 2 }
+  | { type: "bridge.error"; version: 2; message: string; code?: string };
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -202,6 +211,17 @@ function parsePageContext(value: unknown): PageContext | null {
         textLength: value.textLength,
         extractionMethod: value.extractionMethod
       };
+    case "full_dom":
+      if (!hasOnlyKeys(value, ["kind", "metadata", "html", "htmlLength"])) return null;
+      if (!isNonEmptyString(value.html)) return null;
+      if (typeof value.htmlLength !== "number" || !Number.isInteger(value.htmlLength)) return null;
+      if (value.htmlLength !== value.html.length) return null;
+      return {
+        kind: "full_dom",
+        metadata,
+        html: value.html,
+        htmlLength: value.htmlLength
+      };
     case "metadata_only":
       if (!hasOnlyKeys(value, ["kind", "metadata", "reason"])) return null;
       if (!isMetadataOnlyPageContextReason(value.reason)) return null;
@@ -216,7 +236,7 @@ function parsePageContext(value: unknown): PageContext | null {
 }
 
 function isMetadataOnlyPageContextReason(value: unknown): value is MetadataOnlyPageContextReason {
-  return value === "no_usable_text" || value === "content_too_large";
+  return value === "no_usable_text" || value === "content_too_large" || value === "full_dom_too_large";
 }
 
 function parsePageContextMetadata(value: Record<string, unknown>): PageContextMetadata | null {

@@ -39,7 +39,7 @@ class FakePort implements NativeBridgePort {
 function startMessage(): ExtensionToBridge {
   return {
     type: "session.start",
-    version: 1,
+    version: 2,
     clientSessionId: "client-1",
     providerId: "codex"
   };
@@ -77,7 +77,7 @@ describe("BridgeConnection", () => {
     const { connection, ports } = createHarness();
 
     connection.connect();
-    ports[0].emitMessage({ type: "bridge.ready", version: 1 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 2 });
 
     expect(connection.getSnapshot()).toMatchObject({
       connected: true,
@@ -122,7 +122,7 @@ describe("BridgeConnection", () => {
     const { connection, ports } = createHarness();
 
     connection.connect();
-    ports[0].emitMessage({ type: "bridge.ready", version: 1 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 2 });
     ports[0].emitDisconnect();
 
     expect(connection.getSnapshot()).toMatchObject({
@@ -151,7 +151,7 @@ describe("BridgeConnection", () => {
 
     expect(connection.connect()).toEqual({ ok: false, error: "missing host" });
     expect(connection.retry()).toEqual({ ok: true });
-    ports[0].emitMessage({ type: "bridge.ready", version: 1 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 2 });
 
     expect(connectNative).toHaveBeenCalledTimes(2);
     expect(connection.getSnapshot()).toMatchObject({
@@ -165,10 +165,10 @@ describe("BridgeConnection", () => {
     const { connection, connectNative, ports } = createHarness();
 
     connection.connect();
-    ports[0].emitMessage({ type: "bridge.error", version: 1, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 2, message: "bridge failed" });
     expect(connection.retry()).toEqual({ ok: true });
-    ports[0].emitMessage({ type: "bridge.ready", version: 1 });
-    ports[1].emitMessage({ type: "bridge.ready", version: 1 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 2 });
+    ports[1].emitMessage({ type: "bridge.ready", version: 2 });
 
     expect(connectNative).toHaveBeenCalledTimes(2);
     expect(connection.getSnapshot()).toMatchObject({
@@ -186,7 +186,7 @@ describe("BridgeConnection", () => {
     connection.connect();
     ports[0].emitMessage({
       type: "agent.event",
-      version: 1,
+      version: 2,
       clientSessionId: "client-1",
       event: { type: "assistant.text.delta" }
     });
@@ -215,7 +215,7 @@ describe("BridgeConnection", () => {
     const { connection, connectNative, ports } = createHarness();
 
     connection.post(startMessage());
-    connection.post({ type: "session.send", version: 1, clientSessionId: "client-1", prompt: "hi" });
+    connection.post({ type: "session.send", version: 2, clientSessionId: "client-1", prompt: "hi" });
 
     expect(connectNative).toHaveBeenCalledTimes(1);
     expect(ports[0].postedMessages).toHaveLength(2);
@@ -225,7 +225,7 @@ describe("BridgeConnection", () => {
     const { connection, ports } = createHarness();
 
     connection.post(startMessage());
-    ports[0].emitMessage({ type: "bridge.ready", version: 1 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 2 });
 
     expect(connection.getSnapshot()).toMatchObject({ connected: true, ready: true });
   });
@@ -240,7 +240,7 @@ describe("BridgeConnection", () => {
     expect(() =>
       ports[0].emitMessage({
         type: "agent.event",
-        version: 1,
+        version: 2,
         clientSessionId: "client-1",
         event: { type: "assistant.text.delta" }
       })
@@ -259,7 +259,7 @@ describe("BridgeConnection", () => {
     const { connection, ports } = createHarness();
 
     connection.post(startMessage());
-    ports[0].emitMessage({ type: "bridge.ready", version: 1 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 2 });
     ports[0].emitDisconnect();
 
     expect(connection.getSnapshot()).toMatchObject({
@@ -274,8 +274,8 @@ describe("BridgeConnection", () => {
 
     connection.post(startMessage());
     ports[0].emitDisconnect();
-    connection.post({ type: "session.send", version: 1, clientSessionId: "client-1", prompt: "after" });
-    ports[0].emitMessage({ type: "bridge.ready", version: 1 });
+    connection.post({ type: "session.send", version: 2, clientSessionId: "client-1", prompt: "after" });
+    ports[0].emitMessage({ type: "bridge.ready", version: 2 });
 
     expect(connection.getSnapshot()).toMatchObject({ connected: true, ready: false });
   });

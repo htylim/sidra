@@ -1,6 +1,7 @@
 import { Readability } from "@mozilla/readability";
 import type { PageContext, PageContextMetadata } from "@sidra/protocol";
 import { type ActivePageTab } from "./active-page";
+import type { CaptureMode } from "./capture-mode";
 import { captureCurrentDocumentSnapshot, type CapturedTabDocument } from "./capture-script";
 import { resolvePageIdentity, type PageIdentity } from "./page-key";
 import { createDefaultSettingsSource, type SidraSettings } from "./settings-store";
@@ -21,13 +22,25 @@ export type CaptureResult =
       message: string;
     };
 
+export type CaptureDocumentResult =
+  | {
+      status: "captured";
+      pageIdentity: Extract<PageIdentity, { status: "ready" }>;
+      capturedDocument: CapturedTabDocument;
+    }
+  | {
+      status: "unavailable";
+      pageIdentity: PageIdentity;
+      message: string;
+    };
+
 export type CaptureGateway = {
   queryActiveTab(): Promise<ActivePageTab | undefined>;
   readTabDocument(tabId: number): Promise<CapturedTabDocument>;
 };
 
 export type CaptureSettingsSource = {
-  getSnapshot(): Pick<SidraSettings, "readableContentLimitCharacters">;
+  getSnapshot(): Pick<SidraSettings, "readableContentLimitCharacters" | "domContentLimitCharacters">;
   whenReady(): Promise<void>;
 };
 
@@ -46,6 +59,17 @@ export class CaptureService {
   }
 
   async captureActivePageContext(): Promise<CaptureResult> {
+    const documentResult = await this.captureActivePageDocument();
+    if (documentResult.status === "unavailable") return documentResult;
+
+    return {
+      status: "captured",
+      pageIdentity: documentResult.pageIdentity,
+      pageContext: await this.buildPageContextForCapturedDocument(documentResult.capturedDocument)
+    };
+  }
+
+  async captureActivePageDocument(): Promise<CaptureDocumentResult> {
     let activeTab: ActivePageTab | undefined;
 
     try {
@@ -83,14 +107,25 @@ export class CaptureService {
       return unavailable(pageIdentity, "Could not capture this page.");
     }
 
-    await this.settings.whenReady();
-    const settings = this.settings.getSnapshot();
-
     return {
       status: "captured",
       pageIdentity,
-      pageContext: buildPageContext(capturedDocument, settings.readableContentLimitCharacters)
+      capturedDocument
     };
+  }
+
+  async buildPageContextForCapturedDocument(
+    capturedDocument: CapturedTabDocument,
+    mode: CaptureMode = "readable"
+  ): Promise<PageContext> {
+    await this.settings.whenReady();
+    const settings = this.settings.getSnapshot();
+
+    if (mode === "full_dom") {
+      return buildFullDomPageContext(capturedDocument, settings.domContentLimitCharacters);
+    }
+
+    return buildReadablePageContext(capturedDocument, settings.readableContentLimitCharacters);
   }
 }
 
@@ -117,7 +152,7 @@ function createChromeCaptureGateway(): CaptureGateway {
   };
 }
 
-function buildPageContext(capturedDocument: CapturedTabDocument, readableContentLimitCharacters: number): PageContext {
+function buildReadablePageContext(capturedDocument: CapturedTabDocument, readableContentLimitCharacters: number): PageContext {
   const metadata = buildMetadata(capturedDocument);
   const readabilityText = extractReadableText(capturedDocument.html);
   if (isUsableText(readabilityText)) {
@@ -136,6 +171,20 @@ function buildPageContext(capturedDocument: CapturedTabDocument, readableContent
   }
 
   return metadataOnlyContext(metadata, "no_usable_text");
+}
+
+function buildFullDomPageContext(capturedDocument: CapturedTabDocument, domContentLimitCharacters: number): PageContext {
+  const metadata = buildMetadata(capturedDocument);
+  if (capturedDocument.html.length > domContentLimitCharacters) {
+    return metadataOnlyContext(metadata, "full_dom_too_large");
+  }
+
+  return {
+    kind: "full_dom",
+    metadata,
+    html: capturedDocument.html,
+    htmlLength: capturedDocument.html.length
+  };
 }
 
 function buildMetadata(capturedDocument: CapturedTabDocument): PageContextMetadata {
@@ -197,7 +246,7 @@ function assignOptional<T extends keyof PageContextMetadata>(
   if (cleaned) metadata[key] = cleaned;
 }
 
-function unavailable(pageIdentity: PageIdentity, message: string): CaptureResult {
+function unavailable(pageIdentity: PageIdentity, message: string): Extract<CaptureResult, { status: "unavailable" }> {
   return {
     status: "unavailable",
     pageIdentity,
