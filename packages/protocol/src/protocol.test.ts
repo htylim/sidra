@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BRIDGE_PAYLOAD_TOO_LARGE_CODE,
   exceedsPayloadByteLimit,
+  parseAgentEvent,
   parseBridgeToExtension,
   parseExtensionToBridge,
   serializedJsonByteLength
@@ -475,7 +476,7 @@ describe("bridge-to-extension protocol validation", () => {
         version: 2,
         clientSessionId: "page-1",
         message: "failed",
-        code: "provider-error"
+        code: "provider_error"
       })
     ).toMatchObject({ ok: true });
     expect(
@@ -529,6 +530,255 @@ describe("bridge-to-extension protocol validation", () => {
         code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
       }
     });
+  });
+});
+
+describe("assistant activity protocol validation", () => {
+  it("accepts tool activity with an allowlisted label", () => {
+    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "tool", phase: "started", label: "Tool started" } })).toEqual({
+      ok: true,
+      value: { type: "assistant.activity", activity: { kind: "tool", phase: "started", label: "Tool started" } }
+    });
+  });
+
+  it("accepts progress activity with an allowlisted label", () => {
+    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "progress", label: "Reading" } })).toEqual({
+      ok: true,
+      value: { type: "assistant.activity", activity: { kind: "progress", label: "Reading" } }
+    });
+  });
+
+  it("accepts error activity with an allowlisted label", () => {
+    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "error", label: "Activity error" } })).toEqual({
+      ok: true,
+      value: { type: "assistant.activity", activity: { kind: "error", label: "Activity error" } }
+    });
+  });
+
+  it("accepts activity events through bridge message envelopes", () => {
+    expect(
+      parseBridgeToExtension({
+        type: "agent.event",
+        version: 2,
+        clientSessionId: "page-1",
+        event: { type: "assistant.activity", activity: { kind: "tool", phase: "started", label: "Tool started" } }
+      })
+    ).toEqual({
+      ok: true,
+      value: {
+        type: "agent.event",
+        version: 2,
+        clientSessionId: "page-1",
+        event: { type: "assistant.activity", activity: { kind: "tool", phase: "started", label: "Tool started" } }
+      }
+    });
+  });
+
+  it("rejects activity events with unknown kinds", () => {
+    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "reasoning", label: "Working" } })).toEqual({
+      ok: false,
+      error: "event is invalid"
+    });
+  });
+
+  it("rejects private reasoning or chain-of-thought activity fields", () => {
+    expect(
+      parseAgentEvent({
+        type: "assistant.activity",
+        activity: { kind: "progress", label: "Working", reasoning: "private chain of thought" }
+      })
+    ).toEqual({ ok: false, error: "event is invalid" });
+
+    expect(
+      parseAgentEvent({
+        type: "assistant.activity",
+        activity: { kind: "progress", label: "Working", chainOfThought: "private" }
+      })
+    ).toEqual({ ok: false, error: "event is invalid" });
+  });
+
+  it("rejects free-form activity summary fields", () => {
+    expect(
+      parseAgentEvent({
+        type: "assistant.activity",
+        activity: { kind: "progress", label: "Working", summary: "I searched your prompt and page." }
+      })
+    ).toEqual({ ok: false, error: "event is invalid" });
+  });
+
+  it("rejects activity events with extra fields", () => {
+    expect(
+      parseAgentEvent({
+        type: "assistant.activity",
+        activity: { kind: "tool", phase: "finished", label: "Tool finished", durationMs: 12 }
+      })
+    ).toEqual({ ok: false, error: "event is invalid" });
+  });
+
+  it("rejects activity events with non-allowlisted labels", () => {
+    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "progress", label: "Thinking deeply" } })).toEqual({
+      ok: false,
+      error: "event is invalid"
+    });
+  });
+
+  it("rejects error activity with non-allowlisted labels", () => {
+    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "error", label: "Detailed raw error" } })).toEqual({
+      ok: false,
+      error: "event is invalid"
+    });
+  });
+
+  it("rejects invalid activity events through bridge message envelopes", () => {
+    expect(
+      parseBridgeToExtension({
+        type: "agent.event",
+        version: 2,
+        clientSessionId: "page-1",
+        event: { type: "assistant.activity", activity: { kind: "progress", label: "Thinking privately" } }
+      })
+    ).toEqual({ ok: false, error: "event is invalid" });
+  });
+
+  it("rejects_tool_activity_with_mismatched_phase_and_label", () => {
+    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "tool", phase: "started", label: "Tool finished" } })).toEqual({
+      ok: false,
+      error: "event is invalid"
+    });
+  });
+
+  it("keeps rejecting malformed assistant text deltas", () => {
+    expect(parseAgentEvent({ type: "assistant.text.delta" })).toEqual({ ok: false, error: "event is invalid" });
+    expect(parseAgentEvent({ type: "assistant.text.delta", text: 42 })).toEqual({ ok: false, error: "event is invalid" });
+  });
+
+  it("rejects extra fields on existing assistant event variants", () => {
+    expect(parseAgentEvent({ type: "assistant.text.delta", text: "hello", reasoning: "private" })).toEqual({
+      ok: false,
+      error: "event is invalid"
+    });
+    expect(parseAgentEvent({ type: "assistant.done", text: "done" })).toEqual({ ok: false, error: "event is invalid" });
+    expect(parseAgentEvent({ type: "assistant.cancelled", prompt: "secret" })).toEqual({ ok: false, error: "event is invalid" });
+  });
+
+  it("rejects extra fields on bridge message envelopes", () => {
+    expect(parseBridgeToExtension({ type: "bridge.ready", version: 2, extra: true })).toEqual({
+      ok: false,
+      error: "Message has invalid fields"
+    });
+    expect(
+      parseBridgeToExtension({
+        type: "agent.event",
+        version: 2,
+        clientSessionId: "page-1",
+        event: { type: "assistant.done" },
+        extra: true
+      })
+    ).toEqual({ ok: false, error: "Message has invalid fields" });
+  });
+
+  it.each(["thought", "chainOfThought", "reasoning", "prompt", "pageContent", "stdout", "stderr"])(
+    "rejects bridge message envelopes with private %s fields",
+    (privateField) => {
+      expect(
+        parseBridgeToExtension({
+          type: "agent.event",
+          version: 2,
+          clientSessionId: "page-1",
+          event: { type: "assistant.done" },
+          [privateField]: "secret"
+        })
+      ).toEqual({ ok: false, error: "Message has invalid fields" });
+    }
+  );
+
+  it("rejects session error envelopes with private prompt fields", () => {
+    expect(
+      parseBridgeToExtension({
+        type: "session.error",
+        version: 2,
+        clientSessionId: "page-1",
+        message: "failed",
+        prompt: "secret"
+      })
+    ).toEqual({ ok: false, error: "Message has invalid fields" });
+  });
+
+  it("rejects_extra_fields_on_extension_request_envelopes", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.start",
+        version: 2,
+        clientSessionId: "page-1",
+        providerId: "codex",
+        extra: true
+      })
+    ).toEqual({ ok: false, error: "Message has invalid fields" });
+
+    expect(parseExtensionToBridge({ type: "heartbeat", version: 2, clientSessionId: "page-1" })).toEqual({
+      ok: false,
+      error: "Message has invalid fields"
+    });
+  });
+
+  it("rejects_extension_request_envelopes_with_private_reasoning_or_prompt_fields", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.cancel",
+        version: 2,
+        clientSessionId: "page-1",
+        reasoning: "private"
+      })
+    ).toEqual({ ok: false, error: "Message has invalid fields" });
+
+    expect(parseExtensionToBridge({ type: "session.start", version: 2, clientSessionId: "page-1", providerId: "codex", prompt: "secret" })).toEqual({
+      ok: false,
+      error: "Message has invalid fields"
+    });
+  });
+
+  it.each(["reasoning", "stdout", "stderr", "pageContent"])(
+    "rejects session.send request envelopes with private %s fields",
+    (privateField) => {
+      expect(
+        parseExtensionToBridge({
+          type: "session.send",
+          version: 2,
+          clientSessionId: "page-1",
+          prompt: "summarize",
+          [privateField]: "secret"
+        })
+      ).toEqual({ ok: false, error: "Message has invalid fields" });
+    }
+  );
+
+  it("accepts_known_session_error_codes", () => {
+    for (const code of [
+      "session_not_started",
+      "turn_in_flight",
+      "no_in_flight_turn",
+      "provider_error",
+      "provider_start_failed",
+      "provider_unavailable",
+      "unsafe_provider_event",
+      "unknown_error"
+    ]) {
+      expect(parseBridgeToExtension({ type: "session.error", version: 2, clientSessionId: "page-1", message: "failed", code })).toMatchObject({
+        ok: true
+      });
+    }
+  });
+
+  it("rejects_unknown_session_error_codes", () => {
+    expect(
+      parseBridgeToExtension({
+        type: "session.error",
+        version: 2,
+        clientSessionId: "page-1",
+        message: "failed",
+        code: "provider-error"
+      })
+    ).toEqual({ ok: false, error: "code is invalid" });
   });
 });
 

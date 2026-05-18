@@ -1,60 +1,267 @@
 import { describe, expect, it } from "vitest";
 import {
+  addAssistantActivity,
   addAssistantTextDelta,
   addContextMarker,
+  addErrorStatusEntry,
   addStatusEntry,
   addUserPrompt,
+  cancelAssistantTurn,
+  completeAssistantTurn,
+  failAssistantTurn,
+  removeTranscriptEntriesByIds,
+  type SafeActivityEntry,
   type TranscriptEntry
 } from "./transcript";
 
 describe("transcript reducer", () => {
-  it("adds escaped user prompt entries", () => {
-    const transcript: TranscriptEntry[] = [];
+  describe("rich transcript reducer", () => {
+    it("adds_user_prompt_entries_as_user_message_variants", () => {
+      expect(addUserPrompt([], "  <script>alert(1)</script>  ")).toEqual([
+        { kind: "user_message", role: "user", text: "<script>alert(1)</script>" }
+      ]);
+    });
 
-    expect(addUserPrompt(transcript, "  <script>alert(1)</script>  ")).toEqual([
-      { role: "user", text: "<script>alert(1)</script>" }
-    ]);
-  });
+    it("appends_assistant_text_deltas_to_a_streaming_turn", () => {
+      const transcript = addAssistantTextDelta(addAssistantTextDelta([], "Hi"), " there");
 
-  it("adds assistant text delta entries", () => {
-    const transcript: TranscriptEntry[] = [{ role: "user", text: "hello" }];
+      expect(transcript).toEqual([
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Hi there",
+          text: "Hi there",
+          activity: [],
+          status: "streaming"
+        }
+      ]);
+    });
 
-    expect(addAssistantTextDelta(transcript, "Hi")).toEqual([
-      { role: "user", text: "hello" },
-      { role: "assistant", text: "Hi" }
-    ]);
-  });
+    it("starts_a_new_assistant_turn_after_a_user_message", () => {
+      const transcript = addAssistantTextDelta(addUserPrompt(addAssistantTextDelta([], "Previous"), "next"), "New");
 
-  it("appends consecutive assistant text deltas to the current assistant entry", () => {
-    const transcript: TranscriptEntry[] = addAssistantTextDelta(
-      addAssistantTextDelta([{ role: "user", text: "hello" }], "Hi"),
-      " there"
-    );
+      expect(transcript).toEqual([
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Previous",
+          text: "Previous",
+          activity: [],
+          status: "streaming"
+        },
+        { kind: "user_message", role: "user", text: "next" },
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "New",
+          text: "New",
+          activity: [],
+          status: "streaming"
+        }
+      ]);
+    });
 
-    expect(transcript).toEqual([
-      { role: "user", text: "hello" },
-      { role: "assistant", text: "Hi there" }
-    ]);
-  });
+    it("marks_current_assistant_turn_complete_on_done", () => {
+      expect(completeAssistantTurn(addAssistantTextDelta([], "Done"))).toEqual([
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Done",
+          text: "Done",
+          activity: [],
+          status: "complete"
+        }
+      ]);
+    });
 
-  it("adds operational status entries", () => {
-    const transcript: TranscriptEntry[] = [];
+    it("marks_current_assistant_turn_cancelled_without_removing_partial_text", () => {
+      expect(cancelAssistantTurn(addAssistantTextDelta([], "Partial"))[0]).toMatchObject({
+        kind: "assistant_turn",
+        markdown: "Partial",
+        text: "Partial",
+        status: "cancelled"
+      });
+    });
 
-    expect(addStatusEntry(transcript, "Session started")).toEqual([
-      { role: "status", text: "Session started" }
-    ]);
-  });
+    it("appends_cancelled_status_card_when_assistant_cancelled_arrives", () => {
+      expect(cancelAssistantTurn(addAssistantTextDelta([], "Partial"))).toEqual([
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Partial",
+          text: "Partial",
+          activity: [],
+          status: "cancelled"
+        },
+        { kind: "status", role: "status", tone: "cancelled", text: "Assistant turn cancelled" }
+      ]);
+    });
 
-  it("adds_status_marker_without_raw_page_content", () => {
-    const transcript: TranscriptEntry[] = [];
+    it("does_not_create_blank_assistant_turns_for_terminal_events_without_a_current_turn", () => {
+      expect(completeAssistantTurn([])).toEqual([]);
+      expect(failAssistantTurn([])).toEqual([]);
+      expect(cancelAssistantTurn([])).toEqual([]);
+      expect(completeAssistantTurn(addUserPrompt([], "next"))).toEqual([
+        { kind: "user_message", role: "user", text: "next" }
+      ]);
+    });
 
-    const nextTranscript = addContextMarker(
-      transcript,
-      { kind: "page_context_attached", text: "Page context attached" },
-      "marker-1"
-    );
+    it("marks_current_assistant_turn_failed_without_removing_partial_text", () => {
+      expect(failAssistantTurn(addAssistantTextDelta([], "Partial"))).toEqual([
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Partial",
+          text: "Partial",
+          activity: [],
+          status: "failed"
+        }
+      ]);
+    });
 
-    expect(nextTranscript).toEqual([{ role: "status", text: "Page context attached" }]);
-    expect(nextTranscript[0].id).toBe("marker-1");
+    it("keeps_terminal_assistant_turn_statuses_immutable", () => {
+      const completeTurn = completeAssistantTurn(addAssistantTextDelta([], "Complete"));
+      const failedTurn = failAssistantTurn(addAssistantTextDelta([], "Failed"));
+
+      expect(failAssistantTurn(completeTurn)).toEqual(completeTurn);
+      expect(completeAssistantTurn(failedTurn)).toEqual(failedTurn);
+      expect(cancelAssistantTurn(completeTurn)).toEqual(completeTurn);
+    });
+
+    it("starts_new_streaming_turns_when_text_or_activity_arrives_after_terminal_turns", () => {
+      const activity: SafeActivityEntry = { kind: "progress", label: "Working" };
+      const completeTurn = completeAssistantTurn(addAssistantTextDelta([], "Done"));
+
+      expect(addAssistantTextDelta(completeTurn, "Next")).toEqual([
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Done",
+          text: "Done",
+          activity: [],
+          status: "complete"
+        },
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Next",
+          text: "Next",
+          activity: [],
+          status: "streaming"
+        }
+      ]);
+      expect(addAssistantActivity(completeTurn, activity).at(-1)).toEqual({
+        kind: "assistant_turn",
+        role: "assistant",
+        markdown: "",
+        text: "",
+        activity: [activity],
+        status: "streaming"
+      });
+    });
+
+    it("adds_safe_activity_to_the_current_assistant_turn", () => {
+      const activity: SafeActivityEntry = { kind: "progress", label: "Reading" };
+
+      expect(addAssistantActivity(addAssistantTextDelta([], "Working"), activity)).toEqual([
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Working",
+          text: "Working",
+          activity: [activity],
+          status: "streaming"
+        }
+      ]);
+    });
+
+    it("updates_streaming_assistant_turns_when_status_entries_follow_them", () => {
+      const transcript = addStatusEntry(addAssistantTextDelta([], "Partial"), "Bridge is slow");
+
+      expect(completeAssistantTurn(addAssistantTextDelta(transcript, " output"))).toEqual([
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Partial output",
+          text: "Partial output",
+          activity: [],
+          status: "complete"
+        },
+        { kind: "status", role: "status", tone: "neutral", text: "Bridge is slow" }
+      ]);
+    });
+
+    it("starts_new_assistant_turns_after_status_entries_when_latest_turn_is_terminal", () => {
+      const transcript = addStatusEntry(completeAssistantTurn(addAssistantTextDelta([], "Done")), "Session started");
+
+      expect(addAssistantTextDelta(transcript, "Next")).toEqual([
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Done",
+          text: "Done",
+          activity: [],
+          status: "complete"
+        },
+        { kind: "status", role: "status", tone: "neutral", text: "Session started" },
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Next",
+          text: "Next",
+          activity: [],
+          status: "streaming"
+        }
+      ]);
+    });
+
+    it("creates_an_assistant_turn_for_activity_before_text", () => {
+      const activity: SafeActivityEntry = { kind: "tool", phase: "started", label: "Tool started" };
+
+      expect(addAssistantActivity([], activity)).toEqual([
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "",
+          text: "",
+          activity: [activity],
+          status: "streaming"
+        }
+      ]);
+    });
+
+    it("records_session_error_as_error_status_entry", () => {
+      expect(addErrorStatusEntry([], "Provider failed")).toEqual([
+        { kind: "status", role: "status", tone: "error", text: "Provider failed" }
+      ]);
+    });
+
+    it("keeps_context_attachment_markers_as_neutral_status_entries", () => {
+      const transcript = addContextMarker([], { kind: "page_context_attached", text: "Page context attached" }, "marker-1");
+
+      expect(transcript).toEqual([
+        { kind: "status", role: "status", tone: "neutral", text: "Page context attached" }
+      ]);
+      expect(transcript[0]?.id).toBe("marker-1");
+    });
+
+    it("records_capture_unavailable_as_error_status_entry", () => {
+      const transcript = addErrorStatusEntry([], "Could not capture this page", "capture-1");
+
+      expect(transcript).toEqual([
+        { kind: "status", role: "status", tone: "error", text: "Could not capture this page" }
+      ]);
+      expect(transcript[0]?.id).toBe("capture-1");
+    });
+
+    it("removes_transcript_entries_by_hidden_ids_after_the_entry_shape_changes", () => {
+      const transcript = addStatusEntry(addUserPrompt([], "hello", "prompt-1"), "Session started", "status-1");
+
+      expect(Object.keys(transcript[0] ?? {})).not.toContain("id");
+      expect(transcript[0]?.id).toBe("prompt-1");
+      expect(removeTranscriptEntriesByIds(transcript, new Set(["prompt-1"]))).toEqual([
+        { kind: "status", role: "status", tone: "neutral", text: "Session started" }
+      ]);
+    });
   });
 });

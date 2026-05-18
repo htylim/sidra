@@ -1,4 +1,4 @@
-import type { BridgeToExtension, ExtensionToBridge, ProviderId } from "@sidra/protocol";
+import type { AgentEvent, BridgeToExtension, ExtensionToBridge, SessionErrorCode, ProviderId } from "@sidra/protocol";
 import { describe, expect, it } from "vitest";
 import {
   BridgeSessionCoordinator,
@@ -39,12 +39,38 @@ function createHarness(providerId: ProviderId = "codex", hardPayloadByteLimit?: 
   return { coordinator, transport };
 }
 
+function createStartedHarness() {
+  const harness = createHarness();
+  harness.coordinator.sendPrompt("hello");
+  harness.transport.emitMessage(sessionStarted());
+  return harness;
+}
+
 function sessionStarted(clientSessionId = "client-1"): BridgeToExtension {
   return {
     type: "session.started",
     version: 2,
     clientSessionId,
     bridgeSessionId: "bridge-1"
+  };
+}
+
+function agentEvent(event: AgentEvent, clientSessionId = "client-1"): BridgeToExtension {
+  return {
+    type: "agent.event",
+    version: 2,
+    clientSessionId,
+    event
+  };
+}
+
+function sessionError(message: string, code?: SessionErrorCode, clientSessionId = "client-1"): BridgeToExtension {
+  return {
+    type: "session.error",
+    version: 2,
+    clientSessionId,
+    message,
+    ...(code ? { code } : {})
   };
 }
 
@@ -150,11 +176,11 @@ describe("BridgeSessionCoordinator", () => {
       lastError: "native host unavailable"
     });
     expect(coordinator.getSnapshot().transcript).toEqual([
-      { role: "status", text: "native host unavailable" }
+      expect.objectContaining({ role: "status", tone: "error", text: "native host unavailable" })
     ]);
   });
 
-  it("flushes queued prompts in original order", () => {
+  it("flushes the first queued prompt when the session starts", () => {
     const { coordinator, transport } = createHarness();
 
     coordinator.sendPrompt("first");
@@ -163,10 +189,38 @@ describe("BridgeSessionCoordinator", () => {
 
     expect(transport.postedMessages).toEqual([
       { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" },
-      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "second" }
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" }
     ]);
-    expect(coordinator.getSnapshot().pendingPromptCount).toBe(0);
+    expect(coordinator.getSnapshot().pendingPromptCount).toBe(1);
+  });
+
+  it("sends_only_the_first_queued_prompt_when_session_starts", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt("first");
+    coordinator.sendPrompt("second");
+    transport.emitMessage(sessionStarted());
+
+    expect(transport.postedMessages).toEqual([
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" }
+    ]);
+    expect(coordinator.getSnapshot().pendingPromptCount).toBe(1);
+  });
+
+  it("renders_only_the_sent_queued_prompt_before_the_first_assistant_stream", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt("first");
+    coordinator.sendPrompt("second");
+    transport.emitMessage(sessionStarted());
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "First response" }));
+
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      expect.objectContaining({ kind: "user_message", text: "first" }),
+      expect.objectContaining({ kind: "status", text: "Session started" }),
+      expect.objectContaining({ kind: "assistant_turn", markdown: "First response" })
+    ]);
   });
 
   it("reuses the started provider session for later prompts", () => {
@@ -174,6 +228,7 @@ describe("BridgeSessionCoordinator", () => {
 
     coordinator.sendPrompt("first");
     transport.emitMessage(sessionStarted());
+    transport.emitMessage(agentEvent({ type: "assistant.done" }));
     coordinator.sendPrompt("second");
 
     expect(transport.postedMessages).toEqual([
@@ -183,12 +238,32 @@ describe("BridgeSessionCoordinator", () => {
     ]);
   });
 
+  it("rejects_started_session_prompt_after_send_before_first_delta", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    expect(coordinator.sendPrompt("second")).toBe(false);
+
+    expect(transport.postedMessages).not.toContainEqual(
+      expect.objectContaining({ type: "session.send", prompt: "second" })
+    );
+    expect(coordinator.getSnapshot().transcript).not.toContainEqual(
+      expect.objectContaining({ kind: "user_message", text: "second" })
+    );
+    expect(coordinator.getSnapshot().transcript.at(-1)).toMatchObject({
+      kind: "status",
+      tone: "error",
+      text: "A turn is already in flight for this session"
+    });
+  });
+
   it("does not add a started-session prompt to the transcript when session.send cannot post", () => {
     const { coordinator, transport } = createHarness();
 
     coordinator.sendPrompt("first");
     transport.emitMessage(sessionStarted());
+    transport.emitMessage(agentEvent({ type: "assistant.done" }));
     expect(coordinator.sendPrompt("accepted after start")).toBe(true);
+    transport.emitMessage(agentEvent({ type: "assistant.done" }));
 
     transport.postResult = { ok: false, error: "send failed" };
     const accepted = coordinator.sendPrompt("unsent after start");
@@ -196,10 +271,10 @@ describe("BridgeSessionCoordinator", () => {
     expect(accepted).toBe(false);
     expect(coordinator.getSnapshot()).toMatchObject({ lastError: "send failed" });
     expect(coordinator.getSnapshot().transcript).toEqual([
-      { role: "user", text: "first" },
-      { role: "status", text: "Session started" },
-      { role: "user", text: "accepted after start" },
-      { role: "status", text: "send failed" }
+      expect.objectContaining({ role: "user", text: "first" }),
+      expect.objectContaining({ role: "status", text: "Session started" }),
+      expect.objectContaining({ role: "user", text: "accepted after start" }),
+      expect.objectContaining({ role: "status", tone: "error", text: "send failed" })
     ]);
   });
 
@@ -216,7 +291,9 @@ describe("BridgeSessionCoordinator", () => {
       starting: false,
       lastError: "Payload is too large."
     });
-    expect(coordinator.getSnapshot().transcript).toEqual([{ role: "status", text: "Payload is too large." }]);
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      expect.objectContaining({ role: "status", tone: "error", text: "Payload is too large." })
+    ]);
   });
 
   it("rejects_oversized_started_session_prompt_without_resetting_provider_state", () => {
@@ -238,9 +315,9 @@ describe("BridgeSessionCoordinator", () => {
       lastError: "Payload is too large."
     });
     expect(coordinator.getSnapshot().transcript).toEqual([
-      { role: "user", text: "first" },
-      { role: "status", text: "Session started" },
-      { role: "status", text: "Payload is too large." }
+      expect.objectContaining({ role: "user", text: "first" }),
+      expect.objectContaining({ role: "status", text: "Session started" }),
+      expect.objectContaining({ role: "status", tone: "error", text: "Payload is too large." })
     ]);
   });
 
@@ -269,9 +346,9 @@ describe("BridgeSessionCoordinator", () => {
     });
 
     expect(coordinator.getSnapshot().transcript).toEqual([
-      { role: "user", text: "hello" },
-      { role: "status", text: "Session started" },
-      { role: "assistant", text: "Hi" }
+      expect.objectContaining({ role: "user", text: "hello" }),
+      expect.objectContaining({ role: "status", text: "Session started" }),
+      expect.objectContaining({ role: "assistant", text: "Hi" })
     ]);
   });
 
@@ -298,8 +375,387 @@ describe("BridgeSessionCoordinator", () => {
     coordinator.markBridgeDisconnected();
 
     expect(coordinator.getSnapshot().transcript).toEqual([
-      { role: "status", text: "Bridge disconnected" }
+      expect.objectContaining({ role: "status", text: "Bridge disconnected" })
     ]);
+  });
+});
+
+describe("BridgeSessionCoordinator rich assistant events", () => {
+  it("appends_assistant_text_deltas_to_a_streaming_turn", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Hi" }));
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: " there" }));
+
+    expect(coordinator.getSnapshot().transcript.at(-1)).toMatchObject({
+      kind: "assistant_turn",
+      markdown: "Hi there",
+      status: "streaming"
+    });
+  });
+
+  it("marks_current_assistant_turn_complete_on_assistant_done", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Done" }));
+    transport.emitMessage(agentEvent({ type: "assistant.done" }));
+
+    expect(coordinator.getSnapshot().transcript.at(-1)).toMatchObject({
+      kind: "assistant_turn",
+      markdown: "Done",
+      status: "complete"
+    });
+  });
+
+  it("adds_safe_activity_to_the_current_assistant_turn", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.activity", activity: { kind: "progress", label: "Reading" } }));
+
+    expect(coordinator.getSnapshot().transcript.at(-1)).toMatchObject({
+      kind: "assistant_turn",
+      activity: [{ kind: "progress", label: "Reading" }]
+    });
+  });
+
+  it("marks_current_assistant_turn_cancelled_and_preserves_partial_output", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Partial" }));
+    transport.emitMessage(agentEvent({ type: "assistant.cancelled" }));
+
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      expect.objectContaining({ role: "user", text: "hello" }),
+      expect.objectContaining({ role: "status", text: "Session started" }),
+      expect.objectContaining({ kind: "assistant_turn", markdown: "Partial", status: "cancelled" }),
+      expect.objectContaining({ kind: "status", tone: "cancelled", text: "Assistant turn cancelled" })
+    ]);
+  });
+
+  it("appends_cancelled_status_when_assistant_cancelled_arrives_before_first_delta", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.cancelled" }));
+
+    expect(coordinator.getSnapshot().transcript).toContainEqual(
+      expect.objectContaining({ kind: "status", tone: "cancelled", text: "Assistant turn cancelled" })
+    );
+  });
+
+  it("records_session_error_as_error_status_entry", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(sessionError("Provider failed", "provider_error"));
+
+    expect(coordinator.getSnapshot().transcript.at(-1)).toMatchObject({
+      kind: "status",
+      tone: "error",
+      text: "Provider failed"
+    });
+  });
+
+  it("marks_streaming_assistant_turn_failed_when_provider_error_arrives_after_partial_output", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Partial" }));
+    transport.emitMessage(sessionError("Provider failed", "provider_error"));
+
+    expect(coordinator.getSnapshot().transcript).toContainEqual(
+      expect.objectContaining({ kind: "assistant_turn", markdown: "Partial", status: "failed" })
+    );
+    expect(coordinator.getSnapshot().transcript.at(-1)).toMatchObject({ tone: "error", text: "Provider failed" });
+  });
+
+  it("marks_activity_only_assistant_turn_failed_when_terminal_session_error_arrives", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.activity", activity: { kind: "progress", label: "Working" } }));
+    transport.emitMessage(sessionError("Provider failed", "provider_error"));
+
+    expect(coordinator.getSnapshot().transcript).toContainEqual(
+      expect.objectContaining({ kind: "assistant_turn", activity: [{ kind: "progress", label: "Working" }], status: "failed" })
+    );
+  });
+
+  it("marks_streaming_assistant_turn_failed_for_unsafe_provider_event_without_clearing_session_state", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Partial" }));
+    transport.emitMessage(sessionError("Unsafe provider event", "unsafe_provider_event"));
+
+    expect(coordinator.getSnapshot()).toMatchObject({ sessionStarted: true, starting: false });
+    expect(coordinator.getSnapshot().transcript).toContainEqual(
+      expect.objectContaining({ kind: "assistant_turn", markdown: "Partial", status: "failed" })
+    );
+  });
+
+  it("marks_streaming_assistant_turn_failed_for_unknown_error_during_running_turn", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Partial" }));
+    transport.emitMessage(sessionError("Unknown failure", "unknown_error"));
+
+    expect(coordinator.getSnapshot().transcript).toContainEqual(
+      expect.objectContaining({ kind: "assistant_turn", markdown: "Partial", status: "failed" })
+    );
+  });
+
+  it("keeps_streaming_assistant_turn_active_for_nonterminal_session_error", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Partial" }));
+    transport.emitMessage(sessionError("Turn in flight", "turn_in_flight"));
+
+    expect(coordinator.getSnapshot()).toMatchObject({ sessionStarted: true });
+    expect(coordinator.getSnapshot().transcript).toContainEqual(
+      expect.objectContaining({ kind: "assistant_turn", markdown: "Partial", status: "streaming" })
+    );
+    expect(coordinator.getSnapshot().transcript.at(-1)).toMatchObject({ tone: "error", text: "Turn in flight" });
+  });
+
+  it("keeps_later_deltas_attached_to_the_current_turn_after_turn_in_flight_rejects_a_second_prompt", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Partial" }));
+    expect(coordinator.sendPrompt("second")).toBe(false);
+    transport.emitMessage(sessionError("Turn in flight", "turn_in_flight"));
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: " output" }));
+
+    expect(coordinator.getSnapshot().transcript).toContainEqual(
+      expect.objectContaining({ kind: "assistant_turn", markdown: "Partial output", status: "streaming" })
+    );
+    expect(coordinator.getSnapshot().transcript).not.toContainEqual(
+      expect.objectContaining({ kind: "user_message", text: "second" })
+    );
+  });
+
+  it("rejects_context_prompts_without_leaving_context_markers_when_an_assistant_turn_is_streaming", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Partial" }));
+    expect(coordinator.sendPrompt({ prompt: "second", pageContext: readablePageContext() })).toBe(false);
+
+    expect(transport.postedMessages).not.toContainEqual(
+      expect.objectContaining({ type: "session.send", prompt: "second" })
+    );
+    expect(coordinator.getSnapshot().transcript).not.toContainEqual(
+      expect.objectContaining({ role: "status", text: "Page context attached" })
+    );
+    expect(coordinator.getSnapshot().transcript).not.toContainEqual(
+      expect.objectContaining({ role: "user", text: "second" })
+    );
+  });
+
+  it("completes_current_streaming_turn_when_second_prompt_was_rejected_locally", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Partial" }));
+    expect(coordinator.sendPrompt("second")).toBe(false);
+    transport.emitMessage(agentEvent({ type: "assistant.done" }));
+
+    expect(coordinator.getSnapshot().transcript).toContainEqual(
+      expect.objectContaining({ kind: "assistant_turn", markdown: "Partial", status: "complete" })
+    );
+  });
+
+  it("clears_started_session_when_session_not_started_error_arrives", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(sessionError("Session missing", "session_not_started"));
+
+    expect(coordinator.getSnapshot()).toMatchObject({ sessionStarted: false, starting: false });
+  });
+
+  it("marks_streaming_assistant_turn_failed_when_session_not_started_arrives_after_partial_output", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Partial" }));
+    transport.emitMessage(sessionError("Session missing", "session_not_started"));
+
+    expect(coordinator.getSnapshot().transcript).toContainEqual(
+      expect.objectContaining({ kind: "assistant_turn", markdown: "Partial", status: "failed" })
+    );
+  });
+
+  it("keeps_started_session_state_when_nonfatal_session_error_arrives", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(sessionError("No turn", "no_in_flight_turn"));
+
+    expect(coordinator.getSnapshot()).toMatchObject({ sessionStarted: true, starting: false });
+  });
+
+  it("clears_pending_startup_state_when_fatal_startup_error_arrives", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt("hello");
+    transport.emitMessage(sessionError("Provider failed to start", "provider_start_failed"));
+
+    expect(coordinator.getSnapshot()).toMatchObject({
+      sessionStarted: false,
+      starting: false,
+      pendingPromptCount: 0
+    });
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      expect.objectContaining({ kind: "status", tone: "error", text: "Provider failed to start" })
+    ]);
+  });
+
+  it("recordCaptureUnavailable_adds_error_status_entry", () => {
+    const { coordinator } = createHarness();
+
+    coordinator.recordCaptureUnavailable("Could not capture this page.");
+
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      expect.objectContaining({ kind: "status", tone: "error", text: "Could not capture this page." })
+    ]);
+  });
+
+  it("marks_streaming_assistant_turn_failed_when_bridge_disconnects", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Partial" }));
+    coordinator.markBridgeDisconnected();
+
+    expect(coordinator.getSnapshot().transcript).toContainEqual(
+      expect.objectContaining({ kind: "assistant_turn", markdown: "Partial", status: "failed" })
+    );
+    expect(coordinator.getSnapshot().transcript.at(-1)).toMatchObject({ text: "Bridge disconnected" });
+  });
+
+  it("marks_streaming_assistant_turn_failed_when_bridge_error_arrives", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Partial" }));
+    transport.emitMessage({ type: "bridge.error", version: 2, message: "Bridge failed" });
+
+    expect(coordinator.getSnapshot().transcript).toContainEqual(
+      expect.objectContaining({ kind: "assistant_turn", markdown: "Partial", status: "failed" })
+    );
+  });
+
+  it("ignores_agent_events_for_another_client_session", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Hidden" }, "other-client"));
+
+    expect(coordinator.getSnapshot().transcript).not.toContainEqual(expect.objectContaining({ text: "Hidden" }));
+  });
+
+  it("ignores_unsolicited_agent_events_before_a_turn_is_in_flight", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt("first");
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "stale" }));
+    transport.emitMessage(agentEvent({ type: "assistant.done" }));
+
+    expect(coordinator.getSnapshot()).toMatchObject({ pendingPromptCount: 1, sessionStarted: false, starting: true });
+    expect(coordinator.getSnapshot().transcript).toEqual([expect.objectContaining({ kind: "user_message", text: "first" })]);
+    expect(transport.postedMessages).toEqual([
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
+    ]);
+  });
+
+  it("ignores_stale_agent_events_after_new_chat_clears_the_current_turn", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    coordinator.newChat();
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "stale" }));
+    transport.emitMessage(agentEvent({ type: "assistant.cancelled" }));
+
+    expect(coordinator.getSnapshot().transcript).toEqual([]);
+  });
+
+  it("ignores_the_old_start_ack_when_new_chat_resets_during_startup", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt("old");
+    coordinator.newChat();
+    coordinator.sendPrompt("fresh");
+    transport.emitMessage(sessionStarted());
+
+    expect(coordinator.getSnapshot()).toMatchObject({ pendingPromptCount: 1, sessionStarted: false, starting: true });
+    expect(transport.postedMessages).toEqual([
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.reset", version: 2, clientSessionId: "client-1" }
+    ]);
+
+    transport.emitMessage(sessionStarted());
+
+    expect(coordinator.getSnapshot()).toMatchObject({ pendingPromptCount: 0, sessionStarted: true, starting: false });
+    expect(transport.postedMessages).toEqual([
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.reset", version: 2, clientSessionId: "client-1" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "fresh" }
+    ]);
+  });
+
+  it("ignores_the_old_start_error_when_new_chat_resets_during_startup", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt("old");
+    coordinator.newChat();
+    coordinator.sendPrompt("fresh");
+    transport.emitMessage(sessionError("Old start failed", "provider_start_failed"));
+
+    expect(coordinator.getSnapshot()).toMatchObject({ pendingPromptCount: 1, sessionStarted: false, starting: true });
+    expect(coordinator.getSnapshot().transcript).toEqual([expect.objectContaining({ kind: "user_message", text: "fresh" })]);
+
+    transport.emitMessage(sessionStarted());
+
+    expect(transport.postedMessages).toContainEqual({
+      type: "session.send",
+      version: 2,
+      clientSessionId: "client-1",
+      prompt: "fresh"
+    });
+  });
+
+  it("ignores_multiple_old_start_acks_when_new_chat_resets_twice_during_startup", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt("old");
+    coordinator.newChat();
+    coordinator.newChat();
+    coordinator.sendPrompt("fresh");
+    transport.emitMessage(sessionStarted());
+    transport.emitMessage(sessionStarted());
+
+    expect(coordinator.getSnapshot()).toMatchObject({ pendingPromptCount: 1, sessionStarted: false, starting: true });
+    expect(transport.postedMessages).toEqual([
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.reset", version: 2, clientSessionId: "client-1" },
+      { type: "session.reset", version: 2, clientSessionId: "client-1" }
+    ]);
+
+    transport.emitMessage(sessionStarted());
+
+    expect(coordinator.getSnapshot()).toMatchObject({ pendingPromptCount: 0, sessionStarted: true, starting: false });
+    expect(transport.postedMessages).toContainEqual({
+      type: "session.send",
+      version: 2,
+      clientSessionId: "client-1",
+      prompt: "fresh"
+    });
+  });
+
+  it("ignores_stale_terminal_turn_error_after_new_chat_resets_a_running_turn", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    coordinator.newChat();
+    coordinator.sendPrompt("fresh");
+    transport.emitMessage(sessionError("Old turn failed", "provider_error"));
+
+    expect(coordinator.getSnapshot()).toMatchObject({ pendingPromptCount: 1, sessionStarted: false, starting: true });
+    expect(coordinator.getSnapshot().transcript).toEqual([expect.objectContaining({ kind: "user_message", text: "fresh" })]);
+  });
+
+  it("ignores_session_errors_for_another_client_session", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    transport.emitMessage(sessionError("Other failure", "provider_error", "other-client"));
+
+    expect(coordinator.getSnapshot().transcript).not.toContainEqual(expect.objectContaining({ text: "Other failure" }));
   });
 });
 
@@ -425,7 +881,7 @@ describe("BridgeSessionCoordinator page context", () => {
     coordinator.markBridgeDisconnected();
 
     expect(coordinator.getSnapshot().transcript).toEqual([
-      { role: "status", text: "Bridge disconnected" }
+      expect.objectContaining({ role: "status", text: "Bridge disconnected" })
     ]);
   });
 
@@ -441,7 +897,7 @@ describe("BridgeSessionCoordinator page context", () => {
     });
 
     expect(coordinator.getSnapshot().transcript).toEqual([
-      { role: "status", text: "session failed" }
+      expect.objectContaining({ role: "status", text: "session failed" })
     ]);
   });
 
@@ -453,8 +909,8 @@ describe("BridgeSessionCoordinator page context", () => {
     transport.emitMessage(sessionStarted());
 
     expect(coordinator.getSnapshot().transcript).toEqual([
-      { role: "status", text: "Session started" },
-      { role: "status", text: "send failed" }
+      expect.objectContaining({ role: "status", text: "Session started" }),
+      expect.objectContaining({ role: "status", text: "send failed" })
     ]);
   });
 
@@ -489,12 +945,13 @@ describe("BridgeSessionCoordinator page context", () => {
       return originalPost(message);
     };
     transport.emitMessage(sessionStarted());
+    transport.emitMessage(agentEvent({ type: "assistant.done" }));
 
     expect(coordinator.getSnapshot().transcript).toEqual([
       expect.objectContaining({ role: "status", text: "Page context attached" }),
       expect.objectContaining({ role: "user", text: "first" }),
       expect.objectContaining({ role: "status", text: "Session started" }),
-      { role: "status", text: "second failed" }
+      expect.objectContaining({ role: "status", tone: "error", text: "second failed" })
     ]);
   });
 
@@ -505,7 +962,7 @@ describe("BridgeSessionCoordinator page context", () => {
 
     expect(transport.postedMessages).toEqual([]);
     expect(coordinator.getSnapshot().transcript).toEqual([
-      expect.objectContaining({ role: "status", text: "Could not capture this page" })
+      expect.objectContaining({ role: "status", tone: "error", text: "Could not capture this page." })
     ]);
   });
 

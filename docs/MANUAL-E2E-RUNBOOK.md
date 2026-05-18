@@ -77,6 +77,24 @@ Do not redirect `HOME` as a first fix:
 
 Do not use Computer Use unless the user explicitly allows it.
 
+## Manual Run Gotchas
+
+- Run ad hoc Playwright scripts from `apps/extension`, or use
+  `node --input-type=module -e` from that directory. Temp files under `/tmp` may
+  not resolve `@playwright/test`.
+- Brave may resolve the repo-local `.local/native-messaging-hosts` manifest and
+  `.local/sidra-agent-bridge` wrapper before the user-level Brave manifest. If a
+  controlled host or alternate bridge does not appear to run, inspect both the
+  user-level manifest and repo-local wrapper before debugging product code.
+- When temporarily pointing `.local/sidra-agent-bridge` at a controlled manual
+  host, restore it to `apps/bridge/dist/cli.js` before the real bridge smoke.
+- Browser clipboard reads can hang behind permission prompts during manual
+  automation. To verify a code-copy button, stub `navigator.clipboard.writeText`
+  in the extension page and assert the text passed to the stub.
+- Match manual assertions to current UI copy. Context markers can differ by
+  capture path, such as `Page context attached` versus
+  `Page metadata attached`.
+
 ## Build
 
 Run from the repo root:

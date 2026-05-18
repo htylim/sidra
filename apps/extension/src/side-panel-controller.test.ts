@@ -589,13 +589,19 @@ describe("SidePanelController", () => {
     ]);
   });
 
-  it("flushes queued prompts in order after session.started", () => {
+  it("flushes the next queued prompt after the current turn completes", () => {
     const { controller, ports } = createHarness();
 
     ports[0].emitMessage(bridgeReady());
     controller.sendPrompt("first");
     controller.sendPrompt("second");
     ports[0].emitMessage(sessionStarted());
+    ports[0].emitMessage({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "client-1",
+      event: { type: "assistant.done" }
+    });
 
     expect(ports[0].postedMessages).toEqual([
       { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
@@ -641,9 +647,9 @@ describe("SidePanelController", () => {
     });
 
     expect(controller.getSnapshot().activeSession.transcript).toEqual([
-      { role: "user", text: "hello" },
-      { role: "status", text: "Session started" },
-      { role: "assistant", text: "Hi" }
+      expect.objectContaining({ role: "user", text: "hello" }),
+      expect.objectContaining({ role: "status", text: "Session started" }),
+      expect.objectContaining({ role: "assistant", text: "Hi" })
     ]);
   });
 
@@ -817,6 +823,24 @@ describe("SidePanelController newChat", () => {
       pendingPromptCount: 0
     });
   });
+
+  it("records_reset_post_failure_as_error_status_entry", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+    const failingPostMessage = vi.fn(() => {
+      throw new Error("reset failed");
+    });
+    ports[0].postMessage = failingPostMessage;
+
+    controller.newChat();
+
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([
+      expect.objectContaining({ kind: "status", tone: "error", text: "reset failed" })
+    ]);
+  });
 });
 
 describe("SidePanelController URL sessions", () => {
@@ -901,7 +925,9 @@ describe("SidePanelController URL sessions", () => {
     controller.sendPrompt("page a");
     activePage.emit(pageIdentity("https://example.com/b"));
     activePage.emit(pageIdentity("https://example.com/a"));
-    expect(controller.getSnapshot().activeSession.transcript).toContainEqual({ role: "user", text: "page a" });
+    expect(controller.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({ role: "user", text: "page a" })
+    );
   });
 
   it("sends_first_prompt_with_the_active_page_client_session_id", () => {
@@ -1384,7 +1410,24 @@ describe("SidePanelController Capture + Send", () => {
 
     expect(ports[0].postedMessages).toEqual([]);
     expect(controller.getSnapshot().activeSession.transcript).toEqual([
-      expect.objectContaining({ role: "status", text: "Could not capture this page" })
+      expect.objectContaining({ role: "status", tone: "error", text: "Could not capture this page." })
+    ]);
+  });
+
+  it("captureAndSend_records_capture_unavailable_as_error_status_entry", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "unavailable",
+      pageIdentity: pageIdentity("https://example.com/a"),
+      message: "Could not capture this page."
+    };
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+
+    await controller.captureAndSend("summarize");
+
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([
+      expect.objectContaining({ kind: "status", role: "status", tone: "error", text: "Could not capture this page." })
     ]);
   });
 

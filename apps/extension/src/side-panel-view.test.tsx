@@ -313,7 +313,7 @@ describe("SidePanelView URL sessions", () => {
     renderInteractiveSnapshot(
       snapshotForPage({
         quickActions: [{ id: "summarize-page", label: "Summarize this page" }],
-        transcript: [{ role: "user", text: "hello" }]
+        transcript: [{ kind: "user_message", role: "user", text: "hello" }]
       })
     );
 
@@ -461,7 +461,7 @@ describe("SidePanelView URL sessions", () => {
   it("renders_active_session_transcript_only", () => {
     const markup = renderPageSnapshot(
       snapshotForPage({
-        transcript: [{ role: "user", text: "active page text" }]
+        transcript: [{ kind: "user_message", role: "user", text: "active page text" }]
       })
     );
     expect(markup).toContain("active page text");
@@ -518,8 +518,8 @@ describe("SidePanelView Capture + Send", () => {
     const markup = renderPageSnapshot(
       snapshotForPage({
         transcript: [
-          { role: "status", text: "Page context attached" },
-          { role: "user", text: "summarize" }
+          { kind: "status", role: "status", tone: "neutral", text: "Page context attached" },
+          { kind: "user_message", role: "user", text: "summarize" }
         ]
       })
     );
@@ -585,6 +585,283 @@ describe("SidePanelView Capture + Send", () => {
     );
 
     expect(markup).toContain("Full DOM skipped: too large");
+  });
+});
+
+describe("SidePanelView rich transcript rendering", () => {
+  it("renders_user_prompt_as_escaped_text", () => {
+    const markup = renderPageSnapshot(
+      snapshotForPage({
+        transcript: [{ kind: "user_message", role: "user", text: "<img src=x onerror=alert(1)>hello" }]
+      })
+    );
+
+    expect(markup).toContain("&lt;img src=x onerror=alert(1)&gt;hello");
+    expect(markup).not.toContain("<img src=");
+  });
+
+  it("renders_sanitized_assistant_markdown_without_raw_html", () => {
+    const markup = renderPageSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "## Answer\n\n<strong data-secret=\"raw\">raw html</strong>\n\n- item",
+            text: "Answer",
+            activity: [],
+            status: "complete"
+          }
+        ]
+      })
+    );
+
+    expect(markup).toContain("<h2>Answer</h2>");
+    expect(markup).toContain("<li>item</li>");
+    expect(markup).not.toContain("data-secret");
+    expect(markup).not.toContain("<strong");
+  });
+
+  it("renders_assistant_links_with_blank_target_and_safe_rel", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "[Open example](https://example.com/path)",
+            text: "Open example",
+            activity: [],
+            status: "complete"
+          }
+        ]
+      })
+    );
+
+    const link = screen.getByRole("link", { name: "Open example" }) as HTMLAnchorElement;
+    expect(link.href).toBe("https://example.com/path");
+    expect(link.target).toBe("_blank");
+    expect(link.rel).toBe("noreferrer noopener");
+  });
+
+  it("renders_assistant_mailto_links_with_blank_target_and_safe_rel", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "[Email support](mailto:support@example.com)",
+            text: "Email support",
+            activity: [],
+            status: "complete"
+          }
+        ]
+      })
+    );
+
+    const link = screen.getByRole("link", { name: "Email support" }) as HTMLAnchorElement;
+    expect(link.href).toBe("mailto:support@example.com");
+    expect(link.target).toBe("_blank");
+    expect(link.rel).toBe("noreferrer noopener");
+  });
+
+  it.each([
+    ["javascript link", "[bad](javascript:alert(1))", "bad"],
+    ["data link", "[data](data:text/html,secret)", "data"],
+    ["malformed link", "[malformed](https://[broken)", "malformed"],
+    ["protocol-relative link", "[protocol relative](//example.com/path)", "protocol relative"]
+  ])("renders_%s_without_clickable_href", (_caseName, markdown, linkText) => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown,
+            text: linkText,
+            activity: [],
+            status: "complete"
+          }
+        ]
+      })
+    );
+
+    expect(screen.queryByRole("link", { name: linkText })).toBeNull();
+    expect(screen.getByText(linkText).closest("a")).toBeNull();
+  });
+
+  it("renders_relative_markdown_links_without_clickable_href", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "[relative](/local/path)",
+            text: "relative",
+            activity: [],
+            status: "complete"
+          }
+        ]
+      })
+    );
+
+    expect(screen.queryByRole("link", { name: "relative" })).toBeNull();
+    expect(screen.getByText("relative").closest("a")).toBeNull();
+  });
+
+  it("does_not_render_markdown_images", () => {
+    const markup = renderPageSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "![secret image](https://example.com/image.png)",
+            text: "",
+            activity: [],
+            status: "complete"
+          }
+        ]
+      })
+    );
+
+    expect(markup).not.toContain("<img");
+    expect(markup).not.toContain("secret image");
+  });
+
+  it("renders_code_blocks_with_copy_buttons", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "```ts\nconst value = 1;\n```",
+            text: "const value = 1;",
+            activity: [],
+            status: "complete"
+          }
+        ]
+      })
+    );
+
+    expect(screen.getByText("const value = 1;")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Copy code" })).not.toBeNull();
+  });
+
+  it("clicking_code_copy_writes_code_to_clipboard", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "```json\n{\"ok\": true}\n```",
+            text: "{\"ok\": true}",
+            activity: [],
+            status: "complete"
+          }
+        ]
+      })
+    );
+
+    await user.click(screen.getByRole("button", { name: "Copy code" }));
+
+    expect(writeText).toHaveBeenCalledWith("{\"ok\": true}\n");
+  });
+
+  it("renders_activity_collapsed_by_default", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "",
+            text: "",
+            activity: [{ kind: "progress", label: "Reading" }],
+            status: "streaming"
+          }
+        ]
+      })
+    );
+
+    const details = screen.getByText("Activity").closest("details");
+    expect(details?.open).toBe(false);
+  });
+
+  it("shows_safe_activity_inside_activity_disclosure_when_opened", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "",
+            text: "",
+            activity: [{ kind: "progress", label: "Reading" }],
+            status: "streaming"
+          }
+        ]
+      })
+    );
+
+    await user.click(screen.getByText("Activity"));
+
+    expect(screen.getByText("Reading")).not.toBeNull();
+  });
+
+  it("renders_error_status_entries_as_distinct_status_cards", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ kind: "status", role: "status", tone: "error", text: "Provider failed" }]
+      })
+    );
+
+    const status = screen.getByRole("alert");
+    expect(status.textContent).toBe("Provider failed");
+    expect(status.closest(".status-card")?.className).toContain("error");
+  });
+
+  it("renders_failed_assistant_turn_as_not_streaming_with_partial_output_visible", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "Partial output",
+            text: "Partial output",
+            activity: [],
+            status: "failed"
+          }
+        ]
+      })
+    );
+
+    expect(screen.getByText("Partial output")).not.toBeNull();
+    expect(screen.queryByText("Streaming")).toBeNull();
+  });
+
+  it("renders_cancelled_status_entries_as_distinct_status_cards", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ kind: "status", role: "status", tone: "cancelled", text: "Assistant turn cancelled" }]
+      })
+    );
+
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe("Assistant turn cancelled");
+    expect(status.closest(".status-card")?.className).toContain("cancelled");
   });
 });
 

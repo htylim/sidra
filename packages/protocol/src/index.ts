@@ -66,8 +66,25 @@ export type ExtensionToBridge =
 
 export type AgentEvent =
   | { type: "assistant.text.delta"; text: string }
+  | { type: "assistant.activity"; activity: SafeAgentActivity }
   | { type: "assistant.done" }
   | { type: "assistant.cancelled" };
+
+export type SafeAgentActivity =
+  | { kind: "tool"; phase: "started"; label: "Tool started" }
+  | { kind: "tool"; phase: "finished"; label: "Tool finished" }
+  | { kind: "progress"; label: "Working" | "Reading" | "Searching" }
+  | { kind: "error"; label: "Activity error" };
+
+export type SessionErrorCode =
+  | "session_not_started"
+  | "turn_in_flight"
+  | "no_in_flight_turn"
+  | "provider_error"
+  | "provider_start_failed"
+  | "provider_unavailable"
+  | "unsafe_provider_event"
+  | "unknown_error";
 
 export type BridgeToExtension =
   | {
@@ -82,7 +99,7 @@ export type BridgeToExtension =
       clientSessionId: string;
       event: AgentEvent;
     }
-  | { type: "session.error"; version: 2; clientSessionId: string; message: string; code?: string }
+  | { type: "session.error"; version: 2; clientSessionId: string; message: string; code?: SessionErrorCode }
   | { type: "bridge.ready"; version: 2 }
   | { type: "bridge.error"; version: 2; message: string; code?: string };
 
@@ -114,10 +131,24 @@ export function parseExtensionToBridge(input: unknown): ParseResult<ExtensionToB
 
   switch (input.type) {
     case "session.start":
+      if (!hasOnlyKeys(input, ["type", "version", "clientSessionId", "providerId"])) {
+        return invalid("Message has invalid fields");
+      }
       if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
       if (input.providerId !== "codex") return invalid("providerId must be codex");
-      return { ok: true, value: input as ExtensionToBridge };
+      return {
+        ok: true,
+        value: {
+          type: "session.start",
+          version: PROTOCOL_VERSION,
+          clientSessionId: input.clientSessionId,
+          providerId: input.providerId
+        }
+      };
     case "session.send":
+      if (!hasOnlyKeys(input, ["type", "version", "clientSessionId", "prompt", "pageContext"])) {
+        return invalid("Message has invalid fields");
+      }
       if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
       if (!isNonEmptyString(input.prompt)) return invalid("prompt is required");
       if (input.pageContext === undefined) {
@@ -148,10 +179,21 @@ export function parseExtensionToBridge(input: unknown): ParseResult<ExtensionToB
     case "session.cancel":
     case "session.reset":
     case "session.close":
+      if (!hasOnlyKeys(input, ["type", "version", "clientSessionId"])) {
+        return invalid("Message has invalid fields");
+      }
       if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
-      return { ok: true, value: input as ExtensionToBridge };
+      return {
+        ok: true,
+        value: {
+          type: input.type,
+          version: PROTOCOL_VERSION,
+          clientSessionId: input.clientSessionId
+        }
+      };
     case "heartbeat":
-      return { ok: true, value: input as ExtensionToBridge };
+      if (!hasOnlyKeys(input, ["type", "version"])) return invalid("Message has invalid fields");
+      return { ok: true, value: { type: "heartbeat", version: PROTOCOL_VERSION } };
     default:
       return invalid("Unknown command");
   }
@@ -163,26 +205,100 @@ export function parseBridgeToExtension(input: unknown): ParseResult<BridgeToExte
 
   switch (input.type) {
     case "bridge.ready":
-      return { ok: true, value: input as BridgeToExtension };
+      if (!hasOnlyKeys(input, ["type", "version"])) return invalid("Message has invalid fields");
+      return { ok: true, value: { type: "bridge.ready", version: PROTOCOL_VERSION } };
     case "session.started":
+      if (!hasOnlyKeys(input, ["type", "version", "clientSessionId", "bridgeSessionId"])) {
+        return invalid("Message has invalid fields");
+      }
       if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
       if (!isNonEmptyString(input.bridgeSessionId)) return invalid("bridgeSessionId is required");
-      return { ok: true, value: input as BridgeToExtension };
+      return {
+        ok: true,
+        value: {
+          type: "session.started",
+          version: PROTOCOL_VERSION,
+          clientSessionId: input.clientSessionId,
+          bridgeSessionId: input.bridgeSessionId
+        }
+      };
     case "agent.event":
+      if (!hasOnlyKeys(input, ["type", "version", "clientSessionId", "event"])) {
+        return invalid("Message has invalid fields");
+      }
       if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
-      if (!isAgentEvent(input.event)) return invalid("event is invalid");
-      return { ok: true, value: input as BridgeToExtension };
+      {
+        const event = parseAgentEvent(input.event);
+        if (!event.ok) return event;
+        return {
+          ok: true,
+          value: {
+            type: "agent.event",
+            version: PROTOCOL_VERSION,
+            clientSessionId: input.clientSessionId,
+            event: event.value
+          }
+        };
+      }
     case "session.error":
+      if (!hasOnlyKeys(input, ["type", "version", "clientSessionId", "message", "code"])) {
+        return invalid("Message has invalid fields");
+      }
       if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
       if (!isNonEmptyString(input.message)) return invalid("message is required");
-      if (!optionalString(input.code)) return invalid("code is invalid");
-      return { ok: true, value: input as BridgeToExtension };
+      if (!optionalSessionErrorCode(input.code)) return invalid("code is invalid");
+      {
+        const value: BridgeToExtension = {
+          type: "session.error",
+          version: PROTOCOL_VERSION,
+          clientSessionId: input.clientSessionId,
+          message: input.message
+        };
+        if (input.code !== undefined) value.code = input.code;
+        return { ok: true, value };
+      }
     case "bridge.error":
+      if (!hasOnlyKeys(input, ["type", "version", "message", "code"])) {
+        return invalid("Message has invalid fields");
+      }
       if (!isNonEmptyString(input.message)) return invalid("message is required");
       if (!optionalString(input.code)) return invalid("code is invalid");
-      return { ok: true, value: input as BridgeToExtension };
+      {
+        const value: BridgeToExtension = { type: "bridge.error", version: PROTOCOL_VERSION, message: input.message };
+        if (input.code !== undefined) value.code = input.code;
+        return { ok: true, value };
+      }
     default:
       return invalid("Unknown message");
+  }
+}
+
+export function parseAgentEvent(input: unknown): ParseResult<AgentEvent> {
+  if (!isRecord(input)) return invalid("event is invalid");
+
+  switch (input.type) {
+    case "assistant.text.delta":
+      if (!hasOnlyKeys(input, ["type", "text"])) return invalid("event is invalid");
+      if (typeof input.text !== "string") return invalid("event is invalid");
+      return {
+        ok: true,
+        value: { type: "assistant.text.delta", text: input.text }
+      };
+    case "assistant.activity":
+      if (!hasOnlyKeys(input, ["type", "activity"])) return invalid("event is invalid");
+      {
+        const activity = parseSafeAgentActivity(input.activity);
+        if (!activity) return invalid("event is invalid");
+        return { ok: true, value: { type: "assistant.activity", activity } };
+      }
+    case "assistant.done":
+      if (!hasOnlyKeys(input, ["type"])) return invalid("event is invalid");
+      return { ok: true, value: { type: "assistant.done" } };
+    case "assistant.cancelled":
+      if (!hasOnlyKeys(input, ["type"])) return invalid("event is invalid");
+      return { ok: true, value: { type: "assistant.cancelled" } };
+    default:
+      return invalid("event is invalid");
   }
 }
 
@@ -271,19 +387,49 @@ function parsePageContextMetadata(value: Record<string, unknown>): PageContextMe
   return metadata;
 }
 
-function isAgentEvent(value: unknown): value is AgentEvent {
-  if (!isRecord(value)) return false;
+function parseSafeAgentActivity(value: unknown): SafeAgentActivity | null {
+  if (!isRecord(value)) return null;
 
-  switch (value.type) {
-    case "assistant.text.delta":
-      return typeof value.text === "string";
-    case "assistant.done":
-    case "assistant.cancelled":
-      return true;
+  switch (value.kind) {
+    case "tool":
+      if (!hasOnlyKeys(value, ["kind", "phase", "label"])) return null;
+      if (value.phase === "started" && value.label === "Tool started") {
+        return { kind: "tool", phase: "started", label: "Tool started" };
+      }
+      if (value.phase === "finished" && value.label === "Tool finished") {
+        return { kind: "tool", phase: "finished", label: "Tool finished" };
+      }
+      return null;
+    case "progress":
+      if (!hasOnlyKeys(value, ["kind", "label"])) return null;
+      if (value.label !== "Working" && value.label !== "Reading" && value.label !== "Searching") return null;
+      return { kind: "progress", label: value.label };
+    case "error":
+      if (!hasOnlyKeys(value, ["kind", "label"])) return null;
+      if (value.label !== "Activity error") return null;
+      return { kind: "error", label: "Activity error" };
     default:
-      return false;
+      return null;
   }
 }
+
+function optionalSessionErrorCode(value: unknown): value is SessionErrorCode | undefined {
+  return value === undefined || isSessionErrorCode(value);
+}
+
+function isSessionErrorCode(value: unknown): value is SessionErrorCode {
+  return (
+    value === "session_not_started" ||
+    value === "turn_in_flight" ||
+    value === "no_in_flight_turn" ||
+    value === "provider_error" ||
+    value === "provider_start_failed" ||
+    value === "provider_unavailable" ||
+    value === "unsafe_provider_event" ||
+    value === "unknown_error"
+  );
+}
+
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -1,4 +1,4 @@
-import type { BridgeToExtension, ExtensionToBridge, PageContext, ProviderId } from "@sidra/protocol";
+import type { BridgeToExtension, ExtensionToBridge, PageContext, ProviderId, SessionErrorCode } from "@sidra/protocol";
 import {
   BRIDGE_HARD_PAYLOAD_BYTE_LIMIT,
   BRIDGE_PAYLOAD_TOO_LARGE_MESSAGE,
@@ -6,10 +6,15 @@ import {
   serializedJsonByteLength
 } from "@sidra/protocol";
 import {
+  addAssistantActivity,
   addAssistantTextDelta,
   addContextMarker,
+  addErrorStatusEntry,
   addStatusEntry,
   addUserPrompt,
+  cancelAssistantTurn,
+  completeAssistantTurn,
+  failAssistantTurn,
   removeTranscriptEntriesByIds,
   type ContextAttachmentMarker,
   type TranscriptEntry
@@ -55,6 +60,7 @@ type PreparedPromptSubmission = PromptSubmission & {
     markerId?: string;
     promptId: string;
   };
+  transcriptEntriesVisible: boolean;
 };
 
 type SubmissionInput = string | PromptSubmission;
@@ -76,8 +82,14 @@ export class BridgeSessionCoordinator {
   private pendingSubmissions: PreparedPromptSubmission[] = [];
   // Tracks whether the bridge may already have provider state for this session.
   private startPosted = false;
+  // A sent prompt owns the current provider turn until a terminal event or error arrives.
+  private turnInFlight = false;
   // New Chat sends `session.reset`, whose success also arrives as `session.started`.
   private suppressNextSessionStartedStatus = false;
+  // Reset can race already-posted startup messages because protocol v2 has no request id.
+  private startupResultsToIgnore = 0;
+  // Reset can also race a terminal result from an old in-flight turn.
+  private terminalTurnErrorsToIgnore = 0;
   private snapshot: BridgeSessionCoordinatorSnapshot;
 
   constructor(options: BridgeSessionCoordinatorOptions) {
@@ -92,7 +104,7 @@ export class BridgeSessionCoordinator {
   getSnapshot = (): BridgeSessionCoordinatorSnapshot => this.snapshot;
 
   hasProviderState = (): boolean =>
-    this.startPosted || this.snapshot.sessionStarted || this.snapshot.starting;
+    this.startPosted || this.snapshot.sessionStarted || this.snapshot.starting || this.turnInFlight;
 
   subscribe = (listener: Listener): (() => void) => {
     this.listeners.add(listener);
@@ -109,6 +121,10 @@ export class BridgeSessionCoordinator {
       this.recordLocalSubmissionError(payloadPreflight.error);
       return false;
     }
+    if (this.turnInFlight) {
+      this.recordLocalSubmissionError("A turn is already in flight for this session");
+      return false;
+    }
 
     if (this.snapshot.sessionStarted) {
       const result = this.postSessionSend(submission);
@@ -116,6 +132,7 @@ export class BridgeSessionCoordinator {
         this.clearPendingAfterError(result.error);
         return false;
       }
+      this.turnInFlight = true;
       this.setSnapshot({
         ...this.snapshot,
         transcript: this.addSubmissionTranscriptEntries(this.snapshot.transcript, submission),
@@ -140,11 +157,15 @@ export class BridgeSessionCoordinator {
       }
     }
 
-    this.pendingSubmissions.push(submission);
+    const shouldShowQueuedSubmission = this.pendingSubmissions.length === 0;
+    const queuedSubmission = { ...submission, transcriptEntriesVisible: shouldShowQueuedSubmission };
+    this.pendingSubmissions.push(queuedSubmission);
     this.setSnapshot({
       ...this.snapshot,
       pendingPromptCount: this.pendingSubmissions.length,
-      transcript: this.addSubmissionTranscriptEntries(this.snapshot.transcript, submission),
+      transcript: shouldShowQueuedSubmission
+        ? this.addSubmissionTranscriptEntries(this.snapshot.transcript, queuedSubmission)
+        : this.snapshot.transcript,
       lastError: undefined
     });
     return true;
@@ -153,22 +174,23 @@ export class BridgeSessionCoordinator {
   recordCaptureUnavailable(message: string): void {
     this.setSnapshot({
       ...this.snapshot,
-      transcript: addContextMarker(
-        this.snapshot.transcript,
-        { kind: "capture_unavailable", text: "Could not capture this page" },
-        this.createTranscriptEntryId()
-      ),
+      transcript: addErrorStatusEntry(this.snapshot.transcript, message, this.createTranscriptEntryId()),
       lastError: message
     });
   }
 
   newChat(): void {
-    const providerStateMayExist = this.startPosted || this.snapshot.sessionStarted || this.snapshot.starting;
+    const providerStateMayExist = this.startPosted || this.snapshot.sessionStarted || this.snapshot.starting || this.turnInFlight;
+    const resetDuringStartup = this.snapshot.starting && !this.snapshot.sessionStarted;
+    const resetDuringTurn = this.turnInFlight;
     this.pendingSubmissions = [];
+    this.turnInFlight = false;
 
     if (!providerStateMayExist) {
       this.startPosted = false;
       this.suppressNextSessionStartedStatus = false;
+      this.startupResultsToIgnore = 0;
+      this.terminalTurnErrorsToIgnore = 0;
       this.setSnapshot(this.initialSnapshot());
       return;
     }
@@ -181,17 +203,22 @@ export class BridgeSessionCoordinator {
 
     if (!result.ok) {
       this.startPosted = false;
+      this.turnInFlight = false;
       this.suppressNextSessionStartedStatus = false;
+      this.startupResultsToIgnore = 0;
+      this.terminalTurnErrorsToIgnore = 0;
       this.setSnapshot({
         ...this.initialSnapshot(),
         lastError: result.error,
-        transcript: addStatusEntry([], result.error)
+        transcript: addErrorStatusEntry([], result.error)
       });
       return;
     }
 
     this.startPosted = true;
     this.suppressNextSessionStartedStatus = true;
+    if (resetDuringStartup) this.startupResultsToIgnore += 1;
+    if (resetDuringTurn) this.terminalTurnErrorsToIgnore += 1;
     this.setSnapshot({
       ...this.initialSnapshot(),
       starting: true
@@ -202,7 +229,10 @@ export class BridgeSessionCoordinator {
     this.clientSessionId = clientSessionId;
     this.pendingSubmissions = [];
     this.startPosted = false;
+    this.turnInFlight = false;
     this.suppressNextSessionStartedStatus = false;
+    this.startupResultsToIgnore = 0;
+    this.terminalTurnErrorsToIgnore = 0;
     this.snapshot = {
       clientSessionId,
       sessionStarted: false,
@@ -217,12 +247,16 @@ export class BridgeSessionCoordinator {
     const transcript = this.removePendingTranscriptEntries(this.snapshot.transcript);
     this.pendingSubmissions = [];
     this.startPosted = false;
+    this.turnInFlight = false;
+    this.suppressNextSessionStartedStatus = false;
+    this.startupResultsToIgnore = 0;
+    this.terminalTurnErrorsToIgnore = 0;
     this.setSnapshot({
       ...this.snapshot,
       sessionStarted: false,
       starting: false,
       pendingPromptCount: 0,
-      transcript: addStatusEntry(transcript, "Bridge disconnected")
+      transcript: addStatusEntry(failAssistantTurn(transcript), "Bridge disconnected")
     });
   }
 
@@ -242,6 +276,11 @@ export class BridgeSessionCoordinator {
         return;
       case "session.started":
         if (message.clientSessionId !== this.snapshot.clientSessionId || !this.startPosted) return;
+        if (this.startupResultsToIgnore > 0) {
+          this.startupResultsToIgnore -= 1;
+          return;
+        }
+        this.terminalTurnErrorsToIgnore = 0;
         const nextTranscript = this.suppressNextSessionStartedStatus
           ? this.snapshot.transcript
           : addStatusEntry(this.snapshot.transcript, "Session started");
@@ -256,16 +295,45 @@ export class BridgeSessionCoordinator {
         return;
       case "agent.event":
         if (message.clientSessionId !== this.snapshot.clientSessionId) return;
+        if (!this.turnInFlight) return;
         if (message.event.type === "assistant.text.delta") {
+          this.turnInFlight = true;
           this.setSnapshot({
             ...this.snapshot,
             transcript: addAssistantTextDelta(this.snapshot.transcript, message.event.text)
           });
+          return;
+        }
+        if (message.event.type === "assistant.activity") {
+          this.turnInFlight = true;
+          this.setSnapshot({
+            ...this.snapshot,
+            transcript: addAssistantActivity(this.snapshot.transcript, message.event.activity)
+          });
+          return;
+        }
+        if (message.event.type === "assistant.done") {
+          this.turnInFlight = false;
+          this.setSnapshot({
+            ...this.snapshot,
+            transcript: completeAssistantTurn(this.snapshot.transcript)
+          });
+          this.flushPendingPrompts();
+          return;
+        }
+        if (message.event.type === "assistant.cancelled") {
+          this.turnInFlight = false;
+          const transcript = cancelAssistantTurn(this.snapshot.transcript);
+          this.setSnapshot({
+            ...this.snapshot,
+            transcript: transcript === this.snapshot.transcript ? appendCancelledStatus(this.snapshot.transcript) : transcript
+          });
+          this.flushPendingPrompts();
         }
         return;
       case "session.error":
         if (message.clientSessionId !== this.snapshot.clientSessionId) return;
-        this.clearPendingAfterError(message.message);
+        this.handleSessionError(message.message, message.code);
         return;
       case "bridge.error":
         this.clearPendingAfterBridgeError();
@@ -274,6 +342,8 @@ export class BridgeSessionCoordinator {
   }
 
   private flushPendingPrompts(): void {
+    if (!this.snapshot.sessionStarted) return;
+    if (this.turnInFlight) return;
     while (this.pendingSubmissions.length > 0) {
       const submission = this.pendingSubmissions.shift();
       if (submission === undefined) return;
@@ -283,6 +353,16 @@ export class BridgeSessionCoordinator {
         this.removeFailedSubmissionAfterFlush(submission, result.error);
         return;
       }
+      this.turnInFlight = true;
+      if (!submission.transcriptEntriesVisible) {
+        submission.transcriptEntriesVisible = true;
+        this.setSnapshot({
+          ...this.snapshot,
+          transcript: this.addSubmissionTranscriptEntries(this.snapshot.transcript, submission),
+          lastError: undefined
+        });
+      }
+      return;
     }
   }
 
@@ -313,37 +393,114 @@ export class BridgeSessionCoordinator {
     this.setSnapshot({
       ...this.snapshot,
       lastError: message,
-      transcript: addStatusEntry(this.snapshot.transcript, message)
+      transcript: addErrorStatusEntry(this.snapshot.transcript, message)
     });
   }
 
-  private clearPendingAfterError(message: string): void {
+  private clearPendingAfterError(message: string, tone: "neutral" | "error" = "error"): void {
     const transcript = this.removePendingTranscriptEntries(this.snapshot.transcript);
     this.pendingSubmissions = [];
     this.startPosted = false;
+    this.turnInFlight = false;
     this.suppressNextSessionStartedStatus = false;
+    this.startupResultsToIgnore = 0;
+    this.terminalTurnErrorsToIgnore = 0;
     this.setSnapshot({
       ...this.snapshot,
       sessionStarted: false,
       starting: false,
       pendingPromptCount: 0,
       lastError: message,
-      transcript: addStatusEntry(transcript, message)
+      transcript: tone === "error" ? addErrorStatusEntry(transcript, message) : addStatusEntry(transcript, message)
     });
+  }
+
+  private handleSessionError(message: string, code: SessionErrorCode | undefined): void {
+    const effectiveCode = code ?? "unknown_error";
+    const terminalTurnError = this.isTerminalTurnError(effectiveCode);
+    const fatalStartupError = this.isFatalStartupError(effectiveCode);
+    if (this.shouldIgnoreStaleSessionError(terminalTurnError, fatalStartupError)) return;
+
+    if (fatalStartupError) {
+      this.clearPendingAfterError(message, "error");
+      return;
+    }
+
+    if (effectiveCode === "session_not_started") {
+      const transcript = failAssistantTurn(this.snapshot.transcript);
+      this.pendingSubmissions = [];
+      this.startPosted = false;
+      this.turnInFlight = false;
+      this.suppressNextSessionStartedStatus = false;
+      this.startupResultsToIgnore = 0;
+      this.terminalTurnErrorsToIgnore = 0;
+      this.setSnapshot({
+        ...this.snapshot,
+        sessionStarted: false,
+        starting: false,
+        pendingPromptCount: 0,
+        lastError: message,
+        transcript: addErrorStatusEntry(transcript, message)
+      });
+      return;
+    }
+
+    const transcript = terminalTurnError ? failAssistantTurn(this.snapshot.transcript) : this.snapshot.transcript;
+    if (terminalTurnError) this.turnInFlight = false;
+    this.setSnapshot({
+      ...this.snapshot,
+      lastError: message,
+      transcript: addErrorStatusEntry(transcript, message)
+    });
+    if (terminalTurnError) this.flushPendingPrompts();
+  }
+
+  private isFatalStartupError(code: SessionErrorCode): boolean {
+    return (
+      this.snapshot.starting &&
+      !this.snapshot.sessionStarted &&
+      !this.turnInFlight &&
+      !this.hasStreamingAssistantTurn() &&
+      code !== "turn_in_flight" &&
+      code !== "no_in_flight_turn"
+    );
+  }
+
+  private isTerminalTurnError(code: SessionErrorCode): boolean {
+    return code === "provider_error" || code === "unsafe_provider_event" || code === "unknown_error";
+  }
+
+  private shouldIgnoreStaleSessionError(terminalTurnError: boolean, fatalStartupError: boolean): boolean {
+    if (fatalStartupError && this.startupResultsToIgnore > 0) {
+      this.startupResultsToIgnore -= 1;
+      return true;
+    }
+    if (terminalTurnError && this.terminalTurnErrorsToIgnore > 0) {
+      this.terminalTurnErrorsToIgnore -= 1;
+      return true;
+    }
+    return false;
+  }
+
+  private hasStreamingAssistantTurn(): boolean {
+    return this.snapshot.transcript.some((entry) => entry.kind === "assistant_turn" && entry.status === "streaming");
   }
 
   private clearPendingAfterBridgeError(): void {
     const transcript = this.removePendingTranscriptEntries(this.snapshot.transcript);
     this.pendingSubmissions = [];
     this.startPosted = false;
+    this.turnInFlight = false;
     this.suppressNextSessionStartedStatus = false;
+    this.startupResultsToIgnore = 0;
+    this.terminalTurnErrorsToIgnore = 0;
     this.setSnapshot({
       ...this.snapshot,
       sessionStarted: false,
       starting: false,
       pendingPromptCount: 0,
       lastError: undefined,
-      transcript
+      transcript: failAssistantTurn(transcript)
     });
   }
 
@@ -356,14 +513,17 @@ export class BridgeSessionCoordinator {
 
     this.pendingSubmissions = [];
     this.startPosted = false;
+    this.turnInFlight = false;
     this.suppressNextSessionStartedStatus = false;
+    this.startupResultsToIgnore = 0;
+    this.terminalTurnErrorsToIgnore = 0;
     this.setSnapshot({
       ...this.snapshot,
       sessionStarted: false,
       starting: false,
       pendingPromptCount: 0,
       lastError: message,
-      transcript: addStatusEntry(
+      transcript: addErrorStatusEntry(
         removeTranscriptEntriesByIds(this.snapshot.transcript, pendingEntriesToRemove),
         message
       )
@@ -382,6 +542,7 @@ export class BridgeSessionCoordinator {
       prompt: normalizedPrompt,
       pageContext,
       contextMarker,
+      transcriptEntriesVisible: false,
       transcriptEntryIds: {
         markerId: contextMarker ? this.createTranscriptEntryId() : undefined,
         promptId: this.createTranscriptEntryId()
@@ -445,4 +606,8 @@ function markerForPageContext(pageContext: PageContext | undefined): ContextAtta
     return { kind: "full_dom_attached", text: "Full DOM attached" };
   }
   return { kind: "page_context_attached", text: "Page context attached" };
+}
+
+function appendCancelledStatus(transcript: TranscriptEntry[]): TranscriptEntry[] {
+  return [...transcript, { kind: "status", role: "status", tone: "cancelled", text: "Assistant turn cancelled" }];
 }

@@ -1,12 +1,14 @@
-import type { AgentEvent, BridgeToExtension, ProviderId } from "@sidra/protocol";
+import { parseAgentEvent, type AgentEvent, type BridgeToExtension, type ProviderId } from "@sidra/protocol";
 import { formatPromptForAgent, type BridgeTurnInput } from "./context-prompt.js";
+
+export type SafeProviderTurnEvent = AgentEvent;
 
 export type AgentSendInput = {
   prompt: string;
 };
 
 export type AgentSession = {
-  send(input: AgentSendInput, signal: AbortSignal): AsyncIterable<AgentEvent>;
+  send(input: AgentSendInput, signal: AbortSignal): AsyncIterable<SafeProviderTurnEvent>;
   close(): Promise<void>;
 };
 
@@ -87,37 +89,47 @@ export class BridgeSessionManager {
       prompt: formatPromptForAgent(input)
     };
 
-    inFlight.done = this.runProviderSend(clientSessionId, session.providerSession, providerInput, controller).finally(() => {
+    const clearInFlight = () => {
       if (session.inFlight === inFlight) {
         delete session.inFlight;
       }
-    });
+    };
+
+    inFlight.done = this.runProviderSend(
+      clientSessionId,
+      session.providerSession,
+      providerInput,
+      controller,
+      clearInFlight
+    ).finally(clearInFlight);
     session.inFlight = inFlight;
     await inFlight.done;
   }
 
   async cancelTurn(clientSessionId: string): Promise<void> {
-    await this.sessionOperations.get(clientSessionId);
-    const session = this.sessions.get(clientSessionId);
-    if (!session?.inFlight) {
+    await this.enqueueSessionOperation(clientSessionId, async () => {
+      const session = this.sessions.get(clientSessionId);
+      if (!session?.inFlight) {
+        this.options.emit({
+          type: "session.error",
+          version: 2,
+          clientSessionId,
+          message: "No in-flight turn to cancel",
+          code: "no_in_flight_turn"
+        });
+        return;
+      }
+
+      const inFlight = session.inFlight;
+      inFlight.controller.abort();
+      await inFlight.done;
+      if (this.sessions.get(clientSessionId) !== session) return;
       this.options.emit({
-        type: "session.error",
+        type: "agent.event",
         version: 2,
         clientSessionId,
-        message: "No in-flight turn to cancel",
-        code: "no_in_flight_turn"
+        event: { type: "assistant.cancelled" }
       });
-      return;
-    }
-
-    const inFlight = session.inFlight;
-    inFlight.controller.abort();
-    await inFlight.done;
-    this.options.emit({
-      type: "agent.event",
-      version: 2,
-      clientSessionId,
-      event: { type: "assistant.cancelled" }
     });
   }
 
@@ -170,9 +182,25 @@ export class BridgeSessionManager {
     const existing = this.sessions.get(clientSessionId);
     if (existing) {
       await this.closeManagedSession(existing);
+      if (this.sessions.get(clientSessionId) === existing) {
+        this.sessions.delete(clientSessionId);
+      }
     }
 
-    const providerSession = await this.options.provider.createSession();
+    let providerSession: AgentSession;
+    try {
+      providerSession = await this.options.provider.createSession();
+    } catch {
+      this.options.emit({
+        type: "session.error",
+        version: 2,
+        clientSessionId,
+        message: "Provider session failed to start.",
+        code: "provider_start_failed"
+      });
+      return;
+    }
+
     this.sessions.set(clientSessionId, { providerSession, providerId });
     this.options.emit({
       type: "session.started",
@@ -194,15 +222,46 @@ export class BridgeSessionManager {
     clientSessionId: string,
     providerSession: AgentSession,
     input: AgentSendInput,
-    controller: AbortController
+    controller: AbortController,
+    clearInFlight: () => void
   ): Promise<void> {
+    let terminalEventEmitted = false;
     try {
       for await (const event of providerSession.send(input, controller.signal)) {
         if (controller.signal.aborted) return;
-        this.options.emit({ type: "agent.event", version: 2, clientSessionId, event });
+        const safeEvent = parseAgentEvent(event);
+        if (!safeEvent.ok) {
+          controller.abort();
+          clearInFlight();
+          this.options.emit({
+            type: "session.error",
+            version: 2,
+            clientSessionId,
+            message: "Provider emitted an unsafe event.",
+            code: "unsafe_provider_event"
+          });
+          return;
+        }
+        if (safeEvent.value.type === "assistant.done" || safeEvent.value.type === "assistant.cancelled") {
+          terminalEventEmitted = true;
+          clearInFlight();
+          this.options.emit({ type: "agent.event", version: 2, clientSessionId, event: safeEvent.value });
+          return;
+        }
+        this.options.emit({ type: "agent.event", version: 2, clientSessionId, event: safeEvent.value });
+      }
+      if (!terminalEventEmitted && !controller.signal.aborted) {
+        clearInFlight();
+        this.options.emit({
+          type: "agent.event",
+          version: 2,
+          clientSessionId,
+          event: { type: "assistant.done" }
+        });
       }
     } catch {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || terminalEventEmitted) return;
+      clearInFlight();
       this.options.emit({
         type: "session.error",
         version: 2,

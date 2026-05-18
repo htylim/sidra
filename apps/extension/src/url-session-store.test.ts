@@ -62,6 +62,15 @@ function agentTextDelta(clientSessionId: string, text: string): BridgeToExtensio
   };
 }
 
+function sessionStarted(clientSessionId: string): BridgeToExtension {
+  return {
+    type: "session.started",
+    version: 2,
+    clientSessionId,
+    bridgeSessionId: `${clientSessionId}-bridge`
+  };
+}
+
 function sessionsByClientSessionId(store: UrlSessionStore) {
   return new Map(store.getSnapshot().sessions.map((session) => [session.clientSessionId, session]));
 }
@@ -152,7 +161,9 @@ describe("UrlSessionStore", () => {
     store.selectPage(pageIdentity("https://example.com/b"));
     store.selectPage(pageIdentity("https://example.com/a"));
     expect(store.getSnapshot().activeSession.draftPrompt).toBe("");
-    expect(store.getSnapshot().activeSession.transcript).toContainEqual({ role: "user", text: "hello" });
+    expect(store.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({ role: "user", text: "hello" })
+    );
   });
 
   it("updates_only_the_active_session_draft", () => {
@@ -176,29 +187,79 @@ describe("UrlSessionStore", () => {
     const harness = createStoreHarness();
     harness.store.selectPage(pageIdentity("https://example.com/a"));
     harness.store.sendPrompt("first");
+    harness.transport.emitMessage(sessionStarted("client-1"));
     harness.store.selectPage(pageIdentity("https://example.com/b"));
     harness.transport.emitMessage(agentTextDelta("client-1", "hidden while inactive"));
     expect(harness.store.getSnapshot().activeSession.transcript).toEqual([]);
     harness.store.selectPage(pageIdentity("https://example.com/a"));
-    expect(harness.store.getSnapshot().activeSession.transcript).toContainEqual({
-      role: "assistant",
-      text: "hidden while inactive"
+    expect(harness.store.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({
+        role: "assistant",
+        text: "hidden while inactive"
+      })
+    );
+  });
+
+  it("does_not_show_inactive_session_stream_or_error_in_active_session", () => {
+    const harness = createStoreHarness();
+    harness.store.selectPage(pageIdentity("https://example.com/a"));
+    harness.store.sendPrompt("first");
+    harness.transport.emitMessage(sessionStarted("client-1"));
+    harness.store.selectPage(pageIdentity("https://example.com/b"));
+
+    harness.transport.emitMessage(agentTextDelta("client-1", "inactive text"));
+    harness.transport.emitMessage({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "client-1",
+      message: "Inactive failure",
+      code: "provider_error"
     });
+
+    expect(harness.store.getSnapshot().activeSession.transcript).toEqual([]);
+  });
+
+  it("restores_inactive_session_stream_and_error_when_returning_to_that_page", () => {
+    const harness = createStoreHarness();
+    harness.store.selectPage(pageIdentity("https://example.com/a"));
+    harness.store.sendPrompt("first");
+    harness.transport.emitMessage(sessionStarted("client-1"));
+    harness.store.selectPage(pageIdentity("https://example.com/b"));
+
+    harness.transport.emitMessage(agentTextDelta("client-1", "inactive text"));
+    harness.transport.emitMessage({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "client-1",
+      message: "Inactive failure",
+      code: "provider_error"
+    });
+    harness.store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(harness.store.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({ kind: "assistant_turn", markdown: "inactive text", status: "failed" })
+    );
+    expect(harness.store.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({ kind: "status", tone: "error", text: "Inactive failure" })
+    );
   });
 
   it("updates_cached_sessions_when_an_inactive_coordinator_changes", () => {
     const harness = createStoreHarness();
     harness.store.selectPage(pageIdentity("https://example.com/a"));
     harness.store.sendPrompt("first");
+    harness.transport.emitMessage(sessionStarted("client-1"));
     harness.store.selectPage(pageIdentity("https://example.com/b"));
     harness.store.getSnapshot();
 
     harness.transport.emitMessage(agentTextDelta("client-1", "inactive text"));
 
-    expect(sessionsByClientSessionId(harness.store).get("client-1")?.transcript).toContainEqual({
-      role: "assistant",
-      text: "inactive text"
-    });
+    expect(sessionsByClientSessionId(harness.store).get("client-1")?.transcript).toContainEqual(
+      expect.objectContaining({
+        role: "assistant",
+        text: "inactive text"
+      })
+    );
   });
 
   it("marks_all_started_sessions_disconnected_when_bridge_disconnects", () => {
@@ -214,14 +275,14 @@ describe("UrlSessionStore", () => {
       sessionStarted: false,
       starting: false,
       pendingPromptCount: 0,
-      transcript: expect.arrayContaining([{ role: "status", text: "Bridge disconnected" }])
+      transcript: expect.arrayContaining([expect.objectContaining({ role: "status", text: "Bridge disconnected" })])
     });
     expect(sessions.get("client-2")).toMatchObject({
       pageKey: "https://example.com/b",
       sessionStarted: false,
       starting: false,
       pendingPromptCount: 0,
-      transcript: expect.arrayContaining([{ role: "status", text: "Bridge disconnected" }])
+      transcript: expect.arrayContaining([expect.objectContaining({ role: "status", text: "Bridge disconnected" })])
     });
   });
 
@@ -371,7 +432,7 @@ describe("UrlSessionStore context state", () => {
       }
     });
     expect(store.getSnapshot().activeSession.transcript).toEqual([
-      expect.objectContaining({ role: "status", text: "Could not capture this page" })
+      expect.objectContaining({ role: "status", tone: "error", text: "Could not capture this page." })
     ]);
   });
 });

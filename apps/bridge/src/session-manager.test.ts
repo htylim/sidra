@@ -110,6 +110,332 @@ describe("BridgeSessionManager", () => {
     ]);
   });
 
+  it("emits assistant.done when the provider stream ends without a terminal event", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new FakeAgentSession(undefined, []));
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", { prompt: "Summarize this page" });
+
+    expect(emitted).toContainEqual({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "page-1",
+      event: { type: "assistant.done" }
+    });
+  });
+
+  it("ends the bridge turn when the provider emits a terminal event before the stream closes", async () => {
+    const stream = new ManualAsyncEvents();
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new FakeAgentSession(stream));
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    const firstSend = manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForSendCount(1);
+    stream.push({ type: "assistant.done" });
+    await firstSend;
+    const secondSend = manager.sendPrompt("page-1", { prompt: "Second" });
+    await provider.createdSessions[0]?.waitForSendCount(2);
+    stream.finish();
+    await secondSend;
+
+    expect(provider.createdSessions[0]?.sentInputs).toEqual([{ prompt: "First" }, { prompt: "Second" }]);
+    expect(emitted).toContainEqual({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "page-1",
+      event: { type: "assistant.done" }
+    });
+  });
+
+  it("accepts_next_prompt_synchronously_from_terminal_event_handler", async () => {
+    const stream = new ManualAsyncEvents();
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new FakeAgentSession(stream));
+    let queuedSecondPrompt = false;
+    const manager = new BridgeSessionManager({
+      provider,
+      emit: (message) => {
+        emitted.push(message);
+        if (message.type === "agent.event" && message.event.type === "assistant.done" && !queuedSecondPrompt) {
+          queuedSecondPrompt = true;
+          void manager.sendPrompt("page-1", { prompt: "Second" });
+        }
+      }
+    });
+
+    await manager.startSession("page-1", "codex");
+    const firstSend = manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForSendCount(1);
+    stream.push({ type: "assistant.done" });
+    await provider.createdSessions[0]?.waitForSendCount(2);
+    stream.finish();
+    await firstSend;
+
+    expect(provider.createdSessions[0]?.sentInputs).toEqual([{ prompt: "First" }, { prompt: "Second" }]);
+    expect(emitted).not.toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "A turn is already in flight for this session",
+      code: "turn_in_flight"
+    });
+  });
+
+  it("does not emit provider_error when iterator cleanup throws after a terminal event", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new FakeAgentSession(new ThrowingReturnEvents([{ type: "assistant.done" }])));
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", { prompt: "First" });
+
+    expect(emitted).toContainEqual({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "page-1",
+      event: { type: "assistant.done" }
+    });
+    expect(emitted).not.toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Provider send failed",
+      code: "provider_error"
+    });
+  });
+
+  it("rejects unsafe provider events before emitting them", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new FakeAgentSession(undefined, [unsafeAgentEvent({ type: "assistant.done", reasoning: "private" })]));
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", { prompt: "Summarize this page" });
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Provider emitted an unsafe event.",
+      code: "unsafe_provider_event"
+    });
+    expect(emitted).not.toContainEqual({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "page-1",
+      event: { type: "assistant.done", reasoning: "private" }
+    });
+  });
+
+  it("emits safe adapter activity events", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() =>
+      new FakeAgentSession(undefined, [{ type: "assistant.activity", activity: { kind: "progress", label: "Reading" } }])
+    );
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", { prompt: "Summarize this page" });
+
+    expect(emitted).toContainEqual({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "page-1",
+      event: { type: "assistant.activity", activity: { kind: "progress", label: "Reading" } }
+    });
+  });
+
+  it.each([
+    ["reasoning", "private", { type: "assistant.done", reasoning: "private" }],
+    ["chainOfThought", "private", { type: "assistant.text.delta", text: "hello", chainOfThought: "private" }],
+    ["summary", "free-form details", { type: "assistant.activity", activity: { kind: "progress", label: "Working", summary: "free-form details" } }],
+    ["stdout", "raw output", { type: "assistant.activity", activity: { kind: "progress", label: "Working", stdout: "raw output" } }],
+    ["stderr", "raw error", { type: "assistant.activity", activity: { kind: "progress", label: "Working", stderr: "raw error" } }],
+    ["prompt", "secret prompt", { type: "assistant.activity", activity: { kind: "progress", label: "Working", prompt: "secret prompt" } }],
+    ["pageContent", "secret page", { type: "assistant.activity", activity: { kind: "progress", label: "Working", pageContent: "secret page" } }],
+    ["prompt", "secret prompt", { type: "assistant.cancelled", prompt: "secret prompt" }],
+    ["pageContent", "secret page", { type: "assistant.text.delta", text: "hello", pageContent: "secret page" }]
+  ])("does not emit adapter events with private %s fields", async (fieldName, secretValue, event) => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new FakeAgentSession(undefined, [unsafeAgentEvent(event)]));
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", { prompt: "Summarize this page" });
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Provider emitted an unsafe event.",
+      code: "unsafe_provider_event"
+    });
+    expect(emitted).not.toContainEqual({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "page-1",
+      event
+    });
+    expect(JSON.stringify(emitted)).not.toContain(fieldName);
+    expect(JSON.stringify(emitted)).not.toContain(secretValue);
+  });
+
+  it("aborts the turn when an unsafe adapter event is seen", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() =>
+      new FakeAgentSession(undefined, [unsafeAgentEvent({ type: "assistant.activity", activity: { kind: "progress", label: "Thinking privately" } })])
+    );
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", { prompt: "Summarize this page" });
+
+    expect(provider.createdSessions[0]?.sendSignals[0]?.aborted).toBe(true);
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Provider emitted an unsafe event.",
+      code: "unsafe_provider_event"
+    });
+  });
+
+  it("stops processing provider events after an unsafe event", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() =>
+      new FakeAgentSession(undefined, [
+        { type: "assistant.text.delta", text: "before" },
+        unsafeAgentEvent({ type: "assistant.activity", activity: { kind: "progress", label: "Thinking privately" } }),
+        { type: "assistant.text.delta", text: "after" },
+        { type: "assistant.done" }
+      ])
+    );
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", { prompt: "Summarize this page" });
+
+    expect(emitted).toContainEqual({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "page-1",
+      event: { type: "assistant.text.delta", text: "before" }
+    });
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Provider emitted an unsafe event.",
+      code: "unsafe_provider_event"
+    });
+    expect(emitted).not.toContainEqual({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "page-1",
+      event: { type: "assistant.text.delta", text: "after" }
+    });
+    expect(emitted).not.toContainEqual({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "page-1",
+      event: { type: "assistant.done" }
+    });
+  });
+
+  it("emits_session_scoped_provider_start_failed_when_provider_session_creation_rejects", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const manager = new BridgeSessionManager({
+      provider: createRejectingProvider(new Error("secret provider startup detail")),
+      emit: (message) => emitted.push(message)
+    });
+
+    await expect(manager.startSession("page-1", "codex")).resolves.toBeUndefined();
+
+    expect(emitted).toEqual([
+      {
+        type: "session.error",
+        version: 2,
+        clientSessionId: "page-1",
+        message: "Provider session failed to start.",
+        code: "provider_start_failed"
+      }
+    ]);
+    expect(JSON.stringify(emitted)).not.toContain("secret provider startup detail");
+  });
+
+  it("does not leave a closed provider session active when replacement creation rejects", async () => {
+    const emitted: BridgeToExtension[] = [];
+    let shouldReject = false;
+    const provider = createFakeProvider(() => {
+      if (shouldReject) throw new Error("secret replacement detail");
+      return new FakeAgentSession();
+    });
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    shouldReject = true;
+    await expect(manager.startSession("page-1", "codex")).resolves.toBeUndefined();
+    await manager.sendPrompt("page-1", { prompt: "After failed replacement" });
+
+    expect(provider.createdSessions[0]?.closeCount).toBe(1);
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Provider session failed to start.",
+      code: "provider_start_failed"
+    });
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Session has not been started",
+      code: "session_not_started"
+    });
+  });
+
+  it("emits generic provider_error when provider send throws", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new ThrowingAgentSession(new Error("secret send detail")));
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", { prompt: "Summarize this page" });
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Provider send failed",
+      code: "provider_error"
+    });
+    expect(JSON.stringify(emitted)).not.toContain("secret send detail");
+  });
+
+  it("does not emit provider_error when provider send throws after abort", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new ThrowingAfterAbortSession());
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    const send = manager.sendPrompt("page-1", { prompt: "Summarize this page" });
+    await provider.createdSessions[0]?.waitForSendCount(1);
+    await manager.closeSession("page-1");
+    await send;
+
+    expect(emitted).not.toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Provider send failed",
+      code: "provider_error"
+    });
+  });
+
   it("rejects a second prompt in the same client session while one is in flight", async () => {
     const emitted: BridgeToExtension[] = [];
     const provider = createFakeProvider(() => new FakeAgentSession(new ManualAsyncEvents()));
@@ -333,6 +659,31 @@ describe("BridgeSessionManager cancellation", () => {
       code: "no_in_flight_turn"
     });
   });
+
+  it("serializes cancel before reset for the same client session", async () => {
+    const stream = new ManualAsyncEvents();
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => {
+      const session = new FakeAgentSession(stream);
+      session.finishStreamOnAbort = true;
+      return session;
+    });
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    const send = manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForSendCount(1);
+    const cancel = manager.cancelTurn("page-1");
+    const reset = manager.resetSession("page-1");
+    await Promise.all([cancel, reset, send]);
+
+    expect(emitted).toEqual([
+      expect.objectContaining({ type: "session.started", clientSessionId: "page-1" }),
+      expect.objectContaining({ type: "agent.event", event: { type: "assistant.cancelled" } }),
+      expect.objectContaining({ type: "session.started", clientSessionId: "page-1" })
+    ]);
+    expect(provider.createdSessions).toHaveLength(2);
+  });
 });
 
 describe("BridgeSessionManager reset and close", () => {
@@ -491,6 +842,15 @@ function createFakeProvider(createSession: () => FakeAgentSession = () => new Fa
   return provider;
 }
 
+function createRejectingProvider(error: unknown): AgentProvider {
+  return {
+    id: "codex",
+    async createSession() {
+      throw error;
+    }
+  };
+}
+
 function createDeferredProvider() {
   const requests: Array<Deferred<FakeAgentSession>> = [];
   const createdSessions: FakeAgentSession[] = [];
@@ -534,6 +894,10 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve };
 }
 
+function unsafeAgentEvent(value: unknown): AgentEvent {
+  return value as AgentEvent;
+}
+
 class FakeAgentSession implements AgentSession {
   readonly events: AgentEvent[];
   readonly sentInputs: AgentSendInput[] = [];
@@ -571,10 +935,30 @@ class FakeAgentSession implements AgentSession {
     }
   }
 
-  private resolveSendWaiters() {
+  protected resolveSendWaiters() {
     while (this.sendWaiters.length > 0) {
       this.sendWaiters.shift()?.();
     }
+  }
+}
+
+class ThrowingAgentSession implements AgentSession {
+  constructor(private readonly error: unknown) {}
+
+  async *send(): AsyncIterable<AgentEvent> {
+    throw this.error;
+  }
+
+  async close() {}
+}
+
+class ThrowingAfterAbortSession extends FakeAgentSession {
+  override async *send(input: AgentSendInput, signal: AbortSignal): AsyncIterable<AgentEvent> {
+    this.sentInputs.push(input);
+    this.sendSignals.push(signal);
+    this.resolveSendWaiters();
+    await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+    throw new Error("throw after abort");
   }
 }
 
@@ -607,6 +991,21 @@ class ManualAsyncEvents implements AsyncIterable<AgentEvent> {
         if (this.finished) return Promise.resolve({ done: true, value: undefined });
         return new Promise<IteratorResult<AgentEvent>>((resolve) => this.pending.push(resolve));
       }
+    };
+  }
+}
+
+class ThrowingReturnEvents implements AsyncIterable<AgentEvent> {
+  constructor(private readonly events: AgentEvent[]) {}
+
+  [Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
+    return {
+      next: () => {
+        const event = this.events.shift();
+        if (event) return Promise.resolve({ done: false, value: event });
+        return Promise.resolve({ done: true, value: undefined });
+      },
+      return: () => Promise.reject(new Error("cleanup failed"))
     };
   }
 }

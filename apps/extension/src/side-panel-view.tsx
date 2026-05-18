@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CaptureMode } from "./capture-mode";
 import type { SidePanelSnapshot } from "./side-panel-controller";
+import { TranscriptView } from "./transcript-view";
 
 export function SidePanelView(props: {
   snapshot: SidePanelSnapshot;
@@ -91,11 +92,7 @@ export function SidePanelView(props: {
             ) : null}
           </div>
         ) : (
-          props.snapshot.activeSession.transcript.map((message, index) => (
-            <div className={`message ${message.role}`} key={`${message.role}-${index}`}>
-              {message.text}
-            </div>
-          ))
+          <TranscriptView entries={props.snapshot.activeSession.transcript} />
         )}
       </section>
 
