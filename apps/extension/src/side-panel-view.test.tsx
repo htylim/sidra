@@ -115,6 +115,7 @@ function renderInteractiveSnapshot(
     onCancelTurn(): boolean;
     onDraftPromptChange(text: string): void;
     onCaptureModeChange(captureMode: SidePanelSnapshot["activeSession"]["captureMode"]): void;
+    onNewChat(): void;
     onOpenSettings(): void;
   }> = {}
 ) {
@@ -145,7 +146,7 @@ function renderInteractiveSnapshot(
           overrides.onCaptureModeChange?.(captureMode);
           renderedView.rerender(viewElement());
         }}
-        onNewChat={() => undefined}
+        onNewChat={overrides.onNewChat ?? (() => undefined)}
         onRetryBridge={() => undefined}
         onOpenSettings={overrides.onOpenSettings ?? (() => undefined)}
       />
@@ -176,7 +177,7 @@ function renderInteractiveSnapshot(
           overrides.onCaptureModeChange?.(captureMode);
           renderedView.rerender(viewElement());
         }}
-        onNewChat={() => undefined}
+        onNewChat={overrides.onNewChat ?? (() => undefined)}
         onRetryBridge={() => undefined}
         onOpenSettings={overrides.onOpenSettings ?? (() => undefined)}
       />
@@ -295,6 +296,41 @@ describe("SidePanelView URL sessions", () => {
     );
 
     expect(screen.getByRole("button", { name: "Summarize this page" })).not.toBeNull();
+  });
+
+  it("clicking_new_chat_invokes_onNewChat", async () => {
+    const user = userEvent.setup();
+    const onNewChat = vi.fn();
+    renderInteractiveSnapshot(snapshotForPage(), { onNewChat });
+
+    await user.click(screen.getByRole("button", { name: "New chat" }));
+
+    expect(onNewChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders_empty_state_quick_actions_after_new_chat_snapshot", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [],
+        quickActions: [{ id: "summarize-page", label: "Summarize this page" }]
+      })
+    );
+
+    expect(screen.getByText("Ask anything about this page")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Summarize this page" })).not.toBeNull();
+  });
+
+  it("new_chat_button_remains_available_while_turn_is_running", async () => {
+    const user = userEvent.setup();
+    const onNewChat = vi.fn();
+    renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: true }), { onNewChat });
+
+    const newChatButton = screen.getByRole("button", { name: "New chat" });
+    expect(newChatButton).toHaveProperty("disabled", false);
+
+    await user.click(newChatButton);
+
+    expect(onNewChat).toHaveBeenCalledTimes(1);
   });
 
   it("renders_custom_quick_actions_from_snapshot", () => {

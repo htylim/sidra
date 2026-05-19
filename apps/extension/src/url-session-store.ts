@@ -42,12 +42,25 @@ export type UrlSessionSnapshot = {
   canCancelTurn: boolean;
 };
 
+export type SessionApproval = {
+  permissionKey: string;
+  decision: "allow_for_session";
+};
+
+export type SessionApprovalState = {
+  grant(approval: SessionApproval): void;
+  has(permissionKey: string): boolean;
+  list(): SessionApproval[];
+  clear(): void;
+};
+
 type UrlSessionRecord = {
   pageIdentity: Extract<PageIdentity, { status: "ready" }>;
   clientSessionId: string;
   captureMode: CaptureMode;
   draftPrompt: string;
   contextState: ContextState;
+  approvals: SessionApprovalState;
   coordinator: UrlSessionCoordinator;
 };
 
@@ -195,6 +208,21 @@ export class UrlSessionStore {
     this.emit();
   }
 
+  grantActiveSessionApproval(approval: SessionApproval): void {
+    const activeRecord = this.getActiveRecord();
+    if (!activeRecord) return;
+
+    activeRecord.approvals.grant(approval);
+  }
+
+  hasActiveSessionApproval(permissionKey: string): boolean {
+    return this.getActiveRecord()?.approvals.has(permissionKey) ?? false;
+  }
+
+  listActiveSessionApprovals(): SessionApproval[] {
+    return this.getActiveRecord()?.approvals.list() ?? [];
+  }
+
   newChat(): void {
     const activeRecord = this.getActiveRecord();
     if (!activeRecord) return;
@@ -202,6 +230,7 @@ export class UrlSessionStore {
     activeRecord.draftPrompt = "";
     activeRecord.contextState = INITIAL_CONTEXT_STATE;
     activeRecord.captureMode = "readable";
+    activeRecord.approvals.clear();
     activeRecord.coordinator.newChat();
     this.emit();
   }
@@ -226,6 +255,7 @@ export class UrlSessionStore {
       captureMode: initialCaptureMode,
       draftPrompt: "",
       contextState: INITIAL_CONTEXT_STATE,
+      approvals: new InMemorySessionApprovalState(),
       coordinator
     };
 
@@ -261,6 +291,26 @@ export class UrlSessionStore {
   private emit(): void {
     this.cachedSnapshot = undefined;
     for (const listener of this.listeners) listener();
+  }
+}
+
+class InMemorySessionApprovalState implements SessionApprovalState {
+  private readonly approvalsByPermissionKey = new Map<string, SessionApproval>();
+
+  grant(approval: SessionApproval): void {
+    this.approvalsByPermissionKey.set(approval.permissionKey, approval);
+  }
+
+  has(permissionKey: string): boolean {
+    return this.approvalsByPermissionKey.has(permissionKey);
+  }
+
+  list(): SessionApproval[] {
+    return Array.from(this.approvalsByPermissionKey.values());
+  }
+
+  clear(): void {
+    this.approvalsByPermissionKey.clear();
   }
 }
 

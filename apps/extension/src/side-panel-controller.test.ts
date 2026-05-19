@@ -912,6 +912,157 @@ describe("SidePanelController newChat", () => {
     });
   });
 
+  it("newChat_keeps_same_page_key_and_client_session_after_reset", () => {
+    const { controller, ports } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/a")
+    });
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+
+    controller.newChat();
+
+    expect(controller.getSnapshot().activeSession).toMatchObject({
+      pageKey: "https://example.com/a",
+      clientSessionId: "client-1",
+      starting: true
+    });
+  });
+
+  it("newChat_clears_active_transcript_draft_context_and_capture_mode", async () => {
+    const { controller, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    controller.updateCaptureMode("full_dom");
+    controller.updateDraftPrompt("unsent draft");
+    await controller.captureAndSend("summarize");
+    ports[0].emitMessage(sessionStarted());
+    controller.updateDraftPrompt("unsent draft");
+
+    controller.newChat();
+
+    expect(controller.getSnapshot().activeSession).toMatchObject({
+      draftPrompt: "",
+      captureMode: "readable",
+      contextState: { status: "none", label: "No context sent yet" },
+      transcript: []
+    });
+  });
+
+  it("newChat_resets_after_completed_turn_and_uses_fresh_provider_session", () => {
+    const { controller, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+    ports[0].emitMessage({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "client-1",
+      event: { type: "assistant.done" }
+    });
+
+    controller.newChat();
+    controller.sendPrompt("after reset");
+
+    expect(ports[0].postedMessages).toEqual([
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.reset", version: 2, clientSessionId: "client-1" }
+    ]);
+
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.send",
+      version: 2,
+      clientSessionId: "client-1",
+      prompt: "after reset"
+    });
+  });
+
+  it("newChat_preserves_inactive_session_transcript_draft_context_running_state_and_provider_session", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/a"),
+      pageContext: readablePageContext()
+    };
+    const { controller, activePage, ports } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/a"),
+      clientSessionIds: ["client-a", "client-b"],
+      captureService
+    });
+    ports[0].emitMessage(bridgeReady());
+    await controller.captureAndSend("a");
+    ports[0].emitMessage(sessionStarted("client-a"));
+    controller.updateDraftPrompt("draft a");
+    activePage.emit(pageIdentity("https://example.com/b"));
+    controller.sendPrompt("b");
+    ports[0].emitMessage(sessionStarted("client-b"));
+    controller.updateDraftPrompt("draft b");
+
+    controller.newChat();
+    activePage.emit(pageIdentity("https://example.com/a"));
+
+    expect(controller.getSnapshot().activeSession).toMatchObject({
+      pageKey: "https://example.com/a",
+      clientSessionId: "client-a",
+      draftPrompt: "draft a",
+      contextState: { status: "attached" },
+      turnInFlight: true,
+      canCancelTurn: true
+    });
+    expect(controller.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({ kind: "user_message", text: "a" })
+    );
+    expect(ports[0].postedMessages).not.toContainEqual({
+      type: "session.reset",
+      version: 2,
+      clientSessionId: "client-a"
+    });
+  });
+
+  it("newChat_restores_empty_state_quick_actions_after_reset", async () => {
+    const { controller, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+    expect(controller.getSnapshot().activeSession.quickActions).toEqual([]);
+
+    controller.newChat();
+
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
+    expect(controller.getSnapshot().activeSession.quickActions).toEqual([
+      { id: "summarize-page", label: "Summarize this page" }
+    ]);
+  });
+
+  it("newChat_records_reset_post_failure_in_active_session_only", () => {
+    const { controller, activePage, ports } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/a"),
+      clientSessionIds: ["client-a", "client-b"]
+    });
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("a");
+    ports[0].emitMessage(sessionStarted("client-a"));
+    activePage.emit(pageIdentity("https://example.com/b"));
+    controller.sendPrompt("b");
+    ports[0].emitMessage(sessionStarted("client-b"));
+    ports[0].postMessage = vi.fn(() => {
+      throw new Error("reset failed");
+    });
+
+    controller.newChat();
+
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([
+      expect.objectContaining({ kind: "status", tone: "error", text: "reset failed" })
+    ]);
+    activePage.emit(pageIdentity("https://example.com/a"));
+    expect(controller.getSnapshot().activeSession.transcript).not.toContainEqual(
+      expect.objectContaining({ text: "reset failed" })
+    );
+  });
+
   it("records_reset_post_failure_as_error_status_entry", () => {
     const { controller, ports } = createHarness();
 

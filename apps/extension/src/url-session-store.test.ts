@@ -1,16 +1,18 @@
 import type { BridgeToExtension, ExtensionToBridge, PageContext } from "@sidra/protocol";
 import { describe, expect, it } from "vitest";
 import { BridgeSessionCoordinator, type ProtocolTransport } from "./bridge/session-coordinator";
+import type { ProtocolTransportPostResult } from "./bridge/session-coordinator";
 import type { PageIdentity, PageKey } from "./page-key";
 import { UrlSessionStore } from "./url-session-store";
 
 class FakeTransport implements ProtocolTransport {
   readonly postedMessages: ExtensionToBridge[] = [];
   private readonly messageListeners: Array<(message: BridgeToExtension) => void> = [];
+  postResult: ProtocolTransportPostResult = { ok: true };
 
   post(message: ExtensionToBridge) {
     this.postedMessages.push(message);
-    return { ok: true as const };
+    return this.postResult;
   }
 
   subscribeToMessages(listener: (message: BridgeToExtension) => void): () => void {
@@ -391,6 +393,120 @@ describe("UrlSessionStore", () => {
       version: 2,
       clientSessionId: "client-1"
     });
+  });
+
+  it("newChat_does_not_post_reset_for_never_started_empty_session", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    store.newChat();
+
+    expect(transport.postedMessages).toEqual([]);
+    expect(store.getSnapshot().activeSession.transcript).toEqual([]);
+  });
+
+  it("newChat_keeps_same_page_key_and_client_session_after_reset", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPrompt("first");
+    transport.emitMessage(sessionStarted("client-1"));
+
+    store.newChat();
+
+    expect(store.getSnapshot().activeSession).toMatchObject({
+      pageKey: "https://example.com/a",
+      clientSessionId: "client-1",
+      starting: true
+    });
+  });
+
+  it("newChat_clears_active_transcript_draft_context_and_capture_mode", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.updateActiveCaptureMode("full_dom");
+    store.sendPromptWithContext({ prompt: "summarize", pageContext: readablePageContext() });
+    transport.emitMessage(sessionStarted("client-1"));
+    store.updateActiveDraftPrompt("unsent draft");
+
+    store.newChat();
+
+    expect(store.getSnapshot().activeSession).toMatchObject({
+      draftPrompt: "",
+      captureMode: "readable",
+      contextState: { status: "none", label: "No context sent yet" },
+      transcript: []
+    });
+  });
+
+  it("newChat_preserves_inactive_session_transcript_draft_context_running_state_and_provider_session", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPromptWithContext({ prompt: "a", pageContext: readablePageContext() });
+    transport.emitMessage(sessionStarted("client-1"));
+    store.updateActiveDraftPrompt("draft a");
+    store.selectPage(pageIdentity("https://example.com/b"));
+    store.sendPrompt("b");
+    transport.emitMessage(sessionStarted("client-2"));
+    store.updateActiveDraftPrompt("draft b");
+
+    store.newChat();
+
+    store.selectPage(pageIdentity("https://example.com/a"));
+    expect(store.getSnapshot().activeSession).toMatchObject({
+      pageKey: "https://example.com/a",
+      clientSessionId: "client-1",
+      draftPrompt: "draft a",
+      contextState: { status: "attached" },
+      turnInFlight: true,
+      canCancelTurn: true
+    });
+    expect(store.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({ kind: "user_message", text: "a" })
+    );
+    expect(transport.postedMessages).not.toContainEqual({
+      type: "session.reset",
+      version: 2,
+      clientSessionId: "client-1"
+    });
+  });
+
+  it("newChat_records_reset_post_failure_in_active_session_only", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPrompt("a");
+    transport.emitMessage(sessionStarted("client-1"));
+    store.selectPage(pageIdentity("https://example.com/b"));
+    store.sendPrompt("b");
+    transport.emitMessage(sessionStarted("client-2"));
+    transport.postResult = { ok: false, error: "reset failed" };
+
+    store.newChat();
+
+    expect(store.getSnapshot().activeSession.transcript).toEqual([
+      expect.objectContaining({ kind: "status", tone: "error", text: "reset failed" })
+    ]);
+    store.selectPage(pageIdentity("https://example.com/a"));
+    expect(store.getSnapshot().activeSession.transcript).not.toContainEqual(
+      expect.objectContaining({ text: "reset failed" })
+    );
+  });
+
+  it("newChat_clears_active_session_scoped_approvals_only", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.grantActiveSessionApproval({ permissionKey: "shell:ls", decision: "allow_for_session" });
+    store.selectPage(pageIdentity("https://example.com/b"));
+    store.grantActiveSessionApproval({ permissionKey: "shell:git", decision: "allow_for_session" });
+
+    store.newChat();
+
+    expect(store.hasActiveSessionApproval("shell:git")).toBe(false);
+    expect(store.listActiveSessionApprovals()).toEqual([]);
+    store.selectPage(pageIdentity("https://example.com/a"));
+    expect(store.hasActiveSessionApproval("shell:ls")).toBe(true);
+    expect(store.listActiveSessionApprovals()).toEqual([
+      { permissionKey: "shell:ls", decision: "allow_for_session" }
+    ]);
   });
 });
 
