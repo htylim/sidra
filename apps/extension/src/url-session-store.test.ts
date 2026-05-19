@@ -62,6 +62,15 @@ function agentTextDelta(clientSessionId: string, text: string): BridgeToExtensio
   };
 }
 
+function assistantCancelled(clientSessionId: string): BridgeToExtension {
+  return {
+    type: "agent.event",
+    version: 2,
+    clientSessionId,
+    event: { type: "assistant.cancelled" }
+  };
+}
+
 function sessionStarted(clientSessionId: string): BridgeToExtension {
   return {
     type: "session.started",
@@ -181,6 +190,85 @@ describe("UrlSessionStore", () => {
     expect(store.getSnapshot().activeSession).toMatchObject({ starting: true, pendingPromptCount: 1 });
     store.selectPage(pageIdentity("https://example.com/b"));
     expect(store.getSnapshot().activeSession).toMatchObject({ starting: false, pendingPromptCount: 0 });
+  });
+
+  it("exposes_turn_in_flight_for_the_active_url_session", () => {
+    const { store, transport } = createStoreHarness();
+
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPrompt("first");
+    transport.emitMessage(sessionStarted("client-1"));
+
+    expect(store.getSnapshot().activeSession).toMatchObject({
+      turnInFlight: true,
+      canCancelTurn: true
+    });
+  });
+
+  it("routes_cancelActiveTurn_to_the_active_url_session_only", () => {
+    const { store, transport } = createStoreHarness();
+
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPrompt("first");
+    transport.emitMessage(sessionStarted("client-1"));
+    store.selectPage(pageIdentity("https://example.com/b"));
+    store.sendPrompt("second");
+    transport.emitMessage(sessionStarted("client-2"));
+
+    expect(store.cancelActiveTurn()).toBe(true);
+
+    expect(transport.postedMessages).toContainEqual({
+      type: "session.cancel",
+      version: 2,
+      clientSessionId: "client-2"
+    });
+    expect(transport.postedMessages).not.toContainEqual({
+      type: "session.cancel",
+      version: 2,
+      clientSessionId: "client-1"
+    });
+  });
+
+  it("returns_false_when_cancelling_without_an_active_turn", () => {
+    const { store } = createStoreHarness();
+
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.cancelActiveTurn()).toBe(false);
+  });
+
+  it("restores_cancel_state_when_returning_to_running_url_session", () => {
+    const { store, transport } = createStoreHarness();
+
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPrompt("first");
+    transport.emitMessage(sessionStarted("client-1"));
+    store.selectPage(pageIdentity("https://example.com/b"));
+    expect(store.getSnapshot().activeSession.turnInFlight).toBe(false);
+
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.getSnapshot().activeSession).toMatchObject({
+      turnInFlight: true,
+      canCancelTurn: true
+    });
+  });
+
+  it("keeps_other_sessions_running_when_active_session_is_cancelled", () => {
+    const { store, transport } = createStoreHarness();
+
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPrompt("first");
+    transport.emitMessage(sessionStarted("client-1"));
+    store.selectPage(pageIdentity("https://example.com/b"));
+    store.sendPrompt("second");
+    transport.emitMessage(sessionStarted("client-2"));
+    store.cancelActiveTurn();
+    transport.emitMessage(assistantCancelled("client-2"));
+
+    const sessions = sessionsByClientSessionId(store);
+    expect(sessions.get("client-1")).toMatchObject({ turnInFlight: true, canCancelTurn: true });
+    expect(sessions.get("client-2")).toMatchObject({ turnInFlight: false, canCancelTurn: false });
   });
 
   it("routes_assistant_events_to_matching_inactive_session_without_leaking_to_active_snapshot", () => {

@@ -8,6 +8,7 @@ export function SidePanelView(props: {
   onSendPrompt(prompt: string): boolean;
   onCaptureAndSend(prompt: string): boolean | Promise<boolean>;
   onQuickAction(actionId: string): boolean | Promise<boolean>;
+  onCancelTurn(): boolean;
   onDraftPromptChange(text: string): void;
   onCaptureModeChange(captureMode: CaptureMode): void;
   onNewChat(): void;
@@ -17,16 +18,31 @@ export function SidePanelView(props: {
   const [promptOptionsOpen, setPromptOptionsOpen] = useState(false);
   const bridgeBlocked = props.snapshot.bridge.availability.status !== "ready";
   const pageUnsupported = props.snapshot.activePage.status === "unsupported";
-  const promptControlsDisabled = !props.snapshot.bridge.canUseChat || pageUnsupported;
+  const chatUnavailable = !props.snapshot.bridge.canUseChat || pageUnsupported;
+  const turnRunning = props.snapshot.activeSession.turnInFlight;
+  const promptEntryDisabled =
+    chatUnavailable || turnRunning || props.snapshot.activeSession.pendingPromptCount > 0;
+  const cancelDisabled = !props.snapshot.activeSession.canCancelTurn;
   const draftPrompt = props.snapshot.activeSession.draftPrompt;
   const sendFullDom = props.snapshot.activeSession.captureMode === "full_dom";
 
   useEffect(() => {
-    if (promptControlsDisabled) setPromptOptionsOpen(false);
-  }, [promptControlsDisabled]);
+    if (promptEntryDisabled) setPromptOptionsOpen(false);
+  }, [promptEntryDisabled]);
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (cancelDisabled) return;
+      props.onCancelTurn();
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [cancelDisabled, props.onCancelTurn]);
 
   function sendPrompt() {
-    if (promptControlsDisabled) return;
+    if (promptEntryDisabled) return;
 
     const prompt = draftPrompt.trim();
     if (!prompt) return;
@@ -80,7 +96,9 @@ export function SidePanelView(props: {
                     type="button"
                     className="quick-action-button"
                     key={action.id}
+                    disabled={promptEntryDisabled}
                     onClick={() => {
+                      if (promptEntryDisabled) return;
                       void props.onQuickAction(action.id);
                     }}
                   >
@@ -100,7 +118,7 @@ export function SidePanelView(props: {
         <textarea
           value={draftPrompt}
           placeholder="Ask about this page"
-          disabled={promptControlsDisabled}
+          disabled={promptEntryDisabled}
           onChange={(event) => props.onDraftPromptChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -116,20 +134,20 @@ export function SidePanelView(props: {
             aria-label="Prompt options"
             aria-expanded={promptOptionsOpen}
             aria-controls="prompt-options-popover"
-            disabled={promptControlsDisabled}
+            disabled={promptEntryDisabled}
             onClick={() => setPromptOptionsOpen((open) => !open)}
           >
             ⚙
           </button>
-          {promptOptionsOpen && !promptControlsDisabled ? (
+          {promptOptionsOpen && !promptEntryDisabled ? (
             <div className="prompt-options-popover" id="prompt-options-popover" role="group" aria-label="Prompt options">
               <label className="prompt-option-toggle">
                 <input
                   type="checkbox"
                   checked={sendFullDom}
-                  disabled={promptControlsDisabled}
+                  disabled={promptEntryDisabled}
                   onChange={(event) => {
-                    if (promptControlsDisabled) return;
+                    if (promptEntryDisabled) return;
                     props.onCaptureModeChange(event.currentTarget.checked ? "full_dom" : "readable");
                   }}
                 />
@@ -137,8 +155,13 @@ export function SidePanelView(props: {
               </label>
             </div>
           ) : null}
-          <button type="button" className="send-button" onClick={sendPrompt} disabled={promptControlsDisabled}>
-            Capture + Send
+          <button
+            type="button"
+            className={`send-button${turnRunning ? " cancel-button" : ""}`}
+            onClick={turnRunning ? props.onCancelTurn : sendPrompt}
+            disabled={turnRunning ? cancelDisabled : promptEntryDisabled}
+          >
+            {turnRunning ? "Cancel" : "Capture + Send"}
           </button>
         </div>
       </footer>

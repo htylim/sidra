@@ -31,6 +31,8 @@ export type BridgeSessionCoordinatorSnapshot = {
   clientSessionId: string;
   sessionStarted: boolean;
   starting: boolean;
+  turnInFlight: boolean;
+  canCancelTurn: boolean;
   pendingPromptCount: number;
   transcript: TranscriptEntry[];
   lastError?: string;
@@ -84,6 +86,10 @@ export class BridgeSessionCoordinator {
   private startPosted = false;
   // A sent prompt owns the current provider turn until a terminal event or error arrives.
   private turnInFlight = false;
+  // A posted cancel remains pending until the bridge reports a terminal event.
+  private cancelRequested = false;
+  // Native Messaging can deliver a stale no-in-flight error after a cancel races with natural completion.
+  private suppressNextNoInFlightAfterCancelTerminal = false;
   // New Chat sends `session.reset`, whose success also arrives as `session.started`.
   private suppressNextSessionStartedStatus = false;
   // Reset can race already-posted startup messages because protocol v2 has no request id.
@@ -116,13 +122,14 @@ export class BridgeSessionCoordinator {
   sendPrompt(input: SubmissionInput): boolean {
     const submission = this.prepareSubmission(input);
     if (!submission) return false;
+    if (this.pendingSubmissions.length > 0 || this.cancelRequested) return false;
+    if (this.turnInFlight) {
+      this.recordLocalSubmissionError("A turn is already in flight for this session");
+      return false;
+    }
     const payloadPreflight = this.validateSessionSendPayload(submission);
     if (!payloadPreflight.ok) {
       this.recordLocalSubmissionError(payloadPreflight.error);
-      return false;
-    }
-    if (this.turnInFlight) {
-      this.recordLocalSubmissionError("A turn is already in flight for this session");
       return false;
     }
 
@@ -133,6 +140,7 @@ export class BridgeSessionCoordinator {
         return false;
       }
       this.turnInFlight = true;
+      this.cancelRequested = false;
       this.setSnapshot({
         ...this.snapshot,
         transcript: this.addSubmissionTranscriptEntries(this.snapshot.transcript, submission),
@@ -171,6 +179,25 @@ export class BridgeSessionCoordinator {
     return true;
   }
 
+  cancelTurn(): boolean {
+    if (!this.turnInFlight || !this.snapshot.sessionStarted || this.cancelRequested) return false;
+
+    const result = this.transport.post({
+      type: "session.cancel",
+      version: 2,
+      clientSessionId: this.clientSessionId
+    });
+    if (!result.ok) {
+      this.recordLocalSubmissionError(result.error);
+      return false;
+    }
+
+    this.cancelRequested = true;
+    this.suppressNextNoInFlightAfterCancelTerminal = false;
+    this.setSnapshot({ ...this.snapshot, lastError: undefined });
+    return true;
+  }
+
   recordCaptureUnavailable(message: string): void {
     this.setSnapshot({
       ...this.snapshot,
@@ -183,8 +210,12 @@ export class BridgeSessionCoordinator {
     const providerStateMayExist = this.startPosted || this.snapshot.sessionStarted || this.snapshot.starting || this.turnInFlight;
     const resetDuringStartup = this.snapshot.starting && !this.snapshot.sessionStarted;
     const resetDuringTurn = this.turnInFlight;
+    const shouldSuppressStaleNoInFlight =
+      this.cancelRequested || this.suppressNextNoInFlightAfterCancelTerminal;
     this.pendingSubmissions = [];
     this.turnInFlight = false;
+    this.cancelRequested = false;
+    this.suppressNextNoInFlightAfterCancelTerminal = shouldSuppressStaleNoInFlight;
 
     if (!providerStateMayExist) {
       this.startPosted = false;
@@ -204,6 +235,8 @@ export class BridgeSessionCoordinator {
     if (!result.ok) {
       this.startPosted = false;
       this.turnInFlight = false;
+      this.cancelRequested = false;
+      this.suppressNextNoInFlightAfterCancelTerminal = shouldSuppressStaleNoInFlight;
       this.suppressNextSessionStartedStatus = false;
       this.startupResultsToIgnore = 0;
       this.terminalTurnErrorsToIgnore = 0;
@@ -230,6 +263,8 @@ export class BridgeSessionCoordinator {
     this.pendingSubmissions = [];
     this.startPosted = false;
     this.turnInFlight = false;
+    this.cancelRequested = false;
+    this.suppressNextNoInFlightAfterCancelTerminal = false;
     this.suppressNextSessionStartedStatus = false;
     this.startupResultsToIgnore = 0;
     this.terminalTurnErrorsToIgnore = 0;
@@ -238,6 +273,8 @@ export class BridgeSessionCoordinator {
       sessionStarted: false,
       starting: false,
       pendingPromptCount: 0,
+      turnInFlight: false,
+      canCancelTurn: false,
       transcript: []
     };
     this.emit();
@@ -248,6 +285,8 @@ export class BridgeSessionCoordinator {
     this.pendingSubmissions = [];
     this.startPosted = false;
     this.turnInFlight = false;
+    this.cancelRequested = false;
+    this.suppressNextNoInFlightAfterCancelTerminal = false;
     this.suppressNextSessionStartedStatus = false;
     this.startupResultsToIgnore = 0;
     this.terminalTurnErrorsToIgnore = 0;
@@ -265,6 +304,8 @@ export class BridgeSessionCoordinator {
       clientSessionId: this.clientSessionId,
       sessionStarted: false,
       starting: false,
+      turnInFlight: false,
+      canCancelTurn: false,
       pendingPromptCount: 0,
       transcript: []
     };
@@ -313,7 +354,7 @@ export class BridgeSessionCoordinator {
           return;
         }
         if (message.event.type === "assistant.done") {
-          this.turnInFlight = false;
+          this.clearRunningTurnAfterTerminalEvent();
           this.setSnapshot({
             ...this.snapshot,
             transcript: completeAssistantTurn(this.snapshot.transcript)
@@ -322,7 +363,7 @@ export class BridgeSessionCoordinator {
           return;
         }
         if (message.event.type === "assistant.cancelled") {
-          this.turnInFlight = false;
+          this.clearRunningTurnAfterTerminalEvent();
           const transcript = cancelAssistantTurn(this.snapshot.transcript);
           this.setSnapshot({
             ...this.snapshot,
@@ -354,6 +395,7 @@ export class BridgeSessionCoordinator {
         return;
       }
       this.turnInFlight = true;
+      this.cancelRequested = false;
       if (!submission.transcriptEntriesVisible) {
         submission.transcriptEntriesVisible = true;
         this.setSnapshot({
@@ -361,6 +403,8 @@ export class BridgeSessionCoordinator {
           transcript: this.addSubmissionTranscriptEntries(this.snapshot.transcript, submission),
           lastError: undefined
         });
+      } else {
+        this.setSnapshot({ ...this.snapshot, lastError: undefined });
       }
       return;
     }
@@ -402,6 +446,8 @@ export class BridgeSessionCoordinator {
     this.pendingSubmissions = [];
     this.startPosted = false;
     this.turnInFlight = false;
+    this.cancelRequested = false;
+    this.suppressNextNoInFlightAfterCancelTerminal = false;
     this.suppressNextSessionStartedStatus = false;
     this.startupResultsToIgnore = 0;
     this.terminalTurnErrorsToIgnore = 0;
@@ -417,6 +463,26 @@ export class BridgeSessionCoordinator {
 
   private handleSessionError(message: string, code: SessionErrorCode | undefined): void {
     const effectiveCode = code ?? "unknown_error";
+    if (effectiveCode === "no_in_flight_turn") {
+      if (this.cancelRequested) {
+        const transcript = failAssistantTurn(this.snapshot.transcript);
+        this.turnInFlight = false;
+        this.cancelRequested = false;
+        this.suppressNextNoInFlightAfterCancelTerminal = false;
+        this.setSnapshot({
+          ...this.snapshot,
+          lastError: message,
+          transcript: addErrorStatusEntry(transcript, message)
+        });
+        return;
+      }
+
+      if (this.suppressNextNoInFlightAfterCancelTerminal) {
+        this.suppressNextNoInFlightAfterCancelTerminal = false;
+        return;
+      }
+    }
+
     const terminalTurnError = this.isTerminalTurnError(effectiveCode);
     const fatalStartupError = this.isFatalStartupError(effectiveCode);
     if (this.shouldIgnoreStaleSessionError(terminalTurnError, fatalStartupError)) return;
@@ -431,6 +497,8 @@ export class BridgeSessionCoordinator {
       this.pendingSubmissions = [];
       this.startPosted = false;
       this.turnInFlight = false;
+      this.cancelRequested = false;
+      this.suppressNextNoInFlightAfterCancelTerminal = false;
       this.suppressNextSessionStartedStatus = false;
       this.startupResultsToIgnore = 0;
       this.terminalTurnErrorsToIgnore = 0;
@@ -446,7 +514,7 @@ export class BridgeSessionCoordinator {
     }
 
     const transcript = terminalTurnError ? failAssistantTurn(this.snapshot.transcript) : this.snapshot.transcript;
-    if (terminalTurnError) this.turnInFlight = false;
+    if (terminalTurnError) this.clearRunningTurnAfterTerminalEvent();
     this.setSnapshot({
       ...this.snapshot,
       lastError: message,
@@ -491,6 +559,8 @@ export class BridgeSessionCoordinator {
     this.pendingSubmissions = [];
     this.startPosted = false;
     this.turnInFlight = false;
+    this.cancelRequested = false;
+    this.suppressNextNoInFlightAfterCancelTerminal = false;
     this.suppressNextSessionStartedStatus = false;
     this.startupResultsToIgnore = 0;
     this.terminalTurnErrorsToIgnore = 0;
@@ -514,6 +584,8 @@ export class BridgeSessionCoordinator {
     this.pendingSubmissions = [];
     this.startPosted = false;
     this.turnInFlight = false;
+    this.cancelRequested = false;
+    this.suppressNextNoInFlightAfterCancelTerminal = false;
     this.suppressNextSessionStartedStatus = false;
     this.startupResultsToIgnore = 0;
     this.terminalTurnErrorsToIgnore = 0;
@@ -578,8 +650,23 @@ export class BridgeSessionCoordinator {
   }
 
   private setSnapshot(snapshot: BridgeSessionCoordinatorSnapshot): void {
-    this.snapshot = snapshot;
+    this.snapshot = this.withRuntimeState(snapshot);
     this.emit();
+  }
+
+  private withRuntimeState(snapshot: BridgeSessionCoordinatorSnapshot): BridgeSessionCoordinatorSnapshot {
+    return {
+      ...snapshot,
+      turnInFlight: this.turnInFlight,
+      canCancelTurn: this.turnInFlight && !this.cancelRequested && snapshot.sessionStarted
+    };
+  }
+
+  private clearRunningTurnAfterTerminalEvent(): void {
+    const hadCancelRequested = this.cancelRequested;
+    this.turnInFlight = false;
+    this.cancelRequested = false;
+    if (hadCancelRequested) this.suppressNextNoInFlightAfterCancelTerminal = true;
   }
 
   private emit(): void {

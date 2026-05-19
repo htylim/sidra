@@ -150,16 +150,31 @@ describe("BridgeSessionCoordinator", () => {
     ]);
   });
 
-  it("queues prompts while waiting for session.started", () => {
+  it("queues one prompt while waiting for session.started", () => {
     const { coordinator, transport } = createHarness();
 
-    coordinator.sendPrompt("first");
-    coordinator.sendPrompt("second");
+    expect(coordinator.sendPrompt("first")).toBe(true);
+    expect(coordinator.sendPrompt("second")).toBe(false);
 
     expect(transport.postedMessages).toEqual([
       { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
     ]);
-    expect(coordinator.getSnapshot()).toMatchObject({ pendingPromptCount: 2, starting: true });
+    expect(coordinator.getSnapshot()).toMatchObject({ pendingPromptCount: 1, starting: true });
+  });
+
+  it("rejects_second_prompt_while_startup_prompt_is_pending", () => {
+    const { coordinator, transport } = createHarness();
+
+    expect(coordinator.sendPrompt("first")).toBe(true);
+    expect(coordinator.sendPrompt("second")).toBe(false);
+
+    expect(transport.postedMessages).toEqual([
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
+    ]);
+    expect(coordinator.getSnapshot()).toMatchObject({ pendingPromptCount: 1, starting: true });
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      expect.objectContaining({ kind: "user_message", text: "first" })
+    ]);
   });
 
   it("does not add the first prompt to the transcript when session.start cannot post", () => {
@@ -191,7 +206,56 @@ describe("BridgeSessionCoordinator", () => {
       { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
       { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" }
     ]);
-    expect(coordinator.getSnapshot().pendingPromptCount).toBe(1);
+    expect(coordinator.getSnapshot().pendingPromptCount).toBe(0);
+  });
+
+  it("exposes_turn_in_flight_after_started_session_send_posts", () => {
+    const { coordinator } = createStartedHarness();
+
+    expect(coordinator.getSnapshot()).toMatchObject({
+      turnInFlight: true,
+      canCancelTurn: true
+    });
+  });
+
+  it("does_not_expose_cancel_before_queued_startup_prompt_is_flushed", () => {
+    const { coordinator } = createHarness();
+
+    coordinator.sendPrompt("hello");
+
+    expect(coordinator.getSnapshot()).toMatchObject({
+      turnInFlight: false,
+      canCancelTurn: false,
+      pendingPromptCount: 1
+    });
+  });
+
+  it("makes_flushed_startup_prompt_cancelable_immediately_after_session_started", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt("hello");
+    transport.emitMessage(sessionStarted());
+
+    expect(coordinator.getSnapshot()).toMatchObject({
+      turnInFlight: true,
+      canCancelTurn: true,
+      pendingPromptCount: 0
+    });
+  });
+
+  it("allows_one_prompt_to_queue_behind_reset_session_started", () => {
+    const { coordinator, transport } = createStartedHarness();
+    transport.emitMessage(agentEvent({ type: "assistant.done" }));
+
+    coordinator.newChat();
+    expect(coordinator.sendPrompt("after reset")).toBe(true);
+
+    expect(coordinator.getSnapshot()).toMatchObject({
+      starting: true,
+      pendingPromptCount: 1,
+      turnInFlight: false,
+      canCancelTurn: false
+    });
   });
 
   it("sends_only_the_first_queued_prompt_when_session_starts", () => {
@@ -205,7 +269,7 @@ describe("BridgeSessionCoordinator", () => {
       { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
       { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" }
     ]);
-    expect(coordinator.getSnapshot().pendingPromptCount).toBe(1);
+    expect(coordinator.getSnapshot().pendingPromptCount).toBe(0);
   });
 
   it("renders_only_the_sent_queued_prompt_before_the_first_assistant_stream", () => {
@@ -236,6 +300,192 @@ describe("BridgeSessionCoordinator", () => {
       { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" },
       { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "second" }
     ]);
+  });
+
+  it("cancelTurn_posts_session_cancel_for_the_current_client_session", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    expect(coordinator.cancelTurn()).toBe(true);
+
+    expect(transport.postedMessages).toContainEqual({
+      type: "session.cancel",
+      version: 2,
+      clientSessionId: "client-1"
+    });
+  });
+
+  it("cancelTurn_returns_false_when_no_turn_is_in_flight", () => {
+    const { coordinator, transport } = createHarness();
+
+    expect(coordinator.cancelTurn()).toBe(false);
+
+    expect(transport.postedMessages).toEqual([]);
+  });
+
+  it("cancelTurn_records_error_when_session_cancel_cannot_post", () => {
+    const { coordinator, transport } = createStartedHarness();
+    transport.postResult = { ok: false, error: "cancel failed" };
+
+    expect(coordinator.cancelTurn()).toBe(false);
+
+    expect(coordinator.getSnapshot()).toMatchObject({
+      turnInFlight: true,
+      canCancelTurn: true,
+      lastError: "cancel failed"
+    });
+    expect(coordinator.getSnapshot().transcript.at(-1)).toMatchObject({
+      kind: "status",
+      tone: "error",
+      text: "cancel failed"
+    });
+  });
+
+  it("keeps_turn_in_flight_true_after_cancel_posts_until_assistant_cancelled_arrives", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    coordinator.cancelTurn();
+
+    expect(coordinator.getSnapshot().turnInFlight).toBe(true);
+    transport.emitMessage(agentEvent({ type: "assistant.cancelled" }));
+    expect(coordinator.getSnapshot().turnInFlight).toBe(false);
+  });
+
+  it("makes_canCancelTurn_false_after_cancel_posts_until_assistant_cancelled_arrives", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    coordinator.cancelTurn();
+
+    expect(coordinator.getSnapshot().canCancelTurn).toBe(false);
+    transport.emitMessage(agentEvent({ type: "assistant.cancelled" }));
+    expect(coordinator.getSnapshot().canCancelTurn).toBe(false);
+  });
+
+  it("cancelTurn_returns_false_after_cancel_is_already_requested", () => {
+    const { coordinator } = createStartedHarness();
+
+    expect(coordinator.cancelTurn()).toBe(true);
+    expect(coordinator.cancelTurn()).toBe(false);
+  });
+
+  it("cancelTurn_posts_only_one_session_cancel_for_repeated_cancel_requests", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    coordinator.cancelTurn();
+    coordinator.cancelTurn();
+
+    expect(transport.postedMessages.filter((message) => message.type === "session.cancel")).toHaveLength(1);
+  });
+
+  it("clears_turn_in_flight_when_assistant_cancelled_arrives", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    coordinator.cancelTurn();
+    transport.emitMessage(agentEvent({ type: "assistant.cancelled" }));
+
+    expect(coordinator.getSnapshot()).toMatchObject({
+      turnInFlight: false,
+      canCancelTurn: false
+    });
+  });
+
+  it("clears_running_state_when_no_in_flight_turn_arrives_after_cancel_request", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    coordinator.cancelTurn();
+    transport.emitMessage(sessionError("No in-flight turn", "no_in_flight_turn"));
+
+    expect(coordinator.getSnapshot()).toMatchObject({
+      turnInFlight: false,
+      canCancelTurn: false,
+      lastError: "No in-flight turn"
+    });
+    expect(coordinator.getSnapshot().transcript.at(-1)).toMatchObject({
+      kind: "status",
+      tone: "error",
+      text: "No in-flight turn"
+    });
+  });
+
+  it("suppresses_stale_no_in_flight_turn_after_cancel_races_with_assistant_done", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    coordinator.cancelTurn();
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Complete" }));
+    transport.emitMessage(agentEvent({ type: "assistant.done" }));
+    transport.emitMessage(sessionError("No in-flight turn", "no_in_flight_turn"));
+
+    expect(coordinator.getSnapshot()).toMatchObject({
+      turnInFlight: false,
+      canCancelTurn: false,
+      lastError: undefined
+    });
+    expect(coordinator.getSnapshot().transcript).not.toContainEqual(
+      expect.objectContaining({ kind: "status", tone: "error", text: "No in-flight turn" })
+    );
+  });
+
+  it("suppresses_stale_no_in_flight_turn_after_cancel_race_then_new_chat", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    coordinator.cancelTurn();
+    transport.emitMessage(agentEvent({ type: "assistant.done" }));
+    coordinator.newChat();
+    transport.emitMessage(sessionError("No in-flight turn", "no_in_flight_turn"));
+
+    expect(coordinator.getSnapshot()).toMatchObject({
+      starting: true
+    });
+    expect(coordinator.getSnapshot()).not.toHaveProperty("lastError");
+    expect(coordinator.getSnapshot().transcript).not.toContainEqual(
+      expect.objectContaining({ kind: "status", tone: "error", text: "No in-flight turn" })
+    );
+  });
+
+  it("rejects_busy_duplicate_before_payload_validation", () => {
+    const { coordinator } = createHarness("codex", 180);
+
+    expect(coordinator.sendPrompt("first")).toBe(true);
+    expect(coordinator.sendPrompt("x".repeat(100))).toBe(false);
+
+    expect(coordinator.getSnapshot()).toMatchObject({
+      pendingPromptCount: 1,
+      lastError: undefined
+    });
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      expect.objectContaining({ kind: "user_message", text: "first" })
+    ]);
+  });
+
+  it("cancelled_bridge_event_preserves_partial_output_after_ui_cancel", () => {
+    const { coordinator, transport } = createStartedHarness();
+
+    coordinator.cancelTurn();
+    transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Partial" }));
+    transport.emitMessage(agentEvent({ type: "assistant.cancelled" }));
+
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      expect.objectContaining({ role: "user", text: "hello" }),
+      expect.objectContaining({ role: "status", text: "Session started" }),
+      expect.objectContaining({ kind: "assistant_turn", markdown: "Partial", status: "cancelled" }),
+      expect.objectContaining({ kind: "status", tone: "cancelled", text: "Assistant turn cancelled" })
+    ]);
+  });
+
+  it("does_not_flush_pending_duplicate_prompts_after_cancel_because_duplicates_are_not_queued", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt("first");
+    coordinator.sendPrompt("second");
+    transport.emitMessage(sessionStarted());
+    coordinator.cancelTurn();
+    transport.emitMessage(agentEvent({ type: "assistant.cancelled" }));
+
+    expect(transport.postedMessages).toEqual([
+      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.cancel", version: 2, clientSessionId: "client-1" }
+    ]);
+    expect(coordinator.getSnapshot().pendingPromptCount).toBe(0);
   });
 
   it("rejects_started_session_prompt_after_send_before_first_delta", () => {
@@ -301,6 +551,7 @@ describe("BridgeSessionCoordinator", () => {
 
     coordinator.sendPrompt("first");
     transport.emitMessage(sessionStarted());
+    transport.emitMessage(agentEvent({ type: "assistant.done" }));
     const accepted = coordinator.sendPrompt("x".repeat(200));
 
     expect(accepted).toBe(false);
@@ -930,28 +1181,18 @@ describe("BridgeSessionCoordinator page context", () => {
     ]);
   });
 
-  it("keeps_flushed_submission_entries_when_a_later_queued_context_send_fails", () => {
+  it("keeps_flushed_submission_entries_when_a_later_context_send_is_rejected", () => {
     const { coordinator, transport } = createHarness();
 
-    coordinator.sendPrompt({ prompt: "first", pageContext: readablePageContext() });
-    coordinator.sendPrompt({ prompt: "second", pageContext: metadataOnlyPageContext() });
-    const originalPost = transport.post.bind(transport);
-    let sendCount = 0;
-    transport.post = (message) => {
-      if (message.type === "session.send") {
-        sendCount += 1;
-        if (sendCount === 2) return { ok: false, error: "second failed" };
-      }
-      return originalPost(message);
-    };
+    expect(coordinator.sendPrompt({ prompt: "first", pageContext: readablePageContext() })).toBe(true);
+    expect(coordinator.sendPrompt({ prompt: "second", pageContext: metadataOnlyPageContext() })).toBe(false);
     transport.emitMessage(sessionStarted());
     transport.emitMessage(agentEvent({ type: "assistant.done" }));
 
     expect(coordinator.getSnapshot().transcript).toEqual([
       expect.objectContaining({ role: "status", text: "Page context attached" }),
       expect.objectContaining({ role: "user", text: "first" }),
-      expect.objectContaining({ role: "status", text: "Session started" }),
-      expect.objectContaining({ role: "status", tone: "error", text: "second failed" })
+      expect.objectContaining({ role: "status", text: "Session started" })
     ]);
   });
 

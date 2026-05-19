@@ -38,6 +38,8 @@ export type UrlSessionSnapshot = {
   pendingPromptCount: number;
   sessionStarted: boolean;
   starting: boolean;
+  turnInFlight: boolean;
+  canCancelTurn: boolean;
 };
 
 type UrlSessionRecord = {
@@ -53,6 +55,7 @@ export type UrlSessionCoordinator = {
   getSnapshot(): BridgeSessionCoordinatorSnapshot;
   subscribe(listener: () => void): () => void;
   sendPrompt(input: string | { prompt: string; pageContext?: PageContext }): boolean;
+  cancelTurn?(): boolean;
   recordCaptureUnavailable?(message: string): void;
   newChat(): void;
   markBridgeDisconnected(): void;
@@ -170,6 +173,15 @@ export class UrlSessionStore {
     return true;
   }
 
+  cancelActiveTurn(): boolean {
+    const activeRecord = this.getActiveRecord();
+    if (!activeRecord?.coordinator.cancelTurn) return false;
+
+    const cancelled = activeRecord.coordinator.cancelTurn();
+    this.emit();
+    return cancelled;
+  }
+
   recordCaptureUnavailable(input: { message: string }): void {
     const activeRecord = this.getActiveRecord();
     if (!activeRecord) return;
@@ -240,7 +252,9 @@ export class UrlSessionStore {
       transcript: coordinatorSnapshot.transcript,
       pendingPromptCount: coordinatorSnapshot.pendingPromptCount,
       sessionStarted: coordinatorSnapshot.sessionStarted,
-      starting: coordinatorSnapshot.starting
+      starting: coordinatorSnapshot.starting,
+      turnInFlight: coordinatorSnapshot.turnInFlight,
+      canCancelTurn: coordinatorSnapshot.canCancelTurn
     };
   }
 
@@ -267,7 +281,9 @@ function createEmptySessionSnapshot(): UrlSessionSnapshot {
     transcript: [],
     pendingPromptCount: 0,
     sessionStarted: false,
-    starting: false
+    starting: false,
+    turnInFlight: false,
+    canCancelTurn: false
   };
 }
 

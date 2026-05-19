@@ -40,6 +40,8 @@ export type SidePanelSnapshot = {
     pendingPromptCount: number;
     sessionStarted: boolean;
     starting: boolean;
+    turnInFlight: boolean;
+    canCancelTurn: boolean;
     quickActions: VisibleQuickAction[];
   };
 };
@@ -55,6 +57,7 @@ export type SidePanelController = {
   sendPrompt(prompt: string): boolean;
   captureAndSend(prompt: string): Promise<boolean>;
   sendQuickAction(actionId: string): Promise<boolean>;
+  cancelTurn(): boolean;
   updateCaptureMode(captureMode: CaptureMode): void;
   updateDraftPrompt(text: string): void;
   newChat(): void;
@@ -194,6 +197,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
 
     refreshSnapshot();
     if (!snapshot.bridge.canUseChat) return false;
+    if (activeSessionIsBusy(snapshot.activeSession)) return false;
 
     const preCaptureMode = snapshot.activeSession.captureMode;
     const captureResult = await captureService.captureActivePageDocument();
@@ -239,15 +243,22 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     sendPrompt: (prompt) => {
       refreshSnapshot();
       if (!snapshot.bridge.canUseChat) return false;
+      if (activeSessionIsBusy(snapshot.activeSession)) return false;
       return urlSessionStore.sendPrompt(prompt);
     },
     captureAndSend: captureAndSendCommand,
     sendQuickAction: async (actionId) => {
       refreshSnapshot();
+      if (activeSessionIsBusy(snapshot.activeSession)) return false;
       const action = settingsSnapshot.quickActions.actions.find((candidate) => candidate.id === actionId);
       const visible = snapshot.activeSession.quickActions.some((candidate) => candidate.id === actionId);
       if (!action || !visible) return false;
       return await captureAndSendCommand(action.prompt);
+    },
+    cancelTurn: () => {
+      const cancelled = urlSessionStore.cancelActiveTurn();
+      emit();
+      return cancelled;
     },
     updateCaptureMode: (captureMode) => urlSessionStore.updateActiveCaptureMode(captureMode),
     updateDraftPrompt: (text) => urlSessionStore.updateActiveDraftPrompt(text),
@@ -285,6 +296,8 @@ function createSnapshot(
       pendingPromptCount: activeSession.pendingPromptCount,
       sessionStarted: activeSession.sessionStarted,
       starting: activeSession.starting,
+      turnInFlight: activeSession.turnInFlight,
+      canCancelTurn: activeSession.canCancelTurn,
       quickActions: deriveVisibleQuickActions({
         activePage,
         canUseChat,
@@ -294,6 +307,13 @@ function createSnapshot(
       })
     }
   };
+}
+
+function activeSessionIsBusy(input: {
+  pendingPromptCount: number;
+  turnInFlight: boolean;
+}): boolean {
+  return input.pendingPromptCount > 0 || input.turnInFlight;
 }
 
 export function createChromeSidePanelController(): SidePanelController {

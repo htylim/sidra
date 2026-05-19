@@ -400,6 +400,24 @@ function agentTextDelta(clientSessionId: string, text: string): BridgeToExtensio
   };
 }
 
+function agentDone(clientSessionId = "client-1"): BridgeToExtension {
+  return {
+    type: "agent.event",
+    version: 2,
+    clientSessionId,
+    event: { type: "assistant.done" }
+  };
+}
+
+function assistantCancelled(clientSessionId = "client-1"): BridgeToExtension {
+  return {
+    type: "agent.event",
+    version: 2,
+    clientSessionId,
+    event: { type: "assistant.cancelled" }
+  };
+}
+
 describe("SidePanelController", () => {
   it("connects to the native bridge when the controller is created", () => {
     const { connectNative } = createHarness();
@@ -589,12 +607,12 @@ describe("SidePanelController", () => {
     ]);
   });
 
-  it("flushes the next queued prompt after the current turn completes", () => {
+  it("rejects a second prompt while the current turn is queued", () => {
     const { controller, ports } = createHarness();
 
     ports[0].emitMessage(bridgeReady());
-    controller.sendPrompt("first");
-    controller.sendPrompt("second");
+    expect(controller.sendPrompt("first")).toBe(true);
+    expect(controller.sendPrompt("second")).toBe(false);
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
@@ -605,9 +623,79 @@ describe("SidePanelController", () => {
 
     expect(ports[0].postedMessages).toEqual([
       { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" },
-      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "second" }
+      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" }
     ]);
+  });
+
+  it("exposes_active_session_turn_in_flight_after_send_is_flushed", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("hello");
+    ports[0].emitMessage(sessionStarted());
+
+    expect(controller.getSnapshot().activeSession).toMatchObject({
+      turnInFlight: true,
+      canCancelTurn: true
+    });
+  });
+
+  it("exposes_canCancelTurn_only_after_provider_turn_is_in_flight", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("hello");
+
+    expect(controller.getSnapshot().activeSession).toMatchObject({
+      turnInFlight: false,
+      canCancelTurn: false,
+      pendingPromptCount: 1
+    });
+
+    ports[0].emitMessage(sessionStarted());
+
+    expect(controller.getSnapshot().activeSession).toMatchObject({
+      turnInFlight: true,
+      canCancelTurn: true
+    });
+  });
+
+  it("cancelTurn_posts_session_cancel_for_the_active_session", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("hello");
+    ports[0].emitMessage(sessionStarted());
+
+    expect(controller.cancelTurn()).toBe(true);
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.cancel",
+      version: 2,
+      clientSessionId: "client-1"
+    });
+  });
+
+  it("cancelTurn_returns_false_when_the_active_session_has_no_cancelable_turn", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+
+    expect(controller.cancelTurn()).toBe(false);
+    expect(ports[0].postedMessages).toEqual([]);
+  });
+
+  it("sendPrompt_returns_false_when_active_session_is_running", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+
+    expect(controller.sendPrompt("second")).toBe(false);
+    expect(ports[0].postedMessages).not.toContainEqual(
+      expect.objectContaining({ type: "session.send", prompt: "second" })
+    );
   });
 
   it("starts a new provider session before sending after retrying a native bridge disconnect", () => {
@@ -968,6 +1056,65 @@ describe("SidePanelController URL sessions", () => {
     expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
   });
 
+  it("allows_other_url_sessions_to_send_while_one_session_is_running", () => {
+    const { controller, activePage, ports } = createHarnessWithOptions({
+      clientSessionIds: ["client-a", "client-b"]
+    });
+
+    ports[0].emitMessage(bridgeReady());
+    activePage.emit(pageIdentity("https://example.com/a"));
+    expect(controller.sendPrompt("page a")).toBe(true);
+    ports[0].emitMessage(sessionStarted("client-a"));
+    activePage.emit(pageIdentity("https://example.com/b"));
+
+    expect(controller.sendPrompt("page b")).toBe(true);
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.start",
+      version: 2,
+      clientSessionId: "client-b",
+      providerId: "codex"
+    });
+  });
+
+  it("restores_cancel_state_when_returning_to_running_url_session", () => {
+    const { controller, activePage, ports } = createHarnessWithOptions({
+      clientSessionIds: ["client-a", "client-b"]
+    });
+
+    ports[0].emitMessage(bridgeReady());
+    activePage.emit(pageIdentity("https://example.com/a"));
+    controller.sendPrompt("page a");
+    ports[0].emitMessage(sessionStarted("client-a"));
+    activePage.emit(pageIdentity("https://example.com/b"));
+    expect(controller.getSnapshot().activeSession.turnInFlight).toBe(false);
+
+    activePage.emit(pageIdentity("https://example.com/a"));
+
+    expect(controller.getSnapshot().activeSession).toMatchObject({
+      turnInFlight: true,
+      canCancelTurn: true
+    });
+  });
+
+  it("keeps_cancelled_partial_output_in_the_active_session_after_bridge_cancelled_event", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("hello");
+    ports[0].emitMessage(sessionStarted());
+    controller.cancelTurn();
+    ports[0].emitMessage(agentTextDelta("client-1", "Partial"));
+    ports[0].emitMessage(assistantCancelled());
+
+    expect(controller.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({ kind: "assistant_turn", markdown: "Partial", status: "cancelled" })
+    );
+    expect(controller.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({ kind: "status", tone: "cancelled", text: "Assistant turn cancelled" })
+    );
+  });
+
   it("switches_visible_running_state_when_active_page_changes", () => {
     const { controller, activePage, ports } = createHarness();
     ports[0].emitMessage(bridgeReady());
@@ -1028,6 +1175,42 @@ describe("SidePanelController Capture + Send", () => {
     controller.updateCaptureMode("full_dom");
 
     expect(controller.getSnapshot().activeSession.captureMode).toBe("full_dom");
+  });
+
+  it("captureAndSend_does_not_capture_when_active_session_is_running", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+
+    await expect(controller.captureAndSend("second")).resolves.toBe(false);
+    expect(captureService.captureCalls).toBe(0);
+  });
+
+  it("captureAndSend_does_not_capture_when_active_session_has_a_queued_startup_prompt", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("first");
+
+    await expect(controller.captureAndSend("second")).resolves.toBe(false);
+    expect(captureService.captureCalls).toBe(0);
+  });
+
+  it("captureAndSend_does_not_capture_when_cancel_is_already_requested", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+    controller.cancelTurn();
+
+    await expect(controller.captureAndSend("second")).resolves.toBe(false);
+    expect(captureService.captureCalls).toBe(0);
   });
 
   it("does_not_capture_on_controller_creation_or_active_page_changes", async () => {
@@ -1166,6 +1349,13 @@ describe("SidePanelController Capture + Send", () => {
 
     await controller.captureAndSend("first");
     expect(controller.getSnapshot().activeSession.contextState.status).toBe("full_dom_attached");
+    ports[0].emitMessage(sessionStarted());
+    ports[0].emitMessage({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "client-1",
+      event: { type: "assistant.done" }
+    });
 
     settingsStore.setDomLimit(html.length - 1);
     await controller.captureAndSend("second");
@@ -1389,6 +1579,13 @@ describe("SidePanelController Capture + Send", () => {
 
     await controller.captureAndSend("first");
     expect(controller.getSnapshot().activeSession.contextState.status).toBe("attached");
+    ports[0].emitMessage(sessionStarted());
+    ports[0].emitMessage({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "client-1",
+      event: { type: "assistant.done" }
+    });
 
     settingsStore.setLimit(1_000);
     await controller.captureAndSend("second");
@@ -1625,6 +1822,19 @@ describe("SidePanelController quick actions", () => {
     controller.sendPrompt("hello");
     await expect(controller.sendQuickAction("summarize-page")).resolves.toBe(false);
 
+    expect(captureService.captureCalls).toBe(0);
+  });
+
+  it("sendQuickAction_returns_false_when_active_session_is_running", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+
+    await expect(controller.sendQuickAction("summarize-page")).resolves.toBe(false);
     expect(captureService.captureCalls).toBe(0);
   });
 

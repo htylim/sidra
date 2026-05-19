@@ -20,6 +20,9 @@ type SnapshotOptions = {
   draftPrompt?: string;
   transcript?: SidePanelSnapshot["activeSession"]["transcript"];
   quickActions?: SidePanelSnapshot["activeSession"]["quickActions"];
+  pendingPromptCount?: number;
+  turnInFlight?: boolean;
+  canCancelTurn?: boolean;
 };
 
 function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
@@ -38,9 +41,11 @@ function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
       draftPrompt: options.draftPrompt ?? "",
       contextState: options.contextState ?? { status: "none", label: "No context sent yet" },
       transcript: options.transcript ?? [],
-      pendingPromptCount: 0,
+      pendingPromptCount: options.pendingPromptCount ?? 0,
       sessionStarted: false,
       starting: false,
+      turnInFlight: options.turnInFlight ?? false,
+      canCancelTurn: options.canCancelTurn ?? false,
       quickActions: options.quickActions ?? []
     }
   };
@@ -74,6 +79,7 @@ function renderSnapshot(bridge: SidePanelSnapshot["bridge"]): string {
       onSendPrompt={() => false}
       onCaptureAndSend={() => false}
       onQuickAction={() => false}
+      onCancelTurn={() => false}
       onDraftPromptChange={() => undefined}
       onCaptureModeChange={() => undefined}
       onNewChat={() => undefined}
@@ -90,6 +96,7 @@ function renderPageSnapshot(snapshot: SidePanelSnapshot): string {
       onSendPrompt={() => false}
       onCaptureAndSend={() => false}
       onQuickAction={() => false}
+      onCancelTurn={() => false}
       onDraftPromptChange={() => undefined}
       onCaptureModeChange={() => undefined}
       onNewChat={() => undefined}
@@ -103,11 +110,12 @@ function renderInteractiveSnapshot(
   snapshot: SidePanelSnapshot,
   overrides: Partial<{
     onSendPrompt(prompt: string): boolean;
-  onCaptureAndSend(prompt: string): boolean | Promise<boolean>;
-  onQuickAction(actionId: string): boolean | Promise<boolean>;
-  onDraftPromptChange(text: string): void;
-  onCaptureModeChange(captureMode: SidePanelSnapshot["activeSession"]["captureMode"]): void;
-  onOpenSettings(): void;
+    onCaptureAndSend(prompt: string): boolean | Promise<boolean>;
+    onQuickAction(actionId: string): boolean | Promise<boolean>;
+    onCancelTurn(): boolean;
+    onDraftPromptChange(text: string): void;
+    onCaptureModeChange(captureMode: SidePanelSnapshot["activeSession"]["captureMode"]): void;
+    onOpenSettings(): void;
   }> = {}
 ) {
   let currentSnapshot = snapshot;
@@ -120,6 +128,7 @@ function renderInteractiveSnapshot(
         onSendPrompt={overrides.onSendPrompt ?? (() => false)}
         onCaptureAndSend={overrides.onCaptureAndSend ?? (() => false)}
         onQuickAction={overrides.onQuickAction ?? (() => false)}
+        onCancelTurn={overrides.onCancelTurn ?? (() => false)}
         onDraftPromptChange={(text) => {
           currentSnapshot = {
             ...currentSnapshot,
@@ -150,6 +159,7 @@ function renderInteractiveSnapshot(
         onSendPrompt={overrides.onSendPrompt ?? (() => false)}
         onCaptureAndSend={overrides.onCaptureAndSend ?? (() => false)}
         onQuickAction={overrides.onQuickAction ?? (() => false)}
+        onCancelTurn={overrides.onCancelTurn ?? (() => false)}
         onDraftPromptChange={(text) => {
           currentSnapshot = {
             ...currentSnapshot,
@@ -409,6 +419,7 @@ describe("SidePanelView URL sessions", () => {
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
         onQuickAction={() => false}
+        onCancelTurn={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
@@ -428,6 +439,7 @@ describe("SidePanelView URL sessions", () => {
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
         onQuickAction={() => false}
+        onCancelTurn={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
@@ -475,6 +487,123 @@ describe("SidePanelView URL sessions", () => {
 });
 
 describe("SidePanelView Capture + Send", () => {
+  it("renders_cancel_button_while_turn_is_in_flight", () => {
+    renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: true }));
+
+    expect(screen.getByRole("button", { name: "Cancel" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Capture + Send" })).toBeNull();
+  });
+
+  it("renders_disabled_cancel_after_cancel_is_requested_until_terminal_event", () => {
+    renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: false }));
+
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveProperty("disabled", true);
+  });
+
+  it("does_not_show_cancel_before_provider_turn_is_in_flight", () => {
+    renderInteractiveSnapshot(snapshotForPage({ pendingPromptCount: 1, turnInFlight: false, canCancelTurn: false }));
+
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Capture + Send" })).toHaveProperty("disabled", true);
+  });
+
+  it("clicking_cancel_calls_onCancelTurn", async () => {
+    const user = userEvent.setup();
+    const onCancelTurn = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: true }), { onCancelTurn });
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onCancelTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("pressing_escape_cancels_the_active_turn_from_the_document", async () => {
+    const user = userEvent.setup();
+    const onCancelTurn = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: true }), { onCancelTurn });
+
+    document.body.focus();
+    await user.keyboard("{Escape}");
+
+    expect(onCancelTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("pressing_escape_cancels_when_focus_is_outside_the_composer", async () => {
+    const user = userEvent.setup();
+    const onCancelTurn = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: true }), { onCancelTurn });
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.keyboard("{Escape}");
+
+    expect(onCancelTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("pressing_escape_after_cancel_is_requested_does_not_call_onCancelTurn_again", async () => {
+    const user = userEvent.setup();
+    const onCancelTurn = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: false }), { onCancelTurn });
+
+    await user.keyboard("{Escape}");
+
+    expect(onCancelTurn).not.toHaveBeenCalled();
+  });
+
+  it("pressing_escape_while_idle_does_not_cancel", async () => {
+    const user = userEvent.setup();
+    const onCancelTurn = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage(), { onCancelTurn });
+
+    await user.keyboard("{Escape}");
+
+    expect(onCancelTurn).not.toHaveBeenCalled();
+  });
+
+  it("pressing_enter_while_turn_is_in_flight_does_not_send", async () => {
+    const user = userEvent.setup();
+    const onCaptureAndSend = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "hello", turnInFlight: true, canCancelTurn: true }), {
+      onCaptureAndSend
+    });
+
+    await user.keyboard("{Enter}");
+
+    expect(onCaptureAndSend).not.toHaveBeenCalled();
+  });
+
+  it("clicking_send_while_turn_is_in_flight_does_not_send", () => {
+    const onCaptureAndSend = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "hello", turnInFlight: true, canCancelTurn: true }), {
+      onCaptureAndSend
+    });
+
+    expect(screen.queryByRole("button", { name: "Capture + Send" })).toBeNull();
+    expect(onCaptureAndSend).not.toHaveBeenCalled();
+  });
+
+  it("disables_prompt_input_and_options_while_turn_is_in_flight", () => {
+    renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: true }));
+
+    expect(screen.getByRole("textbox")).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Prompt options" })).toHaveProperty("disabled", true);
+  });
+
+  it("keeps_cancel_enabled_when_prompt_controls_are_disabled_by_running_turn", () => {
+    renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: true }));
+
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveProperty("disabled", false);
+  });
+
+  it("does_not_cancel_when_canCancelTurn_is_false", async () => {
+    const user = userEvent.setup();
+    const onCancelTurn = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: false }), { onCancelTurn });
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onCancelTurn).not.toHaveBeenCalled();
+  });
+
   it("clicking_capture_and_send_calls_onCaptureAndSend_with_trimmed_prompt", async () => {
     const user = userEvent.setup();
     const onCaptureAndSend = vi.fn(() => true);
@@ -503,6 +632,7 @@ describe("SidePanelView Capture + Send", () => {
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
         onQuickAction={() => false}
+        onCancelTurn={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
@@ -924,6 +1054,7 @@ describe("SidePanelView prompt options", () => {
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
         onQuickAction={() => false}
+        onCancelTurn={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
@@ -944,6 +1075,7 @@ describe("SidePanelView prompt options", () => {
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
         onQuickAction={() => false}
+        onCancelTurn={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
@@ -964,6 +1096,7 @@ describe("SidePanelView prompt options", () => {
         onSendPrompt={() => false}
         onCaptureAndSend={() => false}
         onQuickAction={() => false}
+        onCancelTurn={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
