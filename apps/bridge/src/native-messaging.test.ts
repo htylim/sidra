@@ -205,6 +205,40 @@ describe("native messaging dispatch", () => {
     ]);
   });
 
+  it("reports bridge handler rejections without blocking later dispatch", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 2);
+    let secondMessageDispatched: (() => void) | undefined;
+    const sawSecondMessage = new Promise<void>((resolve) => {
+      secondMessageDispatched = resolve;
+    });
+
+    runNativeMessagingBridge(input, output, {
+      bridge: {
+        async handleMessage(message: unknown) {
+          if (isMessageForClientSession(message, "page-2")) {
+            secondMessageDispatched?.();
+            return;
+          }
+          throw new Error("secret failure detail");
+        }
+      }
+    });
+    input.write(
+      Buffer.concat([
+        encodeNativeMessage({ type: "session.send", version: 2, clientSessionId: "page-1", prompt: "Hello" }),
+        encodeNativeMessage({ type: "session.send", version: 2, clientSessionId: "page-2", prompt: "After failure" })
+      ])
+    );
+
+    await withTimeout(sawSecondMessage);
+    expect(await messages).toEqual([
+      { type: "bridge.ready", version: 2 },
+      { type: "bridge.error", version: 2, message: "Bridge message failed", code: "internal_error" }
+    ]);
+  });
+
   it("reports parser validation errors from framed native messages", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
