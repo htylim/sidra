@@ -64,6 +64,19 @@ function agentTextDelta(clientSessionId: string, text: string): BridgeToExtensio
   };
 }
 
+function permissionRequest(clientSessionId: string, requestId = "permission-1", permissionKey = "shell:ls"): BridgeToExtension {
+  return {
+    type: "permission.request",
+    version: 2,
+    clientSessionId,
+    request: {
+      requestId,
+      permissionKey,
+      title: "Run command"
+    }
+  };
+}
+
 function assistantCancelled(clientSessionId: string): BridgeToExtension {
   return {
     type: "agent.event",
@@ -229,6 +242,134 @@ describe("UrlSessionStore", () => {
       version: 2,
       clientSessionId: "client-1"
     });
+  });
+
+  it("stores_permission_request_in_matching_inactive_session_only", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPrompt("first");
+    transport.emitMessage(sessionStarted("client-1"));
+    store.selectPage(pageIdentity("https://example.com/b"));
+
+    transport.emitMessage(permissionRequest("client-1"));
+
+    expect(store.getSnapshot().activeSession.transcript).toEqual([]);
+    store.selectPage(pageIdentity("https://example.com/a"));
+    expect(store.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({ kind: "permission_request", requestId: "permission-1", status: "pending" })
+    );
+  });
+
+  it("responds_to_permission_for_the_active_url_session_only", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPrompt("first");
+    transport.emitMessage(sessionStarted("client-1"));
+    transport.emitMessage(permissionRequest("client-1"));
+
+    expect(store.respondToActivePermission("permission-1", "deny")).toBe(true);
+
+    expect(transport.postedMessages).toContainEqual({
+      type: "permission.respond",
+      version: 2,
+      clientSessionId: "client-1",
+      requestId: "permission-1",
+      decision: "deny"
+    });
+  });
+
+  it("respondToPermission_does_not_cross_url_session_boundary", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPrompt("first");
+    transport.emitMessage(sessionStarted("client-1"));
+    transport.emitMessage(permissionRequest("client-1"));
+    store.selectPage(pageIdentity("https://example.com/b"));
+
+    expect(store.respondToActivePermission("permission-1", "allow_once")).toBe(false);
+
+    expect(transport.postedMessages).not.toContainEqual(expect.objectContaining({ type: "permission.respond" }));
+  });
+
+  it("allow_once_does_not_create_session_approval", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPrompt("first");
+    transport.emitMessage(sessionStarted("client-1"));
+    transport.emitMessage(permissionRequest("client-1"));
+
+    store.respondToActivePermission("permission-1", "allow_once");
+
+    expect(store.listActiveSessionApprovals()).toEqual([]);
+  });
+
+  it("allow_for_session_records_active_session_approval", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPrompt("first");
+    transport.emitMessage(sessionStarted("client-1"));
+    transport.emitMessage(permissionRequest("client-1"));
+
+    store.respondToActivePermission("permission-1", "allow_for_session");
+
+    expect(store.listActiveSessionApprovals()).toEqual([{ permissionKey: "shell:ls", decision: "allow_for_session" }]);
+  });
+
+  it("auto_allows_matching_request_from_active_session_approval", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.grantActiveSessionApproval({ permissionKey: "shell:ls", decision: "allow_for_session" });
+    store.sendPrompt("first");
+    transport.emitMessage(sessionStarted("client-1"));
+
+    transport.emitMessage(permissionRequest("client-1"));
+
+    expect(transport.postedMessages).toContainEqual({
+      type: "permission.respond",
+      version: 2,
+      clientSessionId: "client-1",
+      requestId: "permission-1",
+      decision: "allow_for_session"
+    });
+    expect(store.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({ kind: "permission_request", status: "allowed_for_session" })
+    );
+  });
+
+  it("failed_auto_allow_does_not_retry_indefinitely", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.grantActiveSessionApproval({ permissionKey: "shell:ls", decision: "allow_for_session" });
+    store.sendPrompt("first");
+    transport.emitMessage(sessionStarted("client-1"));
+    transport.postResult = { ok: false, error: "post failed" };
+
+    transport.emitMessage(permissionRequest("client-1"));
+
+    expect(transport.postedMessages.filter((message) => message.type === "permission.respond")).toHaveLength(1);
+    expect(store.listActiveSessionApprovals()).toEqual([]);
+  });
+
+  it("approval_for_one_url_session_does_not_auto_allow_another_session", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.grantActiveSessionApproval({ permissionKey: "shell:ls", decision: "allow_for_session" });
+    store.selectPage(pageIdentity("https://example.com/b"));
+    store.sendPrompt("second");
+    transport.emitMessage(sessionStarted("client-2"));
+
+    transport.emitMessage(permissionRequest("client-2"));
+
+    expect(transport.postedMessages).not.toContainEqual({
+      type: "permission.respond",
+      version: 2,
+      clientSessionId: "client-2",
+      requestId: "permission-1",
+      decision: "allow_for_session"
+    });
+    expect(store.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({ kind: "permission_request", status: "pending" })
+    );
   });
 
   it("returns_false_when_cancelling_without_an_active_turn", () => {
@@ -507,6 +648,20 @@ describe("UrlSessionStore", () => {
     expect(store.listActiveSessionApprovals()).toEqual([
       { permissionKey: "shell:ls", decision: "allow_for_session" }
     ]);
+  });
+
+  it("bridge_disconnect_clears_all_session_approvals", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.grantActiveSessionApproval({ permissionKey: "shell:ls", decision: "allow_for_session" });
+    store.selectPage(pageIdentity("https://example.com/b"));
+    store.grantActiveSessionApproval({ permissionKey: "shell:git", decision: "allow_for_session" });
+
+    store.markBridgeDisconnected();
+
+    expect(store.listActiveSessionApprovals()).toEqual([]);
+    store.selectPage(pageIdentity("https://example.com/a"));
+    expect(store.listActiveSessionApprovals()).toEqual([]);
   });
 });
 

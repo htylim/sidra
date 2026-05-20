@@ -19,6 +19,7 @@ function SidePanel() {
       onCaptureAndSend={sidePanelController.captureAndSend}
       onQuickAction={sidePanelController.sendQuickAction}
       onCancelTurn={sidePanelController.cancelTurn}
+      onRespondToPermission={sidePanelController.respondToPermission}
       onDraftPromptChange={sidePanelController.updateDraftPrompt}
       onCaptureModeChange={sidePanelController.updateCaptureMode}
       onNewChat={sidePanelController.newChat}

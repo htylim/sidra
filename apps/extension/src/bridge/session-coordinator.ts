@@ -1,4 +1,12 @@
-import type { BridgeToExtension, ExtensionToBridge, PageContext, ProviderId, SessionErrorCode } from "@sidra/protocol";
+import type {
+  BridgeToExtension,
+  ExtensionToBridge,
+  PageContext,
+  PermissionDecision,
+  PermissionRequest,
+  ProviderId,
+  SessionErrorCode
+} from "@sidra/protocol";
 import {
   BRIDGE_HARD_PAYLOAD_BYTE_LIMIT,
   BRIDGE_PAYLOAD_TOO_LARGE_MESSAGE,
@@ -10,12 +18,15 @@ import {
   addAssistantTextDelta,
   addContextMarker,
   addErrorStatusEntry,
+  addPermissionRequest,
   addStatusEntry,
   addUserPrompt,
   cancelAssistantTurn,
   completeAssistantTurn,
   failAssistantTurn,
+  markPendingPermissionRequestsUnavailable,
   removeTranscriptEntriesByIds,
+  resolvePermissionRequest,
   type ContextAttachmentMarker,
   type TranscriptEntry
 } from "../transcript";
@@ -96,6 +107,7 @@ export class BridgeSessionCoordinator {
   private startupResultsToIgnore = 0;
   // Reset can also race a terminal result from an old in-flight turn.
   private terminalTurnErrorsToIgnore = 0;
+  private readonly pendingPermissionKeysByRequestId = new Map<string, string>();
   private snapshot: BridgeSessionCoordinatorSnapshot;
 
   constructor(options: BridgeSessionCoordinatorOptions) {
@@ -194,7 +206,38 @@ export class BridgeSessionCoordinator {
 
     this.cancelRequested = true;
     this.suppressNextNoInFlightAfterCancelTerminal = false;
-    this.setSnapshot({ ...this.snapshot, lastError: undefined });
+    this.clearPendingPermissionRequests();
+    this.setSnapshot({
+      ...this.snapshot,
+      transcript: markPendingPermissionRequestsUnavailable(this.snapshot.transcript),
+      lastError: undefined
+    });
+    return true;
+  }
+
+  respondToPermission(requestId: string, decision: PermissionDecision): boolean {
+    if (this.cancelRequested || !this.pendingPermissionKeysByRequestId.has(requestId) || !this.snapshot.sessionStarted) {
+      return false;
+    }
+
+    const result = this.transport.post({
+      type: "permission.respond",
+      version: 2,
+      clientSessionId: this.clientSessionId,
+      requestId,
+      decision
+    });
+    if (!result.ok) {
+      this.recordLocalSubmissionError(result.error);
+      return false;
+    }
+
+    this.pendingPermissionKeysByRequestId.delete(requestId);
+    this.setSnapshot({
+      ...this.snapshot,
+      transcript: resolvePermissionRequest(this.snapshot.transcript, requestId, decision),
+      lastError: undefined
+    });
     return true;
   }
 
@@ -213,6 +256,7 @@ export class BridgeSessionCoordinator {
     const shouldSuppressStaleNoInFlight =
       this.cancelRequested || this.suppressNextNoInFlightAfterCancelTerminal;
     this.pendingSubmissions = [];
+    this.clearPendingPermissionRequests();
     this.turnInFlight = false;
     this.cancelRequested = false;
     this.suppressNextNoInFlightAfterCancelTerminal = shouldSuppressStaleNoInFlight;
@@ -261,6 +305,7 @@ export class BridgeSessionCoordinator {
   reset(clientSessionId: string): void {
     this.clientSessionId = clientSessionId;
     this.pendingSubmissions = [];
+    this.clearPendingPermissionRequests();
     this.startPosted = false;
     this.turnInFlight = false;
     this.cancelRequested = false;
@@ -283,6 +328,7 @@ export class BridgeSessionCoordinator {
   markBridgeDisconnected(): void {
     const transcript = this.removePendingTranscriptEntries(this.snapshot.transcript);
     this.pendingSubmissions = [];
+    this.clearPendingPermissionRequests();
     this.startPosted = false;
     this.turnInFlight = false;
     this.cancelRequested = false;
@@ -295,7 +341,7 @@ export class BridgeSessionCoordinator {
       sessionStarted: false,
       starting: false,
       pendingPromptCount: 0,
-      transcript: addStatusEntry(failAssistantTurn(transcript), "Bridge disconnected")
+      transcript: addStatusEntry(failAssistantTurn(markPendingPermissionRequestsUnavailable(transcript)), "Bridge disconnected")
     });
   }
 
@@ -357,20 +403,28 @@ export class BridgeSessionCoordinator {
           this.clearRunningTurnAfterTerminalEvent();
           this.setSnapshot({
             ...this.snapshot,
-            transcript: completeAssistantTurn(this.snapshot.transcript)
+            transcript: completeAssistantTurn(markPendingPermissionRequestsUnavailable(this.snapshot.transcript))
           });
           this.flushPendingPrompts();
           return;
         }
         if (message.event.type === "assistant.cancelled") {
           this.clearRunningTurnAfterTerminalEvent();
-          const transcript = cancelAssistantTurn(this.snapshot.transcript);
+          const transcriptWithUnavailablePermissions = markPendingPermissionRequestsUnavailable(this.snapshot.transcript);
+          const transcript = cancelAssistantTurn(transcriptWithUnavailablePermissions);
           this.setSnapshot({
             ...this.snapshot,
-            transcript: transcript === this.snapshot.transcript ? appendCancelledStatus(this.snapshot.transcript) : transcript
+            transcript:
+              transcript === transcriptWithUnavailablePermissions
+                ? appendCancelledStatus(transcriptWithUnavailablePermissions)
+                : transcript
           });
           this.flushPendingPrompts();
         }
+        return;
+      case "permission.request":
+        if (message.clientSessionId !== this.snapshot.clientSessionId) return;
+        this.handlePermissionRequest(message.request);
         return;
       case "session.error":
         if (message.clientSessionId !== this.snapshot.clientSessionId) return;
@@ -444,6 +498,7 @@ export class BridgeSessionCoordinator {
   private clearPendingAfterError(message: string, tone: "neutral" | "error" = "error"): void {
     const transcript = this.removePendingTranscriptEntries(this.snapshot.transcript);
     this.pendingSubmissions = [];
+    this.clearPendingPermissionRequests();
     this.startPosted = false;
     this.turnInFlight = false;
     this.cancelRequested = false;
@@ -465,7 +520,8 @@ export class BridgeSessionCoordinator {
     const effectiveCode = code ?? "unknown_error";
     if (effectiveCode === "no_in_flight_turn") {
       if (this.cancelRequested) {
-        const transcript = failAssistantTurn(this.snapshot.transcript);
+        const transcript = failAssistantTurn(markPendingPermissionRequestsUnavailable(this.snapshot.transcript));
+        this.clearPendingPermissionRequests();
         this.turnInFlight = false;
         this.cancelRequested = false;
         this.suppressNextNoInFlightAfterCancelTerminal = false;
@@ -493,8 +549,9 @@ export class BridgeSessionCoordinator {
     }
 
     if (effectiveCode === "session_not_started") {
-      const transcript = failAssistantTurn(this.snapshot.transcript);
+      const transcript = failAssistantTurn(markPendingPermissionRequestsUnavailable(this.snapshot.transcript));
       this.pendingSubmissions = [];
+      this.clearPendingPermissionRequests();
       this.startPosted = false;
       this.turnInFlight = false;
       this.cancelRequested = false;
@@ -513,8 +570,13 @@ export class BridgeSessionCoordinator {
       return;
     }
 
-    const transcript = terminalTurnError ? failAssistantTurn(this.snapshot.transcript) : this.snapshot.transcript;
-    if (terminalTurnError) this.clearRunningTurnAfterTerminalEvent();
+    const transcript = terminalTurnError
+      ? failAssistantTurn(markPendingPermissionRequestsUnavailable(this.snapshot.transcript))
+      : this.snapshot.transcript;
+    if (terminalTurnError) {
+      this.clearPendingPermissionRequests();
+      this.clearRunningTurnAfterTerminalEvent();
+    }
     this.setSnapshot({
       ...this.snapshot,
       lastError: message,
@@ -557,6 +619,7 @@ export class BridgeSessionCoordinator {
   private clearPendingAfterBridgeError(): void {
     const transcript = this.removePendingTranscriptEntries(this.snapshot.transcript);
     this.pendingSubmissions = [];
+    this.clearPendingPermissionRequests();
     this.startPosted = false;
     this.turnInFlight = false;
     this.cancelRequested = false;
@@ -570,7 +633,7 @@ export class BridgeSessionCoordinator {
       starting: false,
       pendingPromptCount: 0,
       lastError: undefined,
-      transcript: failAssistantTurn(transcript)
+      transcript: failAssistantTurn(markPendingPermissionRequestsUnavailable(transcript))
     });
   }
 
@@ -582,6 +645,7 @@ export class BridgeSessionCoordinator {
     }
 
     this.pendingSubmissions = [];
+    this.clearPendingPermissionRequests();
     this.startPosted = false;
     this.turnInFlight = false;
     this.cancelRequested = false;
@@ -633,6 +697,17 @@ export class BridgeSessionCoordinator {
     return addUserPrompt(withMarker, submission.prompt, submission.transcriptEntryIds.promptId);
   }
 
+  private handlePermissionRequest(request: PermissionRequest): void {
+    if (!this.turnInFlight || this.cancelRequested) return;
+    if (this.pendingPermissionKeysByRequestId.has(request.requestId)) return;
+
+    this.pendingPermissionKeysByRequestId.set(request.requestId, request.permissionKey);
+    this.setSnapshot({
+      ...this.snapshot,
+      transcript: addPermissionRequest(this.snapshot.transcript, request, this.createTranscriptEntryId())
+    });
+  }
+
   private removePendingTranscriptEntries(transcript: TranscriptEntry[]): TranscriptEntry[] {
     return removeTranscriptEntriesByIds(transcript, new Set(this.pendingTranscriptEntryIds()));
   }
@@ -648,6 +723,7 @@ export class BridgeSessionCoordinator {
   private createTranscriptEntryId(): string {
     return `entry-${++nextTranscriptEntryId}`;
   }
+
 
   private setSnapshot(snapshot: BridgeSessionCoordinatorSnapshot): void {
     this.snapshot = this.withRuntimeState(snapshot);
@@ -666,7 +742,12 @@ export class BridgeSessionCoordinator {
     const hadCancelRequested = this.cancelRequested;
     this.turnInFlight = false;
     this.cancelRequested = false;
+    this.clearPendingPermissionRequests();
     if (hadCancelRequested) this.suppressNextNoInFlightAfterCancelTerminal = true;
+  }
+
+  private clearPendingPermissionRequests(): void {
+    this.pendingPermissionKeysByRequestId.clear();
   }
 
   private emit(): void {

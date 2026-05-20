@@ -1,4 +1,14 @@
-import { parseAgentEvent, type AgentEvent, type BridgeToExtension, type ProviderId } from "@sidra/protocol";
+import { randomUUID } from "node:crypto";
+import {
+  PROTOCOL_VERSION,
+  parseAgentEvent,
+  type AgentEvent,
+  type BridgeToExtension,
+  type PermissionDecision,
+  type PermissionRequest,
+  type PermissionRequestMetadata,
+  type ProviderId
+} from "@sidra/protocol";
 import { formatPromptForAgent, type BridgeTurnInput } from "./context-prompt.js";
 
 export type SafeProviderTurnEvent = AgentEvent;
@@ -7,8 +17,23 @@ export type AgentSendInput = {
   prompt: string;
 };
 
+export type ProviderPermissionRequest = {
+  permissionKey: string;
+  title: string;
+  description?: string;
+  metadata?: PermissionRequestMetadata;
+};
+
+export type ProviderPermissionDecision = {
+  decision: PermissionDecision;
+};
+
+export type AgentPermissionRequester = {
+  requestPermission(request: ProviderPermissionRequest): Promise<ProviderPermissionDecision>;
+};
+
 export type AgentSession = {
-  send(input: AgentSendInput, signal: AbortSignal): AsyncIterable<SafeProviderTurnEvent>;
+  send(input: AgentSendInput, signal: AbortSignal, permissions: AgentPermissionRequester): AsyncIterable<SafeProviderTurnEvent>;
   close(): Promise<void>;
 };
 
@@ -28,7 +53,14 @@ export type ManagedSession = {
   inFlight?: {
     controller: AbortController;
     done: Promise<void>;
+    pendingPermission?: PendingPermission;
   };
+};
+
+type PendingPermission = {
+  requestId: string;
+  resolve(decision: ProviderPermissionDecision): void;
+  reject(error: Error): void;
 };
 
 type BridgeSessionManagerOptions = {
@@ -60,7 +92,7 @@ export class BridgeSessionManager {
     if (!session) {
       this.options.emit({
         type: "session.error",
-        version: 2,
+        version: PROTOCOL_VERSION,
         clientSessionId,
         message: "Session has not been started",
         code: "session_not_started"
@@ -71,7 +103,7 @@ export class BridgeSessionManager {
     if (session.inFlight) {
       this.options.emit({
         type: "session.error",
-        version: 2,
+        version: PROTOCOL_VERSION,
         clientSessionId,
         message: "A turn is already in flight for this session",
         code: "turn_in_flight"
@@ -95,14 +127,15 @@ export class BridgeSessionManager {
       }
     };
 
+    session.inFlight = inFlight;
     inFlight.done = this.runProviderSend(
       clientSessionId,
-      session.providerSession,
+      session,
       providerInput,
       controller,
+      inFlight,
       clearInFlight
     ).finally(clearInFlight);
-    session.inFlight = inFlight;
     await inFlight.done;
   }
 
@@ -112,7 +145,7 @@ export class BridgeSessionManager {
       if (!session?.inFlight) {
         this.options.emit({
           type: "session.error",
-          version: 2,
+          version: PROTOCOL_VERSION,
           clientSessionId,
           message: "No in-flight turn to cancel",
           code: "no_in_flight_turn"
@@ -122,11 +155,12 @@ export class BridgeSessionManager {
 
       const inFlight = session.inFlight;
       inFlight.controller.abort();
+      this.rejectPendingPermission(inFlight);
       await inFlight.done;
       if (this.sessions.get(clientSessionId) !== session) return;
       this.options.emit({
         type: "agent.event",
-        version: 2,
+        version: PROTOCOL_VERSION,
         clientSessionId,
         event: { type: "assistant.cancelled" }
       });
@@ -145,11 +179,31 @@ export class BridgeSessionManager {
       const existing = this.sessions.get(clientSessionId);
       if (!existing) return;
 
-      await this.closeManagedSession(existing);
       if (this.sessions.get(clientSessionId) === existing) {
         this.sessions.delete(clientSessionId);
       }
+      await this.closeManagedSession(existing);
     });
+  }
+
+  async respondToPermission(clientSessionId: string, requestId: string, decision: PermissionDecision): Promise<void> {
+    await this.sessionOperations.get(clientSessionId)?.catch(() => {});
+    const session = this.sessions.get(clientSessionId);
+    const inFlight = session?.inFlight;
+    const pendingPermission = inFlight?.pendingPermission;
+    if (!inFlight || !pendingPermission || pendingPermission.requestId !== requestId) {
+      this.options.emit({
+        type: "session.error",
+        version: PROTOCOL_VERSION,
+        clientSessionId,
+        message: "Permission request was not found.",
+        code: "permission_not_found"
+      });
+      return;
+    }
+
+    delete inFlight.pendingPermission;
+    pendingPermission.resolve({ decision });
   }
 
   private async enqueueSessionOperation(clientSessionId: string, operation: () => Promise<void>): Promise<void> {
@@ -171,7 +225,7 @@ export class BridgeSessionManager {
     if (providerId !== this.options.provider.id) {
       this.options.emit({
         type: "session.error",
-        version: 2,
+        version: PROTOCOL_VERSION,
         clientSessionId,
         message: "Provider is not available",
         code: "provider_unavailable"
@@ -181,10 +235,10 @@ export class BridgeSessionManager {
 
     const existing = this.sessions.get(clientSessionId);
     if (existing) {
-      await this.closeManagedSession(existing);
       if (this.sessions.get(clientSessionId) === existing) {
         this.sessions.delete(clientSessionId);
       }
+      await this.closeManagedSession(existing);
     }
 
     let providerSession: AgentSession;
@@ -193,7 +247,7 @@ export class BridgeSessionManager {
     } catch {
       this.options.emit({
         type: "session.error",
-        version: 2,
+        version: PROTOCOL_VERSION,
         clientSessionId,
         message: "Provider session failed to start.",
         code: "provider_start_failed"
@@ -204,7 +258,7 @@ export class BridgeSessionManager {
     this.sessions.set(clientSessionId, { providerSession, providerId });
     this.options.emit({
       type: "session.started",
-      version: 2,
+      version: PROTOCOL_VERSION,
       clientSessionId,
       bridgeSessionId: `mock-${this.nextBridgeSessionId++}`
     });
@@ -213,29 +267,39 @@ export class BridgeSessionManager {
   private async closeManagedSession(session: ManagedSession): Promise<void> {
     if (session.inFlight) {
       session.inFlight.controller.abort();
+      this.rejectPendingPermission(session.inFlight);
       await session.inFlight.done;
     }
-    await session.providerSession.close();
+    try {
+      await session.providerSession.close();
+    } catch {
+      // A failed provider close must not leave a stale session reusable.
+    }
   }
 
   private async runProviderSend(
     clientSessionId: string,
-    providerSession: AgentSession,
+    session: ManagedSession,
     input: AgentSendInput,
     controller: AbortController,
+    inFlight: NonNullable<ManagedSession["inFlight"]>,
     clearInFlight: () => void
   ): Promise<void> {
     let terminalEventEmitted = false;
+    const permissionRequester: AgentPermissionRequester = {
+      requestPermission: (request) => this.requestProviderPermission(clientSessionId, session, inFlight, request)
+    };
     try {
-      for await (const event of providerSession.send(input, controller.signal)) {
+      for await (const event of session.providerSession.send(input, controller.signal, permissionRequester)) {
         if (controller.signal.aborted) return;
         const safeEvent = parseAgentEvent(event);
         if (!safeEvent.ok) {
           controller.abort();
+          this.rejectPendingPermission(inFlight);
           clearInFlight();
           this.options.emit({
             type: "session.error",
-            version: 2,
+            version: PROTOCOL_VERSION,
             clientSessionId,
             message: "Provider emitted an unsafe event.",
             code: "unsafe_provider_event"
@@ -244,31 +308,104 @@ export class BridgeSessionManager {
         }
         if (safeEvent.value.type === "assistant.done" || safeEvent.value.type === "assistant.cancelled") {
           terminalEventEmitted = true;
+          this.rejectPendingPermission(inFlight);
           clearInFlight();
-          this.options.emit({ type: "agent.event", version: 2, clientSessionId, event: safeEvent.value });
+          this.options.emit({ type: "agent.event", version: PROTOCOL_VERSION, clientSessionId, event: safeEvent.value });
           return;
         }
-        this.options.emit({ type: "agent.event", version: 2, clientSessionId, event: safeEvent.value });
+        this.options.emit({ type: "agent.event", version: PROTOCOL_VERSION, clientSessionId, event: safeEvent.value });
       }
       if (!terminalEventEmitted && !controller.signal.aborted) {
+        this.rejectPendingPermission(inFlight);
         clearInFlight();
         this.options.emit({
           type: "agent.event",
-          version: 2,
+          version: PROTOCOL_VERSION,
           clientSessionId,
           event: { type: "assistant.done" }
         });
       }
     } catch {
       if (controller.signal.aborted || terminalEventEmitted) return;
+      this.rejectPendingPermission(inFlight);
       clearInFlight();
       this.options.emit({
         type: "session.error",
-        version: 2,
+        version: PROTOCOL_VERSION,
         clientSessionId,
         message: "Provider send failed",
         code: "provider_error"
       });
     }
   }
+
+  private requestProviderPermission(
+    clientSessionId: string,
+    session: ManagedSession,
+    inFlight: NonNullable<ManagedSession["inFlight"]>,
+    providerRequest: ProviderPermissionRequest
+  ): Promise<ProviderPermissionDecision> {
+    if (inFlight.controller.signal.aborted || session.inFlight !== inFlight) {
+      return Promise.reject(new Error("permission request is stale"));
+    }
+    if (inFlight.pendingPermission) {
+      return Promise.reject(new Error("permission request already pending"));
+    }
+
+    const requestId = randomUUID();
+    const request = this.toSafePermissionRequest(requestId, providerRequest);
+    if (!request) {
+      return Promise.reject(new Error("permission request is invalid"));
+    }
+
+    return new Promise<ProviderPermissionDecision>((resolve, reject) => {
+      inFlight.pendingPermission = {
+        requestId,
+        resolve,
+        reject
+      };
+      this.options.emit({
+        type: "permission.request",
+        version: PROTOCOL_VERSION,
+        clientSessionId,
+        request
+      });
+    });
+  }
+
+  private rejectPendingPermission(inFlight: NonNullable<ManagedSession["inFlight"]>) {
+    const pendingPermission = inFlight.pendingPermission;
+    if (!pendingPermission) return;
+    delete inFlight.pendingPermission;
+    pendingPermission.reject(new Error("permission request ended"));
+  }
+
+  private toSafePermissionRequest(requestId: string, providerRequest: ProviderPermissionRequest): PermissionRequest | null {
+    if (!isNonEmptyString(providerRequest.permissionKey) || !isNonEmptyString(providerRequest.title)) return null;
+    if (providerRequest.description !== undefined && typeof providerRequest.description !== "string") return null;
+
+    const request: PermissionRequest = {
+      requestId,
+      permissionKey: providerRequest.permissionKey,
+      title: providerRequest.title
+    };
+    if (providerRequest.description !== undefined) request.description = providerRequest.description;
+
+    const metadata = providerRequest.metadata;
+    if (metadata !== undefined) {
+      if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) return null;
+      const safeMetadata: PermissionRequestMetadata = {};
+      if (typeof metadata.toolName === "string") safeMetadata.toolName = metadata.toolName;
+      if (typeof metadata.commandPreview === "string") safeMetadata.commandPreview = metadata.commandPreview;
+      if (safeMetadata.toolName !== undefined || safeMetadata.commandPreview !== undefined) {
+        request.metadata = safeMetadata;
+      }
+    }
+
+    return request;
+  }
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }

@@ -1,4 +1,5 @@
 import {
+  PROTOCOL_VERSION,
   type BridgeToExtension,
   type ExtensionToBridge,
   parseExtensionToBridge
@@ -26,7 +27,7 @@ export function createBridge(
   async function handleMessage(input: unknown): Promise<void> {
     const payloadSize = serializedJsonByteLength(input);
     if (!payloadSize.ok) {
-      runtime.emit({ type: "bridge.error", version: 2, message: "Message must be valid JSON", code: "invalid_message" });
+      runtime.emit({ type: "bridge.error", version: PROTOCOL_VERSION, message: "Message must be valid JSON", code: "invalid_message" });
       return;
     }
 
@@ -37,7 +38,7 @@ export function createBridge(
 
     const parsed = parseExtensionToBridge(input);
     if (!parsed.ok) {
-      runtime.emit({ type: "bridge.error", version: 2, message: parsed.error, code: "invalid_message" });
+      runtime.emit({ type: "bridge.error", version: PROTOCOL_VERSION, message: parsed.error, code: "invalid_message" });
       return;
     }
 
@@ -63,6 +64,9 @@ export function createBridge(
         return;
       case "session.close":
         await sessions.closeSession(message.clientSessionId);
+        return;
+      case "permission.respond":
+        await sessions.respondToPermission(message.clientSessionId, message.requestId, message.decision);
         return;
       case "heartbeat":
         return;

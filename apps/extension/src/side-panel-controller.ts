@@ -1,4 +1,4 @@
-import type { PageContext, ProviderId } from "@sidra/protocol";
+import type { PageContext, PermissionDecision, ProviderId } from "@sidra/protocol";
 import { createChromeActivePageTracker } from "./active-page";
 import {
   CaptureService,
@@ -58,6 +58,7 @@ export type SidePanelController = {
   captureAndSend(prompt: string): Promise<boolean>;
   sendQuickAction(actionId: string): Promise<boolean>;
   cancelTurn(): boolean;
+  respondToPermission(requestId: string, decision: PermissionDecision): boolean;
   updateCaptureMode(captureMode: CaptureMode): void;
   updateDraftPrompt(text: string): void;
   newChat(): void;
@@ -260,10 +261,19 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       emit();
       return cancelled;
     },
+    respondToPermission: (requestId, decision) => {
+      const accepted = urlSessionStore.respondToActivePermission(requestId, decision);
+      emit();
+      return accepted;
+    },
     updateCaptureMode: (captureMode) => urlSessionStore.updateActiveCaptureMode(captureMode),
     updateDraftPrompt: (text) => urlSessionStore.updateActiveDraftPrompt(text),
     newChat: () => urlSessionStore.newChat(),
-    retryBridge: () => connection.retry(),
+    retryBridge: () => {
+      urlSessionStore.markBridgeDisconnected();
+      connection.retry();
+      emit();
+    },
     openSettings: () => options.openOptionsPage?.()
   };
 }

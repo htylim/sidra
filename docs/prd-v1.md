@@ -418,21 +418,42 @@ type PageContext =
       reason: "no_usable_text" | "content_too_large" | "full_dom_too_large";
     };
 
+type PermissionDecision = "allow_once" | "allow_for_session" | "deny";
+
 type ExtensionToBridge =
   | { type: "session.start"; version: 2; clientSessionId: string; providerId: "codex" }
   | { type: "session.send"; version: 2; clientSessionId: string; prompt: string; pageContext?: PageContext }
   | { type: "session.cancel"; version: 2; clientSessionId: string }
   | { type: "session.reset"; version: 2; clientSessionId: string }
   | { type: "session.close"; version: 2; clientSessionId: string }
+  | {
+      type: "permission.respond";
+      version: 2;
+      clientSessionId: string;
+      requestId: string;
+      decision: PermissionDecision;
+    }
   | { type: "heartbeat"; version: 2 };
 ```
 
 Bridge to extension messages:
 
 ```ts
+type PermissionRequest = {
+  requestId: string;
+  permissionKey: string;
+  title: string;
+  description?: string;
+  metadata?: {
+    toolName?: string;
+    commandPreview?: string;
+  };
+};
+
 type BridgeToExtension =
   | { type: "session.started"; version: 2; clientSessionId: string; bridgeSessionId: string }
   | { type: "agent.event"; version: 2; clientSessionId: string; event: AgentEvent }
+  | { type: "permission.request"; version: 2; clientSessionId: string; request: PermissionRequest }
   | { type: "session.error"; version: 2; clientSessionId: string; message: string; code?: string }
   | { type: "bridge.ready"; version: 2 }
   | { type: "bridge.error"; version: 2; message: string; code?: string };
@@ -440,20 +461,26 @@ type BridgeToExtension =
 
 The exact schemas should live in `packages/protocol`.
 
-Permission request and response messages are future V1 protocol work. The current protocol rejects them.
-
 ## Agent Provider Interface
 
 The bridge should use an internal provider abstraction:
 
 ```ts
 interface AgentProvider {
-  id: string
-  createSession(options: AgentSessionOptions): Promise<AgentSession>
+  id: ProviderId
+  createSession(): Promise<AgentSession>
+}
+
+interface AgentPermissionRequester {
+  requestPermission(request: ProviderPermissionRequest): Promise<ProviderPermissionDecision>
 }
 
 interface AgentSession {
-  send(input: AgentSendInput, signal: AbortSignal): AsyncIterable<AgentEvent>
+  send(
+    input: AgentSendInput,
+    signal: AbortSignal,
+    permissions: AgentPermissionRequester
+  ): AsyncIterable<SafeProviderTurnEvent>
   close(): Promise<void>
 }
 ```

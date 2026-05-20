@@ -51,6 +51,173 @@ describe("extension-to-bridge protocol validation", () => {
       error: "Unknown command"
     });
   });
+
+  it("accepts_permission_respond_messages", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "permission.respond",
+        version: 2,
+        clientSessionId: "page-1",
+        requestId: "permission-1",
+        decision: "allow_once"
+      })
+    ).toMatchObject({ ok: true });
+
+    expect(
+      parseExtensionToBridge({
+        type: "permission.respond",
+        version: 2,
+        clientSessionId: "page-1",
+        requestId: "permission-1",
+        decision: "allow_for_session"
+      })
+    ).toMatchObject({ ok: true });
+
+    expect(
+      parseExtensionToBridge({
+        type: "permission.respond",
+        version: 2,
+        clientSessionId: "page-1",
+        requestId: "permission-1",
+        decision: "deny"
+      })
+    ).toMatchObject({ ok: true });
+  });
+
+  it("rejects_permission_respond_without_request_id", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "permission.respond",
+        version: 2,
+        clientSessionId: "page-1",
+        decision: "allow_once"
+      })
+    ).toEqual({ ok: false, error: "requestId is required" });
+  });
+
+  it("rejects_permission_respond_with_unknown_decision", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "permission.respond",
+        version: 2,
+        clientSessionId: "page-1",
+        requestId: "permission-1",
+        decision: "allow_forever"
+      })
+    ).toEqual({ ok: false, error: "decision is invalid" });
+  });
+
+  it("rejects_permission_respond_with_private_or_unknown_fields", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "permission.respond",
+        version: 2,
+        clientSessionId: "page-1",
+        requestId: "permission-1",
+        decision: "allow_once",
+        prompt: "private"
+      })
+    ).toEqual({ ok: false, error: "Message has invalid fields" });
+  });
+});
+
+describe("bridge-to-extension permission protocol validation", () => {
+  it("accepts_permission_request_message", () => {
+    expect(
+      parseBridgeToExtension({
+        type: "permission.request",
+        version: 2,
+        clientSessionId: "page-1",
+        request: {
+          requestId: "permission-1",
+          permissionKey: "shell:ls",
+          title: "Run command",
+          description: "Allow the provider to inspect files.",
+          metadata: {
+            toolName: "shell",
+            commandPreview: "ls"
+          }
+        }
+      })
+    ).toMatchObject({ ok: true });
+  });
+
+  it("rejects_permission_request_without_client_session_id", () => {
+    expect(
+      parseBridgeToExtension({
+        type: "permission.request",
+        version: 2,
+        request: {
+          requestId: "permission-1",
+          permissionKey: "shell:ls",
+          title: "Run command"
+        }
+      })
+    ).toEqual({ ok: false, error: "clientSessionId is required" });
+  });
+
+  it("rejects_permission_request_without_request_id", () => {
+    expect(
+      parseBridgeToExtension({
+        type: "permission.request",
+        version: 2,
+        clientSessionId: "page-1",
+        request: {
+          permissionKey: "shell:ls",
+          title: "Run command"
+        }
+      })
+    ).toEqual({ ok: false, error: "request is invalid" });
+  });
+
+  it("rejects_permission_request_without_permission_key", () => {
+    expect(
+      parseBridgeToExtension({
+        type: "permission.request",
+        version: 2,
+        clientSessionId: "page-1",
+        request: {
+          requestId: "permission-1",
+          title: "Run command"
+        }
+      })
+    ).toEqual({ ok: false, error: "request is invalid" });
+  });
+
+  it("rejects_permission_request_with_private_or_unknown_fields", () => {
+    for (const field of ["prompt", "pageContent", "stdout", "stderr", "chainOfThought", "rawInput"]) {
+      expect(
+        parseBridgeToExtension({
+          type: "permission.request",
+          version: 2,
+          clientSessionId: "page-1",
+          request: {
+            requestId: "permission-1",
+            permissionKey: "shell:ls",
+            title: "Run command",
+            [field]: "private"
+          }
+        })
+      ).toEqual({ ok: false, error: "request is invalid" });
+    }
+
+    expect(
+      parseBridgeToExtension({
+        type: "permission.request",
+        version: 2,
+        clientSessionId: "page-1",
+        request: {
+          requestId: "permission-1",
+          permissionKey: "shell:ls",
+          title: "Run command",
+          metadata: {
+            toolName: "shell",
+            rawInput: "private"
+          }
+        }
+      })
+    ).toEqual({ ok: false, error: "request is invalid" });
+  });
 });
 
 describe("page context protocol validation", () => {

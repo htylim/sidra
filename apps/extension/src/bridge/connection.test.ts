@@ -274,7 +274,12 @@ describe("BridgeConnection", () => {
 
     connection.post(startMessage());
     ports[0].emitDisconnect();
-    connection.post({ type: "session.send", version: 2, clientSessionId: "client-1", prompt: "after" });
+    connection.post({
+      type: "session.send",
+      version: 2,
+      clientSessionId: "client-1",
+      prompt: "after"
+    });
     ports[0].emitMessage({ type: "bridge.ready", version: 2 });
 
     expect(connection.getSnapshot()).toMatchObject({ connected: true, ready: false });

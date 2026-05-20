@@ -80,6 +80,7 @@ function renderSnapshot(bridge: SidePanelSnapshot["bridge"]): string {
       onCaptureAndSend={() => false}
       onQuickAction={() => false}
       onCancelTurn={() => false}
+      onRespondToPermission={() => false}
       onDraftPromptChange={() => undefined}
       onCaptureModeChange={() => undefined}
       onNewChat={() => undefined}
@@ -97,6 +98,7 @@ function renderPageSnapshot(snapshot: SidePanelSnapshot): string {
       onCaptureAndSend={() => false}
       onQuickAction={() => false}
       onCancelTurn={() => false}
+      onRespondToPermission={() => false}
       onDraftPromptChange={() => undefined}
       onCaptureModeChange={() => undefined}
       onNewChat={() => undefined}
@@ -113,6 +115,7 @@ function renderInteractiveSnapshot(
     onCaptureAndSend(prompt: string): boolean | Promise<boolean>;
     onQuickAction(actionId: string): boolean | Promise<boolean>;
     onCancelTurn(): boolean;
+    onRespondToPermission(requestId: string, decision: "allow_once" | "allow_for_session" | "deny"): boolean;
     onDraftPromptChange(text: string): void;
     onCaptureModeChange(captureMode: SidePanelSnapshot["activeSession"]["captureMode"]): void;
     onNewChat(): void;
@@ -130,6 +133,7 @@ function renderInteractiveSnapshot(
         onCaptureAndSend={overrides.onCaptureAndSend ?? (() => false)}
         onQuickAction={overrides.onQuickAction ?? (() => false)}
         onCancelTurn={overrides.onCancelTurn ?? (() => false)}
+        onRespondToPermission={overrides.onRespondToPermission ?? (() => false)}
         onDraftPromptChange={(text) => {
           currentSnapshot = {
             ...currentSnapshot,
@@ -161,6 +165,7 @@ function renderInteractiveSnapshot(
         onCaptureAndSend={overrides.onCaptureAndSend ?? (() => false)}
         onQuickAction={overrides.onQuickAction ?? (() => false)}
         onCancelTurn={overrides.onCancelTurn ?? (() => false)}
+        onRespondToPermission={overrides.onRespondToPermission ?? (() => false)}
         onDraftPromptChange={(text) => {
           currentSnapshot = {
             ...currentSnapshot,
@@ -456,6 +461,7 @@ describe("SidePanelView URL sessions", () => {
         onCaptureAndSend={() => false}
         onQuickAction={() => false}
         onCancelTurn={() => false}
+        onRespondToPermission={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
@@ -476,6 +482,7 @@ describe("SidePanelView URL sessions", () => {
         onCaptureAndSend={() => false}
         onQuickAction={() => false}
         onCancelTurn={() => false}
+        onRespondToPermission={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
@@ -669,6 +676,7 @@ describe("SidePanelView Capture + Send", () => {
         onCaptureAndSend={() => false}
         onQuickAction={() => false}
         onCancelTurn={() => false}
+        onRespondToPermission={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
@@ -755,6 +763,134 @@ describe("SidePanelView Capture + Send", () => {
 });
 
 describe("SidePanelView rich transcript rendering", () => {
+  it("renders_inline_permission_card_with_safe_request_text", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "permission_request",
+            role: "permission",
+            requestId: "permission-1",
+            permissionKey: "shell:ls",
+            title: "Run command",
+            description: "Allow listing files.",
+            metadata: { toolName: "shell", commandPreview: "ls" },
+            status: "pending"
+          }
+        ],
+        turnInFlight: true,
+        canCancelTurn: true
+      })
+    );
+
+    expect(screen.getByText("Run command")).not.toBeNull();
+    expect(screen.getByText("Allow listing files.")).not.toBeNull();
+    expect(screen.getByText("Scope: shell:ls")).not.toBeNull();
+    expect(screen.getByText("shell")).not.toBeNull();
+    expect(screen.getByText("ls")).not.toBeNull();
+  });
+
+  it("does_not_render_raw_private_permission_metadata", () => {
+    const markup = renderPageSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "permission_request",
+            role: "permission",
+            requestId: "permission-1",
+            permissionKey: "shell:ls",
+            title: "Run command",
+            metadata: { toolName: "shell", commandPreview: "ls" },
+            status: "pending"
+          }
+        ]
+      })
+    );
+
+    expect(markup).not.toContain("rawInput");
+    expect(markup).not.toContain("stdout");
+    expect(markup).not.toContain("pageContent");
+  });
+
+  it.each([
+    ["Allow once", "allow_once"],
+    ["Allow for this session", "allow_for_session"],
+    ["Deny", "deny"]
+  ] as const)("permission_card_%s_calls_onRespondToPermission", async (label, decision) => {
+    const user = userEvent.setup();
+    const onRespondToPermission = vi.fn(() => true);
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "permission_request",
+            role: "permission",
+            requestId: "permission-1",
+            permissionKey: "shell:ls",
+            title: "Run command",
+            status: "pending"
+          }
+        ],
+        turnInFlight: true,
+        canCancelTurn: true
+      }),
+      { onRespondToPermission }
+    );
+
+    await user.click(screen.getByRole("button", { name: decision === "deny" ? "Deny shell:ls" : `${label} for shell:ls` }));
+
+    expect(onRespondToPermission).toHaveBeenCalledWith("permission-1", decision);
+  });
+
+  it.each([
+    ["allowed_once", "Allowed once"],
+    ["allowed_for_session", "Allowed for this session"],
+    ["denied", "Denied"],
+    ["unavailable", "Unavailable"]
+  ] as const)("resolved_permission_card_%s_disables_actions", (status, label) => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "permission_request",
+            role: "permission",
+            requestId: "permission-1",
+            permissionKey: "shell:ls",
+            title: "Run command",
+            status
+          }
+        ]
+      })
+    );
+
+    expect(screen.getByText(label)).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Allow once for shell:ls" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Allow for this session for shell:ls" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Deny shell:ls" })).toBeNull();
+  });
+
+  it("pending_permission_card_keeps_prompt_controls_disabled_while_turn_is_in_flight", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "permission_request",
+            role: "permission",
+            requestId: "permission-1",
+            permissionKey: "shell:ls",
+            title: "Run command",
+            status: "pending"
+          }
+        ],
+        turnInFlight: true,
+        canCancelTurn: true
+      })
+    );
+
+    expect(screen.getByRole("textbox")).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Cancel" })).not.toBeNull();
+  });
+
   it("renders_user_prompt_as_escaped_text", () => {
     const markup = renderPageSnapshot(
       snapshotForPage({
@@ -1091,6 +1227,7 @@ describe("SidePanelView prompt options", () => {
         onCaptureAndSend={() => false}
         onQuickAction={() => false}
         onCancelTurn={() => false}
+        onRespondToPermission={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
@@ -1112,6 +1249,7 @@ describe("SidePanelView prompt options", () => {
         onCaptureAndSend={() => false}
         onQuickAction={() => false}
         onCancelTurn={() => false}
+        onRespondToPermission={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}
@@ -1133,6 +1271,7 @@ describe("SidePanelView prompt options", () => {
         onCaptureAndSend={() => false}
         onQuickAction={() => false}
         onCancelTurn={() => false}
+        onRespondToPermission={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onNewChat={() => undefined}

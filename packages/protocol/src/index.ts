@@ -62,7 +62,29 @@ export type ExtensionToBridge =
   | { type: "session.cancel"; version: 2; clientSessionId: string }
   | { type: "session.reset"; version: 2; clientSessionId: string }
   | { type: "session.close"; version: 2; clientSessionId: string }
+  | {
+      type: "permission.respond";
+      version: 2;
+      clientSessionId: string;
+      requestId: string;
+      decision: PermissionDecision;
+    }
   | { type: "heartbeat"; version: 2 };
+
+export type PermissionRequestMetadata = {
+  toolName?: string;
+  commandPreview?: string;
+};
+
+export type PermissionRequest = {
+  requestId: string;
+  permissionKey: string;
+  title: string;
+  description?: string;
+  metadata?: PermissionRequestMetadata;
+};
+
+export type PermissionDecision = "allow_once" | "allow_for_session" | "deny";
 
 export type AgentEvent =
   | { type: "assistant.text.delta"; text: string }
@@ -84,6 +106,8 @@ export type SessionErrorCode =
   | "provider_start_failed"
   | "provider_unavailable"
   | "unsafe_provider_event"
+  | "permission_not_found"
+  | "permission_response_invalid"
   | "unknown_error";
 
 export type BridgeToExtension =
@@ -98,6 +122,12 @@ export type BridgeToExtension =
       version: 2;
       clientSessionId: string;
       event: AgentEvent;
+    }
+  | {
+      type: "permission.request";
+      version: 2;
+      clientSessionId: string;
+      request: PermissionRequest;
     }
   | { type: "session.error"; version: 2; clientSessionId: string; message: string; code?: SessionErrorCode }
   | { type: "bridge.ready"; version: 2 }
@@ -191,6 +221,23 @@ export function parseExtensionToBridge(input: unknown): ParseResult<ExtensionToB
           clientSessionId: input.clientSessionId
         }
       };
+    case "permission.respond":
+      if (!hasOnlyKeys(input, ["type", "version", "clientSessionId", "requestId", "decision"])) {
+        return invalid("Message has invalid fields");
+      }
+      if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
+      if (!isNonEmptyString(input.requestId)) return invalid("requestId is required");
+      if (!isPermissionDecision(input.decision)) return invalid("decision is invalid");
+      return {
+        ok: true,
+        value: {
+          type: "permission.respond",
+          version: PROTOCOL_VERSION,
+          clientSessionId: input.clientSessionId,
+          requestId: input.requestId,
+          decision: input.decision
+        }
+      };
     case "heartbeat":
       if (!hasOnlyKeys(input, ["type", "version"])) return invalid("Message has invalid fields");
       return { ok: true, value: { type: "heartbeat", version: PROTOCOL_VERSION } };
@@ -237,6 +284,24 @@ export function parseBridgeToExtension(input: unknown): ParseResult<BridgeToExte
             version: PROTOCOL_VERSION,
             clientSessionId: input.clientSessionId,
             event: event.value
+          }
+        };
+      }
+    case "permission.request":
+      if (!hasOnlyKeys(input, ["type", "version", "clientSessionId", "request"])) {
+        return invalid("Message has invalid fields");
+      }
+      if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
+      {
+        const request = parsePermissionRequest(input.request);
+        if (!request) return invalid("request is invalid");
+        return {
+          ok: true,
+          value: {
+            type: "permission.request",
+            version: PROTOCOL_VERSION,
+            clientSessionId: input.clientSessionId,
+            request
           }
         };
       }
@@ -413,6 +478,40 @@ function parseSafeAgentActivity(value: unknown): SafeAgentActivity | null {
   }
 }
 
+function parsePermissionRequest(value: unknown): PermissionRequest | null {
+  if (!isRecord(value)) return null;
+  if (!hasOnlyKeys(value, ["requestId", "permissionKey", "title", "description", "metadata"])) return null;
+  if (!isNonEmptyString(value.requestId)) return null;
+  if (!isNonEmptyString(value.permissionKey)) return null;
+  if (!isNonEmptyString(value.title)) return null;
+  if (!optionalString(value.description)) return null;
+  const metadata = value.metadata === undefined ? undefined : parsePermissionRequestMetadata(value.metadata);
+  if (value.metadata !== undefined && !metadata) return null;
+
+  const request: PermissionRequest = {
+    requestId: value.requestId,
+    permissionKey: value.permissionKey,
+    title: value.title
+  };
+  if (value.description !== undefined) request.description = value.description;
+  if (metadata) request.metadata = metadata;
+  return request;
+}
+
+function parsePermissionRequestMetadata(value: unknown): PermissionRequestMetadata | null {
+  if (!isRecord(value)) return null;
+  if (!hasOnlyKeys(value, ["toolName", "commandPreview"])) return null;
+  if (!optionalString(value.toolName) || !optionalString(value.commandPreview)) return null;
+  const metadata: PermissionRequestMetadata = {};
+  if (value.toolName !== undefined) metadata.toolName = value.toolName;
+  if (value.commandPreview !== undefined) metadata.commandPreview = value.commandPreview;
+  return metadata;
+}
+
+function isPermissionDecision(value: unknown): value is PermissionDecision {
+  return value === "allow_once" || value === "allow_for_session" || value === "deny";
+}
+
 function optionalSessionErrorCode(value: unknown): value is SessionErrorCode | undefined {
   return value === undefined || isSessionErrorCode(value);
 }
@@ -426,10 +525,11 @@ function isSessionErrorCode(value: unknown): value is SessionErrorCode {
     value === "provider_start_failed" ||
     value === "provider_unavailable" ||
     value === "unsafe_provider_event" ||
+    value === "permission_not_found" ||
+    value === "permission_response_invalid" ||
     value === "unknown_error"
   );
 }
-
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -1,4 +1,4 @@
-import type { PageContext } from "@sidra/protocol";
+import type { PageContext, PermissionDecision } from "@sidra/protocol";
 import type { BridgeSessionCoordinatorSnapshot } from "./bridge/session-coordinator";
 import type { CaptureMode } from "./capture-mode";
 import type { PageIdentity, PageKey } from "./page-key";
@@ -49,6 +49,7 @@ export type SessionApproval = {
 
 export type SessionApprovalState = {
   grant(approval: SessionApproval): void;
+  revoke(permissionKey: string): void;
   has(permissionKey: string): boolean;
   list(): SessionApproval[];
   clear(): void;
@@ -61,6 +62,7 @@ type UrlSessionRecord = {
   draftPrompt: string;
   contextState: ContextState;
   approvals: SessionApprovalState;
+  autoApprovalRequestIds: Set<string>;
   coordinator: UrlSessionCoordinator;
 };
 
@@ -70,6 +72,7 @@ export type UrlSessionCoordinator = {
   sendPrompt(input: string | { prompt: string; pageContext?: PageContext }): boolean;
   cancelTurn?(): boolean;
   recordCaptureUnavailable?(message: string): void;
+  respondToPermission?(requestId: string, decision: PermissionDecision): boolean;
   newChat(): void;
   markBridgeDisconnected(): void;
   hasProviderState?(): boolean;
@@ -215,6 +218,23 @@ export class UrlSessionStore {
     activeRecord.approvals.grant(approval);
   }
 
+  respondToActivePermission(requestId: string, decision: PermissionDecision): boolean {
+    const activeRecord = this.getActiveRecord();
+    if (!activeRecord?.coordinator.respondToPermission) return false;
+
+    const permissionKey = findPendingPermissionKey(activeRecord.coordinator.getSnapshot().transcript, requestId);
+    if (!permissionKey) return false;
+
+    const accepted = activeRecord.coordinator.respondToPermission(requestId, decision);
+    if (!accepted) return false;
+
+    if (decision === "allow_for_session") {
+      activeRecord.approvals.grant({ permissionKey, decision: "allow_for_session" });
+    }
+    this.emit();
+    return true;
+  }
+
   hasActiveSessionApproval(permissionKey: string): boolean {
     return this.getActiveRecord()?.approvals.has(permissionKey) ?? false;
   }
@@ -237,6 +257,7 @@ export class UrlSessionStore {
 
   markBridgeDisconnected(): void {
     for (const record of this.recordsByPageKey.values()) {
+      record.approvals.clear();
       if (!coordinatorMayHaveProviderState(record.coordinator)) continue;
       record.coordinator.markBridgeDisconnected();
     }
@@ -256,11 +277,13 @@ export class UrlSessionStore {
       draftPrompt: "",
       contextState: INITIAL_CONTEXT_STATE,
       approvals: new InMemorySessionApprovalState(),
+      autoApprovalRequestIds: new Set(),
       coordinator
     };
 
     coordinator.subscribe(() => {
       this.cachedSnapshot = undefined;
+      this.autoAllowApprovedPermissionRequests(record);
       if (this.activePageKey === record.pageIdentity.pageKey) this.emit();
     });
 
@@ -269,6 +292,19 @@ export class UrlSessionStore {
 
   private getActiveRecord(): UrlSessionRecord | undefined {
     return this.activePageKey ? this.recordsByPageKey.get(this.activePageKey) : undefined;
+  }
+
+  private autoAllowApprovedPermissionRequests(record: UrlSessionRecord): void {
+    if (!record.coordinator.respondToPermission) return;
+    for (const entry of record.coordinator.getSnapshot().transcript) {
+      if (entry.kind !== "permission_request" || entry.status !== "pending") continue;
+      if (!record.approvals.has(entry.permissionKey)) continue;
+      if (record.autoApprovalRequestIds.has(entry.requestId)) continue;
+      record.autoApprovalRequestIds.add(entry.requestId);
+      const accepted = record.coordinator.respondToPermission(entry.requestId, "allow_for_session");
+      record.autoApprovalRequestIds.delete(entry.requestId);
+      if (!accepted) record.approvals.revoke(entry.permissionKey);
+    }
   }
 
   private snapshotFromRecord(record: UrlSessionRecord): UrlSessionSnapshot {
@@ -301,6 +337,10 @@ class InMemorySessionApprovalState implements SessionApprovalState {
     this.approvalsByPermissionKey.set(approval.permissionKey, approval);
   }
 
+  revoke(permissionKey: string): void {
+    this.approvalsByPermissionKey.delete(permissionKey);
+  }
+
   has(permissionKey: string): boolean {
     return this.approvalsByPermissionKey.has(permissionKey);
   }
@@ -319,6 +359,16 @@ function coordinatorMayHaveProviderState(coordinator: UrlSessionCoordinator): bo
 
   const snapshot = coordinator.getSnapshot();
   return snapshot.sessionStarted || snapshot.starting || snapshot.pendingPromptCount > 0;
+}
+
+function findPendingPermissionKey(transcript: TranscriptEntry[], requestId: string): string | undefined {
+  const entry = transcript.find(
+    (candidate) =>
+      candidate.kind === "permission_request" &&
+      candidate.status === "pending" &&
+      candidate.requestId === requestId
+  );
+  return entry?.kind === "permission_request" ? entry.permissionKey : undefined;
 }
 
 function createEmptySessionSnapshot(): UrlSessionSnapshot {

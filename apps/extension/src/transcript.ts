@@ -1,4 +1,4 @@
-import type { SafeAgentActivity } from "@sidra/protocol";
+import type { PermissionDecision, PermissionRequest, SafeAgentActivity } from "@sidra/protocol";
 
 export type SafeActivityEntry = SafeAgentActivity;
 
@@ -27,11 +27,27 @@ export type StatusEntry = {
   text: string;
 };
 
-export type TranscriptEntry = UserMessageEntry | AssistantTurnEntry | StatusEntry;
+export type PermissionRequestStatus = "pending" | "allowed_once" | "allowed_for_session" | "denied" | "unavailable";
+
+export type PermissionRequestEntry = {
+  id?: string;
+  kind: "permission_request";
+  role: "permission";
+  text?: never;
+  requestId: string;
+  permissionKey: string;
+  title: string;
+  description?: string;
+  metadata?: PermissionRequest["metadata"];
+  status: PermissionRequestStatus;
+};
+
+export type TranscriptEntry = UserMessageEntry | AssistantTurnEntry | StatusEntry | PermissionRequestEntry;
 type TranscriptEntryInput =
   | Omit<UserMessageEntry, "id">
   | Omit<AssistantTurnEntry, "id">
-  | Omit<StatusEntry, "id">;
+  | Omit<StatusEntry, "id">
+  | Omit<PermissionRequestEntry, "id">;
 
 export type ContextAttachmentMarker =
   | { kind: "page_context_attached"; text: "Page context attached" }
@@ -92,6 +108,43 @@ export function addErrorStatusEntry(
   return [...transcript, transcriptEntry({ kind: "status", role: "status", tone: "error", text }, id)];
 }
 
+export function addPermissionRequest(
+  transcript: TranscriptEntry[],
+  request: PermissionRequest,
+  id?: string
+): TranscriptEntry[] {
+  const transcriptWithClosedAssistantSegment = completeAssistantTurn(transcript);
+  const entry: Omit<PermissionRequestEntry, "id"> = {
+    kind: "permission_request",
+    role: "permission",
+    requestId: request.requestId,
+    permissionKey: request.permissionKey,
+    title: request.title,
+    status: "pending"
+  };
+  if (request.description !== undefined) entry.description = request.description;
+  if (request.metadata !== undefined) entry.metadata = request.metadata;
+  return [...transcriptWithClosedAssistantSegment, transcriptEntry(entry, id)];
+}
+
+export function resolvePermissionRequest(
+  transcript: TranscriptEntry[],
+  requestId: string,
+  decision: PermissionDecision
+): TranscriptEntry[] {
+  return updatePermissionRequest(transcript, requestId, statusForPermissionDecision(decision));
+}
+
+export function markPendingPermissionRequestsUnavailable(transcript: TranscriptEntry[]): TranscriptEntry[] {
+  let changed = false;
+  const nextTranscript = transcript.map((entry) => {
+    if (entry.kind !== "permission_request" || entry.status !== "pending") return entry;
+    changed = true;
+    return { ...entry, status: "unavailable" as const };
+  });
+  return changed ? nextTranscript : transcript;
+}
+
 export function addContextMarker(
   transcript: TranscriptEntry[],
   marker: ContextAttachmentMarker,
@@ -106,6 +159,28 @@ export function removeTranscriptEntriesByIds(
 ): TranscriptEntry[] {
   if (entryIds.size === 0) return transcript;
   return transcript.filter((entry) => !entry.id || !entryIds.has(entry.id));
+}
+
+function updatePermissionRequest(
+  transcript: TranscriptEntry[],
+  requestId: string,
+  status: PermissionRequestStatus
+): TranscriptEntry[] {
+  const index = transcript.findIndex((entry) => entry.kind === "permission_request" && entry.requestId === requestId);
+  const entry = transcript[index];
+  if (index === -1 || entry?.kind !== "permission_request" || entry.status !== "pending") return transcript;
+  return replaceTranscriptEntry(transcript, index, { ...entry, status });
+}
+
+function statusForPermissionDecision(decision: PermissionDecision): PermissionRequestStatus {
+  switch (decision) {
+    case "allow_once":
+      return "allowed_once";
+    case "allow_for_session":
+      return "allowed_for_session";
+    case "deny":
+      return "denied";
+  }
 }
 
 function transcriptEntry(

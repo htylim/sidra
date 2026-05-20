@@ -400,6 +400,19 @@ function agentTextDelta(clientSessionId: string, text: string): BridgeToExtensio
   };
 }
 
+function permissionRequest(clientSessionId = "client-1", requestId = "permission-1"): BridgeToExtension {
+  return {
+    type: "permission.request",
+    version: 2,
+    clientSessionId,
+    request: {
+      requestId,
+      permissionKey: "shell:ls",
+      title: "Run command"
+    }
+  };
+}
+
 function agentDone(clientSessionId = "client-1"): BridgeToExtension {
   return {
     type: "agent.event",
@@ -494,6 +507,31 @@ describe("SidePanelController", () => {
       setupError: undefined,
       canUseChat: true,
       availability: { status: "ready" }
+    });
+  });
+
+  it("retryBridge_after_connected_error_clears_session_scoped_approvals", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+    ports[0].emitMessage(permissionRequest("client-1", "permission-1"));
+    controller.respondToPermission("permission-1", "allow_for_session");
+    ports[0].emitMessage({ type: "bridge.error", version: 2, message: "bridge failed" });
+
+    controller.retryBridge();
+    ports[1].emitMessage(bridgeReady());
+    controller.sendPrompt("second");
+    ports[1].emitMessage(sessionStarted());
+    ports[1].emitMessage(permissionRequest("client-1", "permission-2"));
+
+    expect(ports[1].postedMessages).not.toContainEqual({
+      type: "permission.respond",
+      version: 2,
+      clientSessionId: "client-1",
+      requestId: "permission-2",
+      decision: "allow_for_session"
     });
   });
 
@@ -696,6 +734,104 @@ describe("SidePanelController", () => {
     expect(ports[0].postedMessages).not.toContainEqual(
       expect.objectContaining({ type: "session.send", prompt: "second" })
     );
+  });
+
+  it("exposes_permission_request_card_in_active_session_snapshot", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+    ports[0].emitMessage(permissionRequest());
+
+    expect(controller.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({ kind: "permission_request", requestId: "permission-1", status: "pending" })
+    );
+  });
+
+  it("respondToPermission_posts_response_for_active_session_request", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+    ports[0].emitMessage(permissionRequest());
+
+    expect(controller.respondToPermission("permission-1", "allow_once")).toBe(true);
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "permission.respond",
+      version: 2,
+      clientSessionId: "client-1",
+      requestId: "permission-1",
+      decision: "allow_once"
+    });
+  });
+
+  it("respondToPermission_returns_false_when_active_request_is_missing", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+
+    expect(controller.respondToPermission("missing", "allow_once")).toBe(false);
+    expect(ports[0].postedMessages).not.toContainEqual(expect.objectContaining({ type: "permission.respond" }));
+  });
+
+  it("respondToPermission_records_allow_for_session_for_active_session", () => {
+    const { controller, ports } = createHarness();
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+    ports[0].emitMessage(permissionRequest("client-1", "permission-1"));
+    controller.respondToPermission("permission-1", "allow_for_session");
+    ports[0].emitMessage(agentDone());
+    controller.sendPrompt("second");
+    ports[0].emitMessage(permissionRequest("client-1", "permission-2"));
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "permission.respond",
+      version: 2,
+      clientSessionId: "client-1",
+      requestId: "permission-2",
+      decision: "allow_for_session"
+    });
+  });
+
+  it("pending_permission_request_keeps_send_and_capture_blocked_for_same_session", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+    ports[0].emitMessage(permissionRequest());
+
+    expect(controller.sendPrompt("second")).toBe(false);
+    await expect(controller.captureAndSend("capture")).resolves.toBe(false);
+    expect(captureService.captureCalls).toBe(0);
+  });
+
+  it("pending_permission_request_does_not_block_other_url_session", () => {
+    const { controller, ports, activePage } = createHarnessWithOptions({
+      clientSessionIds: ["client-1", "client-2"],
+      initialPage: pageIdentity("https://example.com/a")
+    });
+
+    ports[0].emitMessage(bridgeReady());
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted("client-1"));
+    ports[0].emitMessage(permissionRequest("client-1"));
+    activePage.emit(pageIdentity("https://example.com/b"));
+
+    expect(controller.sendPrompt("second")).toBe(true);
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.start",
+      version: 2,
+      clientSessionId: "client-2",
+      providerId: "codex"
+    });
   });
 
   it("starts a new provider session before sending after retrying a native bridge disconnect", () => {

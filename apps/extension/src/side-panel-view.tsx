@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { PermissionDecision } from "@sidra/protocol";
 import type { CaptureMode } from "./capture-mode";
 import type { SidePanelSnapshot } from "./side-panel-controller";
 import { TranscriptView } from "./transcript-view";
@@ -9,6 +10,7 @@ export function SidePanelView(props: {
   onCaptureAndSend(prompt: string): boolean | Promise<boolean>;
   onQuickAction(actionId: string): boolean | Promise<boolean>;
   onCancelTurn(): boolean;
+  onRespondToPermission(requestId: string, decision: PermissionDecision): boolean;
   onDraftPromptChange(text: string): void;
   onCaptureModeChange(captureMode: CaptureMode): void;
   onNewChat(): void;
@@ -110,7 +112,10 @@ export function SidePanelView(props: {
             ) : null}
           </div>
         ) : (
-          <TranscriptView entries={props.snapshot.activeSession.transcript} />
+          <TranscriptView
+            entries={props.snapshot.activeSession.transcript}
+            onRespondToPermission={props.onRespondToPermission}
+          />
         )}
       </section>
 

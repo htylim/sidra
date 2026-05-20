@@ -418,6 +418,97 @@ textarea {
   background: #faf7f2;
 }
 
+.permission-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  width: min(100%, 88%);
+  border: 1px solid #cfd9d5;
+  border-left: 4px solid #087c71;
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.permission-card-header,
+.permission-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.permission-card-label,
+.permission-tool {
+  border: 1px solid #d8e1dd;
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: #50605c;
+  background: #f6f8f7;
+  font-size: 12px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.permission-card h3,
+.permission-card p,
+.permission-scope {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.permission-card h3 {
+  font-size: 14px;
+}
+
+.permission-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.permission-scope {
+  color: #50605c;
+  font-size: 12px;
+}
+
+.permission-command {
+  overflow: auto;
+  margin: 0;
+  border: 1px solid #d8e1dd;
+  border-radius: 6px;
+  padding: 8px;
+  background: #f6f8f7;
+  color: #17201f;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.permission-actions button {
+  min-height: 30px;
+  border: 1px solid #cfd9d5;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: #17201f;
+  font-weight: 650;
+}
+
+.permission-actions button:first-child {
+  border-color: #087c71;
+  background: #087c71;
+  color: #ffffff;
+}
+
+.permission-card.denied,
+.permission-card.unavailable {
+  border-left-color: #8f2d16;
+}
+
 .composer {
   position: relative;
   display: grid;

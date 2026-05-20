@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { AgentEvent, BridgeToExtension } from "@sidra/protocol";
-import { BridgeSessionManager, type AgentProvider, type AgentSendInput, type AgentSession } from "./session-manager.js";
+import {
+  BridgeSessionManager,
+  type AgentPermissionRequester,
+  type AgentProvider,
+  type AgentSendInput,
+  type AgentSession,
+  type ProviderPermissionDecision
+} from "./session-manager.js";
 
 describe("BridgeSessionManager", () => {
   it("creates one provider session per clientSessionId", async () => {
@@ -524,6 +531,275 @@ describe("BridgeSessionManager", () => {
   });
 });
 
+describe("BridgeSessionManager permission requests", () => {
+  it("emits_permission_request_for_provider_permission_callback", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new PermissionAgentSession());
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    const send = manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForPermissionRequest();
+
+    expect(emitted).toContainEqual({
+      type: "permission.request",
+      version: 2,
+      clientSessionId: "page-1",
+      request: {
+        requestId: expect.any(String),
+        permissionKey: "shell:ls",
+        title: "Run command",
+        description: "Allow command",
+        metadata: { toolName: "shell", commandPreview: "ls" }
+      }
+    });
+    expect(permissionRequestIdFrom(emitted)).not.toBe("permission-1");
+
+    await manager.respondToPermission("page-1", permissionRequestIdFrom(emitted), "allow_once");
+    await send;
+  });
+
+  it("blocks_provider_turn_until_permission_response_arrives", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new PermissionAgentSession());
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    const send = manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForPermissionRequest();
+
+    expect(emitted).not.toContainEqual({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "page-1",
+      event: { type: "assistant.text.delta", text: expect.any(String) }
+    });
+
+    await manager.respondToPermission("page-1", permissionRequestIdFrom(emitted), "allow_once");
+    await send;
+
+    expect(emitted).toContainEqual({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "page-1",
+      event: { type: "assistant.text.delta", text: "allowed:allow_once" }
+    });
+  });
+
+  it.each(["allow_once", "allow_for_session", "deny"] as const)(
+    "%s_resumes_blocked_provider_turn",
+    async (decision) => {
+      const emitted: BridgeToExtension[] = [];
+      const provider = createFakeProvider(() => new PermissionAgentSession());
+      const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+      await manager.startSession("page-1", "codex");
+      const send = manager.sendPrompt("page-1", { prompt: "First" });
+      await provider.createdSessions[0]?.waitForPermissionRequest();
+      await manager.respondToPermission("page-1", permissionRequestIdFrom(emitted), decision);
+      await send;
+
+      expect(provider.createdSessions[0]?.permissionDecisions).toEqual([{ decision }]);
+      expect(emitted).toContainEqual({
+        type: "agent.event",
+        version: 2,
+        clientSessionId: "page-1",
+        event: { type: "assistant.done" }
+      });
+    }
+  );
+
+  it("rejects_permission_response_without_matching_pending_request", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const manager = new BridgeSessionManager({ provider: createFakeProvider(), emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    await manager.respondToPermission("page-1", "missing", "allow_once");
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Permission request was not found.",
+      code: "permission_not_found"
+    });
+  });
+
+  it("rejects_duplicate_permission_request_while_same_turn_has_one_pending", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new DuplicatePermissionAgentSession());
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", { prompt: "First" });
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Provider send failed",
+      code: "provider_error"
+    });
+  });
+
+  it("pending_permission_does_not_block_other_client_session", async () => {
+    const emitted: BridgeToExtension[] = [];
+    let createCount = 0;
+    const provider = createFakeProvider(() => {
+      createCount += 1;
+      return createCount === 1 ? new PermissionAgentSession() : new FakeAgentSession(undefined, [{ type: "assistant.text.delta", text: "second" }]);
+    });
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    await manager.startSession("page-2", "codex");
+    const firstSend = manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForPermissionRequest();
+    await manager.sendPrompt("page-2", { prompt: "Second" });
+
+    expect(emitted).toContainEqual({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "page-2",
+      event: { type: "assistant.text.delta", text: "second" }
+    });
+
+    await manager.respondToPermission("page-1", permissionRequestIdFrom(emitted), "allow_once");
+    await firstSend;
+  });
+
+  it("cancel_clears_pending_permission_request_for_turn", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new PermissionAgentSession());
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    const send = manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForPermissionRequest();
+    await manager.cancelTurn("page-1");
+    await send;
+    await manager.respondToPermission("page-1", permissionRequestIdFrom(emitted), "allow_once");
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Permission request was not found.",
+      code: "permission_not_found"
+    });
+  });
+
+  it("queued_cancel_wins_over_later_permission_response_for_same_session", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new PermissionAgentSession());
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    const send = manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForPermissionRequest();
+    const requestId = permissionRequestIdFrom(emitted);
+    const cancel = manager.cancelTurn("page-1");
+    await manager.respondToPermission("page-1", requestId, "allow_once");
+    await Promise.all([cancel, send]);
+
+    expect(provider.createdSessions[0]?.permissionDecisions).toEqual([]);
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Permission request was not found.",
+      code: "permission_not_found"
+    });
+  });
+
+  it("reset_clears_pending_permission_request_for_turn", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new PermissionAgentSession());
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    const send = manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForPermissionRequest();
+    await manager.resetSession("page-1");
+    await send;
+    await manager.respondToPermission("page-1", permissionRequestIdFrom(emitted), "allow_once");
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Permission request was not found.",
+      code: "permission_not_found"
+    });
+  });
+
+  it("does_not_emit_permission_request_after_turn_is_aborted", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new AbortedPermissionAgentSession());
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    const send = manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForSendCount(1);
+    await manager.closeSession("page-1");
+    await send;
+
+    expect(emitted).not.toContainEqual(expect.objectContaining({ type: "permission.request" }));
+  });
+
+  it("does_not_emit_private_permission_request_fields_from_provider_objects", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new PrivatePermissionAgentSession());
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    const send = manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForPermissionRequest();
+    await manager.respondToPermission("page-1", permissionRequestIdFrom(emitted), "allow_once");
+    await send;
+
+    expect(emitted).toContainEqual({
+      type: "permission.request",
+      version: 2,
+      clientSessionId: "page-1",
+      request: {
+        requestId: expect.any(String),
+        permissionKey: "shell:private",
+        title: "Run private command",
+        metadata: { toolName: "shell", commandPreview: "safe-preview" }
+      }
+    });
+    expect(JSON.stringify(emitted)).not.toContain("secret prompt");
+    expect(JSON.stringify(emitted)).not.toContain("secret page");
+    expect(JSON.stringify(emitted)).not.toContain("private stdout");
+    expect(JSON.stringify(emitted)).not.toContain("raw private input");
+  });
+
+  it("permission_response_waits_for_queued_same_session_reset", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new PermissionAgentSession());
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    const send = manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForPermissionRequest();
+    const requestId = permissionRequestIdFrom(emitted);
+
+    const reset = manager.resetSession("page-1");
+    const response = manager.respondToPermission("page-1", requestId, "allow_once");
+    await Promise.all([reset, response, send]);
+
+    expect(provider.createdSessions[0]?.permissionDecisions).toEqual([]);
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Permission request was not found.",
+      code: "permission_not_found"
+    });
+  });
+});
+
 describe("BridgeSessionManager page context prompt formatting", () => {
   it("passes_formatted_untrusted_prompt_to_the_provider_session", async () => {
     const provider = createFakeProvider();
@@ -771,6 +1047,39 @@ describe("BridgeSessionManager reset and close", () => {
     });
   });
 
+  it("close_removes_the_provider_session_even_when_provider_close_rejects", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new RejectingCloseAgentSession());
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    await manager.closeSession("page-1");
+    await manager.sendPrompt("page-1", { prompt: "After failed close" });
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Session has not been started",
+      code: "session_not_started"
+    });
+  });
+
+  it("reset_replaces_the_provider_session_even_when_old_provider_close_rejects", async () => {
+    const provider = createFakeProvider(() => {
+      if (provider.createdSessions.length === 0) return new RejectingCloseAgentSession();
+      return new FakeAgentSession();
+    });
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.resetSession("page-1");
+    await manager.sendPrompt("page-1", { prompt: "After reset" });
+
+    expect(provider.createdSessions).toHaveLength(2);
+    expect(provider.createdSessions[1]?.sentInputs).toEqual([{ prompt: "After reset" }]);
+  });
+
   it("reset and close do not affect another client session", async () => {
     const provider = createFakeProvider();
     const manager = new BridgeSessionManager({ provider, emit: () => {} });
@@ -884,14 +1193,17 @@ function createDeferredProvider() {
 type Deferred<T> = {
   promise: Promise<T>;
   resolve(value: T): void;
+  reject(error: unknown): void;
 };
 
 function deferred<T>(): Deferred<T> {
   let resolve: (value: T) => void = () => {};
-  const promise = new Promise<T>((done) => {
+  let reject: (error: unknown) => void = () => {};
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function unsafeAgentEvent(value: unknown): AgentEvent {
@@ -960,6 +1272,123 @@ class ThrowingAfterAbortSession extends FakeAgentSession {
     await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
     throw new Error("throw after abort");
   }
+}
+
+class RejectingCloseAgentSession extends FakeAgentSession {
+  override async close() {
+    this.closeCount += 1;
+    throw new Error("close failed");
+  }
+}
+
+class PermissionAgentSession extends FakeAgentSession {
+  readonly permissionDecisions: ProviderPermissionDecision[] = [];
+  private permissionRequested: (() => void) | undefined;
+  private permissionRequestPromise = new Promise<void>((resolve) => {
+    this.permissionRequested = resolve;
+  });
+
+  override async *send(
+    input: AgentSendInput,
+    signal: AbortSignal,
+    permissions: AgentPermissionRequester
+  ): AsyncIterable<AgentEvent> {
+    this.sentInputs.push(input);
+    this.sendSignals.push(signal);
+    this.permissionRequested?.();
+    const decision = await permissions.requestPermission({
+      permissionKey: "shell:ls",
+      title: "Run command",
+      description: "Allow command",
+      metadata: { toolName: "shell", commandPreview: "ls" }
+    });
+    this.permissionDecisions.push(decision);
+    if (signal.aborted) return;
+    yield { type: "assistant.text.delta", text: `allowed:${decision.decision}` };
+    yield { type: "assistant.done" };
+  }
+
+  async waitForPermissionRequest() {
+    await this.permissionRequestPromise;
+  }
+}
+
+class DuplicatePermissionAgentSession extends FakeAgentSession {
+  override async *send(
+    input: AgentSendInput,
+    signal: AbortSignal,
+    permissions: AgentPermissionRequester
+  ): AsyncIterable<AgentEvent> {
+    this.sentInputs.push(input);
+    this.sendSignals.push(signal);
+    void permissions.requestPermission({
+      permissionKey: "shell:first",
+      title: "First permission"
+    }).catch(() => {});
+    await permissions.requestPermission({
+      permissionKey: "shell:second",
+      title: "Second permission"
+    });
+    yield { type: "assistant.done" };
+  }
+}
+
+class AbortedPermissionAgentSession extends FakeAgentSession {
+  override async *send(
+    input: AgentSendInput,
+    signal: AbortSignal,
+    permissions: AgentPermissionRequester
+  ): AsyncIterable<AgentEvent> {
+    this.sentInputs.push(input);
+    this.sendSignals.push(signal);
+    this.resolveSendWaiters();
+    await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+    await permissions.requestPermission({
+      permissionKey: "shell:stale",
+      title: "Stale permission"
+    });
+    yield { type: "assistant.done" };
+  }
+}
+
+class PrivatePermissionAgentSession extends FakeAgentSession {
+  private permissionRequested: (() => void) | undefined;
+  private permissionRequestPromise = new Promise<void>((resolve) => {
+    this.permissionRequested = resolve;
+  });
+
+  override async *send(
+    input: AgentSendInput,
+    signal: AbortSignal,
+    permissions: AgentPermissionRequester
+  ): AsyncIterable<AgentEvent> {
+    this.sentInputs.push(input);
+    this.sendSignals.push(signal);
+    this.permissionRequested?.();
+    await permissions.requestPermission({
+      permissionKey: "shell:private",
+      title: "Run private command",
+      prompt: "secret prompt",
+      pageContent: "secret page",
+      metadata: {
+        toolName: "shell",
+        commandPreview: "safe-preview",
+        stdout: "private stdout",
+        rawInput: "raw private input"
+      }
+    } as unknown as Parameters<AgentPermissionRequester["requestPermission"]>[0]);
+    yield { type: "assistant.done" };
+  }
+
+  async waitForPermissionRequest() {
+    await this.permissionRequestPromise;
+  }
+}
+
+function permissionRequestIdFrom(messages: BridgeToExtension[]): string {
+  const request = messages.find((message) => message.type === "permission.request");
+  if (!request || request.type !== "permission.request") throw new Error("Missing permission request");
+  return request.request.requestId;
 }
 
 class ManualAsyncEvents implements AsyncIterable<AgentEvent> {

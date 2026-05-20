@@ -30,7 +30,7 @@ Context:
 
 - Sidra's side panel receives user input and renders chat state.
 - The bridge owns Native Messaging communication with the local agent bridge.
-- Upcoming work adds bridge availability and retry, URL-scoped sessions, explicit page capture, streaming turns, cancellation, New Chat reset, permission requests, heartbeats, and Codex provider lifecycle.
+- Sidra coordinates bridge availability and retry, URL-scoped sessions, explicit page capture, streaming turns, cancellation, New Chat reset, permission requests, heartbeats, and provider lifecycle across several modules.
 - A small controller inside the side panel can fix one sequencing bug, but it creates a pattern where future protocol behavior may accrete inside UI code.
 
 Decision:
@@ -38,7 +38,7 @@ Decision:
 - The side panel must not coordinate low-level bridge protocol sequencing.
 - Add a dedicated bridge/session boundary before expanding bridge behavior.
 - UI code should call application-level commands such as `sendPrompt`, `retryBridge`, `cancelTurn`, and `newChat`, then render derived state.
-- Non-React bridge/session code should own `chrome.runtime.connectNative`, bridge readiness, retry/disconnect handling, provider session start, prompt queueing until `session.started`, and later URL session lifecycle.
+- Non-React bridge/session code should own `chrome.runtime.connectNative`, bridge readiness, retry/disconnect handling, provider session start, prompt queueing until `session.started`, URL session lifecycle, and permission response routing.
 
 Consequences:
 
@@ -83,7 +83,7 @@ Decision:
 - Extension code must be organized around a deep application boundary, not a React component plus a transport helper.
 - The side panel view renders a derived UI snapshot and invokes application commands. It must not own URL session mapping, capture orchestration, bridge protocol sequencing, provider lifecycle, cancellation, permissions, or heartbeat cleanup.
   Draft Prompt state is part of the URL Session snapshot and is controlled by the extension application boundary, not by React-local state.
-- The extension application boundary should expose commands such as `sendPrompt`, `captureAndSend`, `cancelTurn`, `newChat`, `retryBridge`, and later `respondToPermission`, backed by non-React modules.
+- The extension application boundary should expose commands such as `sendPrompt`, `captureAndSend`, `cancelTurn`, `newChat`, `retryBridge`, and `respondToPermission`, backed by non-React modules.
 - Extension modules should separate at least these responsibilities before related behavior expands:
   - `BridgeConnection`: Chrome Native Messaging connection, reconnect, disconnect, raw protocol IO, and bridge availability.
   - `ActivePageTracker`: active tab URL/title metadata reads and tab/window change subscriptions. It must not use scripting or page content extraction.

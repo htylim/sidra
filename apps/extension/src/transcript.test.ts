@@ -4,12 +4,15 @@ import {
   addAssistantTextDelta,
   addContextMarker,
   addErrorStatusEntry,
+  addPermissionRequest,
   addStatusEntry,
   addUserPrompt,
   cancelAssistantTurn,
   completeAssistantTurn,
   failAssistantTurn,
+  markPendingPermissionRequestsUnavailable,
   removeTranscriptEntriesByIds,
+  resolvePermissionRequest,
   type SafeActivityEntry,
   type TranscriptEntry
 } from "./transcript";
@@ -262,6 +265,151 @@ describe("transcript reducer", () => {
       expect(removeTranscriptEntriesByIds(transcript, new Set(["prompt-1"]))).toEqual([
         { kind: "status", role: "status", tone: "neutral", text: "Session started" }
       ]);
+    });
+
+    it("adds_pending_permission_request_entry_after_latest_user_turn", () => {
+      const transcript = addPermissionRequest(addUserPrompt([], "run it"), {
+        requestId: "permission-1",
+        permissionKey: "shell:ls",
+        title: "Run command",
+        description: "Allow command",
+        metadata: { toolName: "shell", commandPreview: "ls" }
+      });
+
+      expect(transcript).toEqual([
+        { kind: "user_message", role: "user", text: "run it" },
+        {
+          kind: "permission_request",
+          role: "permission",
+          requestId: "permission-1",
+          permissionKey: "shell:ls",
+          title: "Run command",
+          description: "Allow command",
+          metadata: { toolName: "shell", commandPreview: "ls" },
+          status: "pending"
+        }
+      ]);
+    });
+
+    it("closes_current_assistant_segment_before_permission_request", () => {
+      const transcript = addPermissionRequest(addAssistantTextDelta(addUserPrompt([], "run it"), "Checking"), {
+        requestId: "permission-1",
+        permissionKey: "shell:ls",
+        title: "Run command"
+      });
+
+      expect(transcript).toEqual([
+        { kind: "user_message", role: "user", text: "run it" },
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Checking",
+          text: "Checking",
+          activity: [],
+          status: "complete"
+        },
+        {
+          kind: "permission_request",
+          role: "permission",
+          requestId: "permission-1",
+          permissionKey: "shell:ls",
+          title: "Run command",
+          status: "pending"
+        }
+      ]);
+    });
+
+    it("keeps_post_permission_output_after_permission_card", () => {
+      const permissionTranscript = resolvePermissionRequest(
+        addPermissionRequest(addAssistantTextDelta(addUserPrompt([], "run it"), "Checking"), {
+          requestId: "permission-1",
+          permissionKey: "shell:ls",
+          title: "Run command"
+        }),
+        "permission-1",
+        "allow_once"
+      );
+      const transcript = addAssistantActivity(addAssistantTextDelta(permissionTranscript, "Allowed"), {
+        kind: "tool",
+        phase: "started",
+        label: "Tool started"
+      });
+
+      expect(transcript).toEqual([
+        { kind: "user_message", role: "user", text: "run it" },
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Checking",
+          text: "Checking",
+          activity: [],
+          status: "complete"
+        },
+        {
+          kind: "permission_request",
+          role: "permission",
+          requestId: "permission-1",
+          permissionKey: "shell:ls",
+          title: "Run command",
+          status: "allowed_once"
+        },
+        {
+          kind: "assistant_turn",
+          role: "assistant",
+          markdown: "Allowed",
+          text: "Allowed",
+          activity: [{ kind: "tool", phase: "started", label: "Tool started" }],
+          status: "streaming"
+        }
+      ]);
+    });
+
+    it("marks_permission_request_allowed_once", () => {
+      const transcript = addPermissionRequest([], {
+        requestId: "permission-1",
+        permissionKey: "shell:ls",
+        title: "Run command"
+      });
+
+      expect(resolvePermissionRequest(transcript, "permission-1", "allow_once")).toContainEqual(
+        expect.objectContaining({ kind: "permission_request", status: "allowed_once" })
+      );
+    });
+
+    it("marks_permission_request_allowed_for_session", () => {
+      const transcript = addPermissionRequest([], {
+        requestId: "permission-1",
+        permissionKey: "shell:ls",
+        title: "Run command"
+      });
+
+      expect(resolvePermissionRequest(transcript, "permission-1", "allow_for_session")).toContainEqual(
+        expect.objectContaining({ kind: "permission_request", status: "allowed_for_session" })
+      );
+    });
+
+    it("marks_permission_request_denied", () => {
+      const transcript = addPermissionRequest([], {
+        requestId: "permission-1",
+        permissionKey: "shell:ls",
+        title: "Run command"
+      });
+
+      expect(resolvePermissionRequest(transcript, "permission-1", "deny")).toContainEqual(
+        expect.objectContaining({ kind: "permission_request", status: "denied" })
+      );
+    });
+
+    it("clears_pending_permission_actionability_when_turn_is_cancelled", () => {
+      const transcript = addPermissionRequest([], {
+        requestId: "permission-1",
+        permissionKey: "shell:ls",
+        title: "Run command"
+      });
+
+      expect(markPendingPermissionRequestsUnavailable(transcript)).toContainEqual(
+        expect.objectContaining({ kind: "permission_request", status: "unavailable" })
+      );
     });
   });
 });

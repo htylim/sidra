@@ -108,6 +108,89 @@ describe("native messaging dispatch", () => {
     await withTimeout(sawCancel);
   });
 
+  it("dispatches_permission_respond_while_provider_turn_is_blocked", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let responseDispatched: (() => void) | undefined;
+    const sawResponse = new Promise<void>((resolve) => {
+      responseDispatched = resolve;
+    });
+
+    runNativeMessagingBridge(input, output, {
+      bridge: {
+        async handleMessage(message: unknown) {
+          if (isMessageOfType(message, "session.send")) {
+            await sawResponse;
+          }
+          if (isMessageOfType(message, "permission.respond")) {
+            responseDispatched?.();
+          }
+        }
+      }
+    });
+
+    input.write(
+      Buffer.concat([
+        encodeNativeMessage({
+          type: "session.send",
+          version: 2,
+          clientSessionId: "page-1",
+          prompt: "Long prompt"
+        }),
+        encodeNativeMessage({
+          type: "permission.respond",
+          version: 2,
+          clientSessionId: "page-1",
+          requestId: "permission-1",
+          decision: "allow_once"
+        })
+      ])
+    );
+
+    await withTimeout(sawResponse);
+  });
+
+  it("dispatches_other_session_messages_while_permission_is_pending", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let secondSessionDispatched: (() => void) | undefined;
+    const sawSecondSession = new Promise<void>((resolve) => {
+      secondSessionDispatched = resolve;
+    });
+
+    runNativeMessagingBridge(input, output, {
+      bridge: {
+        async handleMessage(message: unknown) {
+          if (isMessageForClientSession(message, "page-1")) {
+            await sawSecondSession;
+          }
+          if (isMessageForClientSession(message, "page-2")) {
+            secondSessionDispatched?.();
+          }
+        }
+      }
+    });
+
+    input.write(
+      Buffer.concat([
+        encodeNativeMessage({
+          type: "session.send",
+          version: 2,
+          clientSessionId: "page-1",
+          prompt: "Long prompt"
+        }),
+        encodeNativeMessage({
+          type: "session.send",
+          version: 2,
+          clientSessionId: "page-2",
+          prompt: "Independent prompt"
+        })
+      ])
+    );
+
+    await withTimeout(sawSecondSession);
+  });
+
   it("continues to report invalid JSON without crashing", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
