@@ -68,6 +68,8 @@ type BridgeSessionManagerOptions = {
   emit(message: BridgeToExtension): void;
 };
 
+export type ConnectionCleanupReason = "heartbeat_timeout" | "native_disconnect" | "manual_shutdown";
+
 /**
  * Owns bridge-side provider sessions and turn lifecycle.
  *
@@ -78,25 +80,43 @@ type BridgeSessionManagerOptions = {
 export class BridgeSessionManager {
   private readonly sessions = new Map<string, ManagedSession>();
   private readonly sessionOperations = new Map<string, Promise<void>>();
+  private readonly sessionGenerations = new Map<string, number>();
+  private readonly startingClientSessionIds = new Set<string>();
+  private cleanupGeneration = 0;
+  private closeAllOperation: Promise<void> | undefined;
+  private connectionClosed = false;
   private nextBridgeSessionId = 1;
 
   constructor(private readonly options: BridgeSessionManagerOptions) {}
 
   async startSession(clientSessionId: string, providerId: ProviderId): Promise<void> {
-    await this.enqueueSessionOperation(clientSessionId, () => this.replaceSession(clientSessionId, providerId));
+    if (this.connectionClosed) {
+      this.emitSessionNotStarted(clientSessionId);
+      return;
+    }
+    const operationGeneration = this.cleanupGeneration;
+    const sessionGeneration = this.getSessionGeneration(clientSessionId);
+    this.startingClientSessionIds.add(clientSessionId);
+    await this.enqueueSessionOperation(clientSessionId, () =>
+      this.replaceSession(clientSessionId, providerId, operationGeneration, sessionGeneration)
+    ).finally(() => {
+      this.startingClientSessionIds.delete(clientSessionId);
+    });
   }
 
   async sendPrompt(clientSessionId: string, input: BridgeTurnInput): Promise<void> {
+    if (this.connectionClosed) {
+      this.emitSessionNotStarted(clientSessionId);
+      return;
+    }
     await this.sessionOperations.get(clientSessionId);
+    if (this.connectionClosed) {
+      this.emitSessionNotStarted(clientSessionId);
+      return;
+    }
     const session = this.sessions.get(clientSessionId);
     if (!session) {
-      this.options.emit({
-        type: "session.error",
-        version: PROTOCOL_VERSION,
-        clientSessionId,
-        message: "Session has not been started",
-        code: "session_not_started"
-      });
+      this.emitSessionNotStarted(clientSessionId);
       return;
     }
 
@@ -140,7 +160,15 @@ export class BridgeSessionManager {
   }
 
   async cancelTurn(clientSessionId: string): Promise<void> {
+    if (this.connectionClosed) {
+      this.emitSessionNotStarted(clientSessionId);
+      return;
+    }
     await this.enqueueSessionOperation(clientSessionId, async () => {
+      if (this.connectionClosed) {
+        this.emitSessionNotStarted(clientSessionId);
+        return;
+      }
       const session = this.sessions.get(clientSessionId);
       if (!session?.inFlight) {
         this.options.emit({
@@ -156,7 +184,6 @@ export class BridgeSessionManager {
       const inFlight = session.inFlight;
       inFlight.controller.abort();
       this.rejectPendingPermission(inFlight);
-      await inFlight.done;
       if (this.sessions.get(clientSessionId) !== session) return;
       this.options.emit({
         type: "agent.event",
@@ -168,37 +195,62 @@ export class BridgeSessionManager {
   }
 
   async resetSession(clientSessionId: string): Promise<void> {
+    if (this.connectionClosed) {
+      this.emitSessionNotStarted(clientSessionId);
+      return;
+    }
+    const operationGeneration = this.cleanupGeneration;
+    const sessionGeneration = this.advanceSessionGeneration(clientSessionId);
     await this.enqueueSessionOperation(clientSessionId, async () => {
       const providerId = this.sessions.get(clientSessionId)?.providerId ?? this.options.provider.id;
-      await this.replaceSession(clientSessionId, providerId);
+      await this.replaceSession(clientSessionId, providerId, operationGeneration, sessionGeneration);
     });
   }
 
   async closeSession(clientSessionId: string): Promise<void> {
-    await this.enqueueSessionOperation(clientSessionId, async () => {
-      const existing = this.sessions.get(clientSessionId);
-      if (!existing) return;
+    this.advanceSessionGeneration(clientSessionId);
+    this.sessionOperations.delete(clientSessionId);
+    const existing = this.sessions.get(clientSessionId);
+    if (!existing) return;
 
-      if (this.sessions.get(clientSessionId) === existing) {
-        this.sessions.delete(clientSessionId);
-      }
-      await this.closeManagedSession(existing);
+    if (this.sessions.get(clientSessionId) === existing) {
+      this.sessions.delete(clientSessionId);
+    }
+    this.closeManagedSession(existing);
+  }
+
+  async closeAllSessions(reason: ConnectionCleanupReason): Promise<void> {
+    void reason;
+    if (this.closeAllOperation) return this.closeAllOperation;
+
+    this.connectionClosed = true;
+    const cleanupGeneration = ++this.cleanupGeneration;
+    for (const clientSessionId of this.startingClientSessionIds) {
+      this.emitSessionNotStarted(clientSessionId);
+    }
+    this.startingClientSessionIds.clear();
+    this.sessionOperations.clear();
+    this.closeAllOperation = this.closeAllSessionsForGeneration(cleanupGeneration).finally(() => {
+      if (this.closeAllOperation) this.closeAllOperation = undefined;
     });
+    return this.closeAllOperation;
   }
 
   async respondToPermission(clientSessionId: string, requestId: string, decision: PermissionDecision): Promise<void> {
+    if (this.connectionClosed) {
+      this.emitPermissionNotFound(clientSessionId);
+      return;
+    }
     await this.sessionOperations.get(clientSessionId)?.catch(() => {});
+    if (this.connectionClosed) {
+      this.emitPermissionNotFound(clientSessionId);
+      return;
+    }
     const session = this.sessions.get(clientSessionId);
     const inFlight = session?.inFlight;
     const pendingPermission = inFlight?.pendingPermission;
     if (!inFlight || !pendingPermission || pendingPermission.requestId !== requestId) {
-      this.options.emit({
-        type: "session.error",
-        version: PROTOCOL_VERSION,
-        clientSessionId,
-        message: "Permission request was not found.",
-        code: "permission_not_found"
-      });
+      this.emitPermissionNotFound(clientSessionId);
       return;
     }
 
@@ -221,7 +273,14 @@ export class BridgeSessionManager {
     }
   }
 
-  private async replaceSession(clientSessionId: string, providerId: ProviderId): Promise<void> {
+  private async replaceSession(
+    clientSessionId: string,
+    providerId: ProviderId,
+    operationGeneration: number,
+    sessionGeneration: number
+  ): Promise<void> {
+    if (this.cleanupGeneration !== operationGeneration) return;
+    if (this.getSessionGeneration(clientSessionId) !== sessionGeneration) return;
     if (providerId !== this.options.provider.id) {
       this.options.emit({
         type: "session.error",
@@ -238,13 +297,20 @@ export class BridgeSessionManager {
       if (this.sessions.get(clientSessionId) === existing) {
         this.sessions.delete(clientSessionId);
       }
-      await this.closeManagedSession(existing);
+      await this.closeManagedSessionForReplacement(existing);
     }
 
     let providerSession: AgentSession;
     try {
       providerSession = await this.options.provider.createSession();
     } catch {
+      if (
+        this.connectionClosed ||
+        this.cleanupGeneration !== operationGeneration ||
+        this.getSessionGeneration(clientSessionId) !== sessionGeneration
+      ) {
+        return;
+      }
       this.options.emit({
         type: "session.error",
         version: PROTOCOL_VERSION,
@@ -252,6 +318,14 @@ export class BridgeSessionManager {
         message: "Provider session failed to start.",
         code: "provider_start_failed"
       });
+      return;
+    }
+
+    if (
+      this.cleanupGeneration !== operationGeneration ||
+      this.getSessionGeneration(clientSessionId) !== sessionGeneration
+    ) {
+      this.closeManagedSession({ providerSession, providerId });
       return;
     }
 
@@ -264,17 +338,72 @@ export class BridgeSessionManager {
     });
   }
 
-  private async closeManagedSession(session: ManagedSession): Promise<void> {
+  private closeManagedSession(session: ManagedSession): void {
     if (session.inFlight) {
       session.inFlight.controller.abort();
       this.rejectPendingPermission(session.inFlight);
-      await session.inFlight.done;
+    }
+    try {
+      void session.providerSession.close().catch(() => {
+        // A failed provider close must not leave a stale session reusable.
+      });
+    } catch {
+      // A failed provider close must not leave a stale session reusable.
+    }
+  }
+
+  private async closeManagedSessionForReplacement(session: ManagedSession): Promise<void> {
+    if (session.inFlight) {
+      session.inFlight.controller.abort();
+      this.rejectPendingPermission(session.inFlight);
     }
     try {
       await session.providerSession.close();
     } catch {
-      // A failed provider close must not leave a stale session reusable.
+      // A failed provider close must not block replacement.
     }
+  }
+
+  private async closeAllSessionsForGeneration(cleanupGeneration: number): Promise<void> {
+    const sessionsToClose = Array.from(this.sessions.values());
+    this.sessions.clear();
+
+    for (const session of sessionsToClose) this.closeManagedSession(session);
+
+    if (this.cleanupGeneration !== cleanupGeneration) return;
+    const lateSessionsToClose = Array.from(this.sessions.values());
+    this.sessions.clear();
+    for (const session of lateSessionsToClose) this.closeManagedSession(session);
+  }
+
+  private getSessionGeneration(clientSessionId: string): number {
+    return this.sessionGenerations.get(clientSessionId) ?? 0;
+  }
+
+  private advanceSessionGeneration(clientSessionId: string): number {
+    const nextGeneration = this.getSessionGeneration(clientSessionId) + 1;
+    this.sessionGenerations.set(clientSessionId, nextGeneration);
+    return nextGeneration;
+  }
+
+  private emitSessionNotStarted(clientSessionId: string): void {
+    this.options.emit({
+      type: "session.error",
+      version: PROTOCOL_VERSION,
+      clientSessionId,
+      message: "Session has not been started",
+      code: "session_not_started"
+    });
+  }
+
+  private emitPermissionNotFound(clientSessionId: string): void {
+    this.options.emit({
+      type: "session.error",
+      version: PROTOCOL_VERSION,
+      clientSessionId,
+      message: "Permission request was not found.",
+      code: "permission_not_found"
+    });
   }
 
   private async runProviderSend(

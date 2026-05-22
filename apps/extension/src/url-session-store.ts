@@ -64,6 +64,7 @@ type UrlSessionRecord = {
   approvals: SessionApprovalState;
   autoApprovalRequestIds: Set<string>;
   coordinator: UrlSessionCoordinator;
+  unsubscribeCoordinator: () => void;
 };
 
 export type UrlSessionCoordinator = {
@@ -76,6 +77,7 @@ export type UrlSessionCoordinator = {
   newChat(): void;
   markBridgeDisconnected(): void;
   hasProviderState?(): boolean;
+  dispose?(): void;
 };
 
 export type UrlSessionStoreOptions = {
@@ -264,6 +266,23 @@ export class UrlSessionStore {
     this.emit();
   }
 
+  clearAllSessions(): void {
+    const records = Array.from(this.recordsByPageKey.values());
+    this.recordsByPageKey.clear();
+    this.activePageKey = undefined;
+    this.cachedSnapshot = undefined;
+
+    for (const record of records) {
+      record.approvals.clear();
+      record.unsubscribeCoordinator();
+      if (coordinatorMayHaveProviderState(record.coordinator)) {
+        record.coordinator.markBridgeDisconnected();
+      }
+      record.coordinator.dispose?.();
+    }
+    this.emit();
+  }
+
   private createRecord(
     identity: Extract<PageIdentity, { status: "ready" }>,
     initialCaptureMode: CaptureMode = "readable"
@@ -278,10 +297,11 @@ export class UrlSessionStore {
       contextState: INITIAL_CONTEXT_STATE,
       approvals: new InMemorySessionApprovalState(),
       autoApprovalRequestIds: new Set(),
-      coordinator
+      coordinator,
+      unsubscribeCoordinator: () => undefined
     };
 
-    coordinator.subscribe(() => {
+    record.unsubscribeCoordinator = coordinator.subscribe(() => {
       this.cachedSnapshot = undefined;
       this.autoAllowApprovedPermissionRequests(record);
       if (this.activePageKey === record.pageIdentity.pageKey) this.emit();

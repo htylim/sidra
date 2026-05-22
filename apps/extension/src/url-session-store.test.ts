@@ -1,5 +1,5 @@
 import type { BridgeToExtension, ExtensionToBridge, PageContext } from "@sidra/protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BridgeSessionCoordinator, type ProtocolTransport } from "./bridge/session-coordinator";
 import type { ProtocolTransportPostResult } from "./bridge/session-coordinator";
 import type { PageIdentity, PageKey } from "./page-key";
@@ -662,6 +662,111 @@ describe("UrlSessionStore", () => {
     expect(store.listActiveSessionApprovals()).toEqual([]);
     store.selectPage(pageIdentity("https://example.com/a"));
     expect(store.listActiveSessionApprovals()).toEqual([]);
+  });
+
+  it("clearAllSessions_removes_in_memory_url_sessions_and_approvals", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.updateActiveDraftPrompt("draft");
+    store.grantActiveSessionApproval({ permissionKey: "shell:ls", decision: "allow_for_session" });
+    store.selectPage(pageIdentity("https://example.com/b"));
+
+    store.clearAllSessions();
+
+    expect(store.getSnapshot().sessions).toEqual([]);
+    expect(store.getSnapshot().activeSession.clientSessionId).toBe("");
+    store.selectPage(pageIdentity("https://example.com/a"));
+    expect(store.getSnapshot().activeSession.draftPrompt).toBe("");
+    expect(store.listActiveSessionApprovals()).toEqual([]);
+  });
+
+  it("clearAllSessions_marks_provider_backed_coordinators_disconnected_before_drop", () => {
+    const markBridgeDisconnected = vi.fn();
+    const store = new UrlSessionStore({
+      createClientSessionId: () => "client-1",
+      createCoordinator: (clientSessionId) => ({
+        getSnapshot: () => ({
+          clientSessionId,
+          sessionStarted: true,
+          starting: false,
+          turnInFlight: false,
+          canCancelTurn: false,
+          pendingPromptCount: 0,
+          transcript: []
+        }),
+        subscribe: () => () => undefined,
+        sendPrompt: () => true,
+        newChat: () => undefined,
+        markBridgeDisconnected,
+        hasProviderState: () => true
+      })
+    });
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    store.clearAllSessions();
+
+    expect(markBridgeDisconnected).toHaveBeenCalledTimes(1);
+    expect(store.getSnapshot().sessions).toEqual([]);
+  });
+
+  it("clearAllSessions_does_not_emit_transcript_bearing_intermediate_snapshots", () => {
+    const { store } = createStoreHarness();
+    const snapshots: unknown[] = [];
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPrompt("secret prompt");
+    store.subscribe(() => snapshots.push(store.getSnapshot()));
+
+    store.clearAllSessions();
+
+    expect(JSON.stringify(snapshots)).not.toContain("secret prompt");
+    expect(snapshots).toEqual([
+      expect.objectContaining({
+        activeSession: expect.objectContaining({ clientSessionId: "", transcript: [] }),
+        sessions: []
+      })
+    ]);
+  });
+
+  it("clearAllSessions_disposes_dropped_coordinators_and_transport_subscriptions", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPrompt("secret prompt");
+
+    store.clearAllSessions();
+    transport.emitMessage(sessionStarted("client-1"));
+    transport.emitMessage(agentTextDelta("client-1", "stale assistant text"));
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.getSnapshot().activeSession.transcript).toEqual([]);
+  });
+
+  it("clearAllSessions_disposes_dropped_coordinators_without_provider_state", () => {
+    const dispose = vi.fn();
+    const store = new UrlSessionStore({
+      createClientSessionId: () => "client-1",
+      createCoordinator: (clientSessionId) => ({
+        getSnapshot: () => ({
+          clientSessionId,
+          sessionStarted: false,
+          starting: false,
+          turnInFlight: false,
+          canCancelTurn: false,
+          pendingPromptCount: 0,
+          transcript: []
+        }),
+        subscribe: () => () => undefined,
+        sendPrompt: () => true,
+        newChat: () => undefined,
+        markBridgeDisconnected: () => undefined,
+        hasProviderState: () => false,
+        dispose
+      })
+    });
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    store.clearAllSessions();
+
+    expect(dispose).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -63,6 +63,7 @@ export type SidePanelController = {
   updateDraftPrompt(text: string): void;
   newChat(): void;
   retryBridge(): void;
+  shutdown(): void;
   openSettings(): void;
 };
 
@@ -134,6 +135,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
   let snapshot = createSnapshot(bridgeSnapshot, activePageSnapshot, urlSessionSnapshot, settingsSnapshot, settingsReady);
   let snapshotSettingsSnapshot = settingsSnapshot;
   let snapshotSettingsReady = settingsReady;
+  let shutdownStarted = false;
 
   const refreshSnapshot = () => {
     const nextBridgeSnapshot = connection.getSnapshot();
@@ -160,7 +162,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     for (const listener of listeners) listener();
   };
 
-  connection.subscribe(() => {
+  const unsubscribeConnection = connection.subscribe(() => {
     const connected = connection.getSnapshot().connected;
     const disconnected = bridgeConnected && !connected;
     bridgeConnected = connected;
@@ -171,19 +173,20 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
 
     emit();
   });
-  activePageTracker.subscribe(() => {
+  const unsubscribeActivePageTracker = activePageTracker.subscribe(() => {
     activePageSnapshot = activePageTracker.getSnapshot();
     urlSessionStore.selectPage(activePageSnapshot);
     emit();
   });
-  urlSessionStore.subscribe(emit);
-  settingsStore.subscribe(() => {
+  const unsubscribeUrlSessionStore = urlSessionStore.subscribe(emit);
+  const unsubscribeSettingsStore = settingsStore.subscribe(() => {
     settingsSnapshot = settingsStore.getSnapshot();
     emit();
   });
   connection.connect();
   void settingsStore.start();
   void settingsStore.whenReady().then(() => {
+    if (shutdownStarted) return;
     settingsSnapshot = settingsStore.getSnapshot();
     settingsReady = true;
     emit();
@@ -202,6 +205,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
 
     const preCaptureMode = snapshot.activeSession.captureMode;
     const captureResult = await captureService.captureActivePageDocument();
+    if (shutdownStarted) return false;
     if (captureResult.status === "captured") {
       activePageSnapshot = captureResult.pageIdentity;
       urlSessionStore.selectPage(captureResult.pageIdentity, { initialCaptureMode: preCaptureMode });
@@ -210,6 +214,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
         captureResult.capturedDocument,
         capturedSessionMode
       );
+      if (shutdownStarted) return false;
       activePageSnapshot = captureResult.pageIdentity;
       urlSessionStore.selectPage(captureResult.pageIdentity);
       const accepted = urlSessionStore.sendPromptWithContext({
@@ -272,6 +277,17 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     retryBridge: () => {
       urlSessionStore.markBridgeDisconnected();
       connection.retry();
+      emit();
+    },
+    shutdown: () => {
+      if (shutdownStarted) return;
+      shutdownStarted = true;
+      unsubscribeConnection();
+      unsubscribeActivePageTracker();
+      unsubscribeUrlSessionStore();
+      unsubscribeSettingsStore();
+      urlSessionStore.clearAllSessions();
+      connection.disconnect();
       emit();
     },
     openSettings: () => options.openOptionsPage?.()

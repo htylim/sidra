@@ -91,6 +91,7 @@ export class BridgeSessionCoordinator {
   private readonly transport: ProtocolTransport;
   private readonly hardPayloadByteLimit: number;
   private readonly listeners = new Set<Listener>();
+  private readonly unsubscribeTransport: () => void;
   // Submissions sent before `session.started` must wait for the bridge to create provider state.
   private pendingSubmissions: PreparedPromptSubmission[] = [];
   // Tracks whether the bridge may already have provider state for this session.
@@ -116,7 +117,7 @@ export class BridgeSessionCoordinator {
     this.transport = options.transport;
     this.hardPayloadByteLimit = options.hardPayloadByteLimit ?? BRIDGE_HARD_PAYLOAD_BYTE_LIMIT;
     this.snapshot = this.initialSnapshot();
-    this.transport.subscribeToMessages((message) => this.handleBridgeMessage(message));
+    this.unsubscribeTransport = this.transport.subscribeToMessages((message) => this.handleBridgeMessage(message));
   }
 
   getSnapshot = (): BridgeSessionCoordinatorSnapshot => this.snapshot;
@@ -343,6 +344,21 @@ export class BridgeSessionCoordinator {
       pendingPromptCount: 0,
       transcript: addStatusEntry(failAssistantTurn(markPendingPermissionRequestsUnavailable(transcript)), "Bridge disconnected")
     });
+  }
+
+  dispose(): void {
+    this.unsubscribeTransport();
+    this.listeners.clear();
+    this.pendingSubmissions = [];
+    this.clearPendingPermissionRequests();
+    this.startPosted = false;
+    this.turnInFlight = false;
+    this.cancelRequested = false;
+    this.suppressNextNoInFlightAfterCancelTerminal = false;
+    this.suppressNextSessionStartedStatus = false;
+    this.startupResultsToIgnore = 0;
+    this.terminalTurnErrorsToIgnore = 0;
+    this.snapshot = this.initialSnapshot();
   }
 
   private initialSnapshot(): BridgeSessionCoordinatorSnapshot {

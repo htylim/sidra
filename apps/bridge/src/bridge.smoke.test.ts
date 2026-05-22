@@ -324,6 +324,25 @@ describe("mock bridge chat path", () => {
     });
   });
 
+  it("bridge_smoke_cleans_up_session_on_session_close", async () => {
+    const provider = createRecordingProvider();
+    const bridge = createBridge({ emit: () => {} }, provider);
+
+    await bridge.handleMessage({ type: "session.start", version: 2, clientSessionId: "page-1", providerId: "codex" });
+    await bridge.handleMessage({ type: "session.close", version: 2, clientSessionId: "page-1" });
+
+    expect(provider.createdSessions[0]?.closeCount).toBe(1);
+  });
+
+  it("bridge_smoke_accepts_heartbeat_without_user_visible_output", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const bridge = createBridge({ emit: (message) => emitted.push(message) }, createRecordingProvider());
+
+    await bridge.handleMessage({ type: "heartbeat", version: 2 });
+
+    expect(emitted).toEqual([]);
+  });
+
   it("dispatches a later client session while an earlier session is still pending", async () => {
     const input = new PassThrough();
     const output = new PassThrough();

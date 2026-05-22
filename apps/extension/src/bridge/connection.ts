@@ -1,6 +1,7 @@
 import { parseBridgeToExtension, type BridgeToExtension, type ExtensionToBridge } from "@sidra/protocol";
 
 export const SIDRA_NATIVE_HOST = "com.sidra.agent_bridge";
+export const BRIDGE_HEARTBEAT_INTERVAL_MS = 10_000;
 
 export type NativeBridgePort = {
   postMessage(message: unknown): void;
@@ -52,6 +53,7 @@ export class BridgeConnection {
   private readonly listeners = new Set<Listener>();
   private readonly messageListeners = new Set<MessageListener>();
   private port: NativeBridgePort | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   private snapshot: BridgeConnectionSnapshot = {
     connected: false,
     ready: false,
@@ -91,6 +93,7 @@ export class BridgeConnection {
     } catch (error) {
       const message = errorMessage(error, "Bridge post failed");
       this.port = null;
+      this.stopHeartbeat();
       this.setSnapshot({
         connected: false,
         ready: false,
@@ -109,6 +112,7 @@ export class BridgeConnection {
       this.port = port;
       port.onMessage.addListener((message) => this.handleMessage(port, message));
       port.onDisconnect.addListener(() => this.handleDisconnect(port));
+      this.startHeartbeat(port);
       this.setSnapshot({ connected: true, ready: false, availability: checkingAvailability });
       return { ok: true };
     } catch (error) {
@@ -126,6 +130,7 @@ export class BridgeConnection {
   retry(): PostResult {
     const stalePort = this.port;
     this.port = null;
+    this.stopHeartbeat();
     stalePort?.disconnect();
     return this.connect();
   }
@@ -133,6 +138,7 @@ export class BridgeConnection {
   disconnect(): void {
     const currentPort = this.port;
     this.port = null;
+    this.stopHeartbeat();
     currentPort?.disconnect();
     this.setUnavailableSnapshot(bridgeUnavailableMessage);
   }
@@ -170,7 +176,34 @@ export class BridgeConnection {
   private handleDisconnect(port: NativeBridgePort): void {
     if (this.port !== port) return;
     this.port = null;
+    this.stopHeartbeat();
     this.setUnavailableSnapshot(bridgeUnavailableMessage);
+  }
+
+  private startHeartbeat(port: NativeBridgePort): void {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.port !== port) return;
+      try {
+        port.postMessage({ type: "heartbeat", version: 2 } satisfies ExtensionToBridge);
+      } catch (error) {
+        const message = errorMessage(error, "Bridge heartbeat failed");
+        if (this.port === port) this.port = null;
+        this.stopHeartbeat();
+        this.setSnapshot({
+          connected: false,
+          ready: false,
+          setupError: message,
+          availability: { status: "error", message }
+        });
+      }
+    }, BRIDGE_HEARTBEAT_INTERVAL_MS);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer === undefined) return;
+    clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
   }
 
   private setSnapshot(snapshot: BridgeConnectionSnapshot): void {

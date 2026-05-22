@@ -1,14 +1,18 @@
 import { createBridge } from "./index.js";
+import type { AgentProvider } from "./session-manager.js";
 import { PROTOCOL_VERSION } from "@sidra/protocol";
 import { BRIDGE_HARD_PAYLOAD_BYTE_LIMIT, exceedsPayloadByteLimit, payloadTooLargeError } from "./payload-limit.js";
 
 type NativeMessagingBridge = {
   handleMessage(message: unknown): Promise<void>;
+  closeConnection?(reason: "native_disconnect"): Promise<void>;
 };
 
 type RunNativeMessagingBridgeOptions = {
   bridge?: NativeMessagingBridge;
+  provider?: AgentProvider;
   hardPayloadByteLimit?: number;
+  heartbeatTimeoutMs?: number;
 };
 
 export function runNativeMessagingBridge(
@@ -19,9 +23,17 @@ export function runNativeMessagingBridge(
   const hardPayloadByteLimit = options.hardPayloadByteLimit ?? BRIDGE_HARD_PAYLOAD_BYTE_LIMIT;
   const bridge =
     options.bridge ??
-    createBridge({ emit: (message) => writeNativeMessage(output, message) }, undefined, { hardPayloadByteLimit });
+    createBridge(
+      { emit: (message) => writeNativeMessage(output, message) },
+      options.provider,
+      {
+        hardPayloadByteLimit,
+        heartbeatTimeoutMs: options.heartbeatTimeoutMs
+      }
+    );
   let buffer = Buffer.alloc(0);
   let oversizedBytesToDiscard = 0;
+  let cleanupStarted = false;
 
   writeNativeMessage(output, { type: "bridge.ready", version: PROTOCOL_VERSION });
 
@@ -100,6 +112,16 @@ export function runNativeMessagingBridge(
       enqueueRawMessage(raw);
     }
   });
+
+  input.on("end", cleanupNativeConnection);
+  input.on("close", cleanupNativeConnection);
+  input.on("error", cleanupNativeConnection);
+
+  function cleanupNativeConnection() {
+    if (cleanupStarted) return;
+    cleanupStarted = true;
+    void bridge.closeConnection?.("native_disconnect").catch(() => undefined);
+  }
 }
 
 export function writeNativeMessage(output: NodeJS.WritableStream, message: unknown) {

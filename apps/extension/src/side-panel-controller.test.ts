@@ -597,6 +597,106 @@ describe("SidePanelController", () => {
     expect(controller.getSnapshot().activeSession.clientSessionId).toBe(firstSessionId);
   });
 
+  it("shutdown_disconnects_bridge_and_clears_url_sessions", () => {
+    const { controller, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    controller.updateDraftPrompt("draft");
+    controller.sendPrompt("first");
+
+    (controller as typeof controller & { shutdown(): void }).shutdown();
+
+    expect(controller.getSnapshot().activeSession.clientSessionId).toBe("");
+    expect(controller.getSnapshot().activeSession.draftPrompt).toBe("");
+    expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
+    expect(controller.getSnapshot().bridge.connected).toBe(false);
+  });
+
+  it("shutdown_is_idempotent_and_ignores_later_source_updates", () => {
+    const { controller, ports, activePage } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+
+    controller.shutdown();
+    controller.shutdown();
+    activePage.emit(pageIdentity("https://example.com/after-shutdown"));
+
+    expect(controller.getSnapshot().activeSession.clientSessionId).toBe("");
+    expect(controller.getSnapshot().activePage).not.toMatchObject({ pageKey: "https://example.com/after-shutdown" });
+  });
+
+  it("shutdown_prevents_in_flight_capture_from_recreating_sessions", async () => {
+    let resolveCapture: ((result: CaptureDocumentResult) => void) | undefined;
+    const captureService = new FakeCaptureService();
+    captureService.captureActivePageDocument = () =>
+      new Promise<CaptureDocumentResult>((resolve) => {
+        resolveCapture = resolve;
+      });
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+
+    const send = controller.captureAndSend("summarize");
+    controller.shutdown();
+    resolveCapture?.({
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/captured-after-shutdown"),
+      capturedDocument: capturedDocument()
+    });
+
+    await expect(send).resolves.toBe(false);
+    expect(controller.getSnapshot().activeSession.clientSessionId).toBe("");
+    expect(ports[0].postedMessages).toEqual([]);
+  });
+
+  it("shutdown_ignores_late_settings_readiness", async () => {
+    const settingsStore = new FakeSettingsStore(1_000);
+    settingsStore.holdReadiness();
+    const { controller, ports } = createHarnessWithOptions({ settingsStore });
+    ports[0].emitMessage(bridgeReady());
+    const listener = vi.fn();
+    controller.subscribe(listener);
+
+    controller.shutdown();
+    listener.mockClear();
+    settingsStore.resolveReadiness();
+    await waitForControllerSettings();
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("native_disconnect_preserves_visible_url_sessions_and_marks_them_disconnected", () => {
+    const { controller, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    controller.updateDraftPrompt("draft");
+    controller.sendPrompt("first");
+    ports[0].emitMessage(sessionStarted());
+
+    ports[0].disconnect();
+
+    expect(controller.getSnapshot().activeSession).toMatchObject({
+      clientSessionId: "client-1",
+      draftPrompt: "",
+      sessionStarted: false,
+      starting: false
+    });
+    expect(controller.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({ role: "status", text: "Bridge disconnected" })
+    );
+  });
+
+  it("retry_after_native_disconnect_preserves_visible_url_sessions", () => {
+    const { controller, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    controller.updateDraftPrompt("draft");
+    ports[0].disconnect();
+
+    controller.retryBridge();
+    ports[1].emitMessage(bridgeReady());
+
+    expect(controller.getSnapshot().activeSession).toMatchObject({
+      clientSessionId: "client-1",
+      draftPrompt: "draft"
+    });
+  });
+
   it("retryBridge returns to usable chat after bridge.ready", () => {
     const ports: FakePort[] = [];
     const connectNative = vi

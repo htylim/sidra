@@ -1137,6 +1137,416 @@ describe("BridgeSessionManager reset and close", () => {
   });
 });
 
+describe("BridgeSessionManager connection cleanup", () => {
+  it("closeAll_closes_every_provider_session_for_the_connection", async () => {
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.startSession("page-2", "codex");
+    await manager.closeAllSessions("heartbeat_timeout");
+
+    expect(provider.createdSessions[0]?.closeCount).toBe(1);
+    expect(provider.createdSessions[1]?.closeCount).toBe(1);
+  });
+
+  it("closeAll_during_session_start_closes_late_created_provider_session", async () => {
+    const provider = createDeferredProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+    const session = new FakeAgentSession();
+
+    const start = manager.startSession("page-1", "codex");
+    await provider.waitForRequestCount(1);
+    const cleanup = manager.closeAllSessions("native_disconnect");
+    provider.requests[0]?.resolve(session);
+    await Promise.all([start, cleanup]);
+
+    expect(session.closeCount).toBe(1);
+  });
+
+  it("closeAll_aborts_in_flight_turns_and_rejects_pending_permissions", async () => {
+    const provider = createFakeProvider(() => new PermissionAgentSession());
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    const send = manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForPermissionRequest();
+    await manager.closeAllSessions("heartbeat_timeout");
+    await send;
+
+    expect(provider.createdSessions[0]?.sendSignals[0]?.aborted).toBe(true);
+    expect(provider.createdSessions[0]?.permissionDecisions).toEqual([]);
+    expect(provider.createdSessions[0]?.closeCount).toBe(1);
+  });
+
+  it("closeAll_clears_sessions_so_later_send_reports_session_not_started", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    await manager.closeAllSessions("native_disconnect");
+    await manager.sendPrompt("page-1", { prompt: "After cleanup" });
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Session has not been started",
+      code: "session_not_started"
+    });
+  });
+
+  it("closeAll_is_idempotent", async () => {
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.closeAllSessions("native_disconnect");
+    await manager.closeAllSessions("native_disconnect");
+
+    expect(provider.createdSessions[0]?.closeCount).toBe(1);
+  });
+
+  it("cleanup_does_not_emit_prompt_or_page_content", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const stream = new ManualAsyncEvents();
+    const provider = createFakeProvider(() => new FakeAgentSession(stream));
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    const send = manager.sendPrompt("page-1", {
+      prompt: "Sensitive prompt",
+      pageContext: readablePageContext()
+    });
+    await provider.createdSessions[0]?.waitForSendCount(1);
+    stream.finish();
+    await manager.closeAllSessions("heartbeat_timeout");
+    await send;
+
+    expect(JSON.stringify(emitted)).not.toContain("Sensitive prompt");
+    expect(JSON.stringify(emitted)).not.toContain("Captured page text");
+  });
+
+  it("closeAll_closes_only_sessions_owned_by_this_manager", async () => {
+    const firstProvider = createFakeProvider();
+    const secondProvider = createFakeProvider();
+    const firstManager = new BridgeSessionManager({ provider: firstProvider, emit: () => {} });
+    const secondManager = new BridgeSessionManager({ provider: secondProvider, emit: () => {} });
+
+    await firstManager.startSession("page-1", "codex");
+    await secondManager.startSession("page-1", "codex");
+    await firstManager.closeAllSessions("native_disconnect");
+
+    expect(firstProvider.createdSessions[0]?.closeCount).toBe(1);
+    expect(secondProvider.createdSessions[0]?.closeCount).toBe(0);
+  });
+
+  it("closeAll_does_not_wait_for_never_resolving_session_start", async () => {
+    const manager = new BridgeSessionManager({ provider: createNeverResolvingProvider(), emit: () => {} });
+
+    void manager.startSession("page-1", "codex");
+    await expect(withTimeout(manager.closeAllSessions("heartbeat_timeout"))).resolves.toBeUndefined();
+  });
+
+  it("closeAll_closes_provider_without_waiting_for_stream_to_finish", async () => {
+    const session = new CloseUnblocksAgentSession();
+    const provider = createFakeProvider(() => session);
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    const send = manager.sendPrompt("page-1", { prompt: "First" });
+    await session.waitForSendCount(1);
+    await expect(withTimeout(manager.closeAllSessions("native_disconnect"))).resolves.toBeUndefined();
+    await send;
+
+    expect(session.closeCount).toBe(1);
+  });
+
+  it("closeAll_does_not_wait_for_never_resolving_provider_close", async () => {
+    const provider = createFakeProvider(() => new HangingCloseAgentSession());
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await expect(withTimeout(manager.closeAllSessions("native_disconnect"))).resolves.toBeUndefined();
+
+    expect(provider.createdSessions[0]?.closeCount).toBe(1);
+  });
+
+  it("queued_start_after_closeAll_does_not_create_a_session", async () => {
+    const provider = createDeferredProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+    const firstSession = new FakeAgentSession();
+
+    const firstStart = manager.startSession("page-1", "codex");
+    await provider.waitForRequestCount(1);
+    const secondStart = manager.startSession("page-1", "codex");
+    await manager.closeAllSessions("native_disconnect");
+    provider.requests[0]?.resolve(firstSession);
+    await Promise.all([firstStart, secondStart]);
+
+    expect(provider.requests).toHaveLength(1);
+    expect(firstSession.closeCount).toBe(1);
+  });
+
+  it("queued_reset_after_closeAll_does_not_create_a_session", async () => {
+    const provider = createDeferredProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+    const firstSession = new FakeAgentSession();
+
+    const start = manager.startSession("page-1", "codex");
+    await provider.waitForRequestCount(1);
+    const reset = manager.resetSession("page-1");
+    await manager.closeAllSessions("native_disconnect");
+    provider.requests[0]?.resolve(firstSession);
+    await Promise.all([start, reset]);
+
+    expect(provider.requests).toHaveLength(1);
+    expect(firstSession.closeCount).toBe(1);
+  });
+
+  it("closeAll_continues_when_provider_close_throws_synchronously", async () => {
+    const provider = createFakeProvider(() => new ThrowingCloseAgentSession());
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.startSession("page-2", "codex");
+    await manager.closeAllSessions("native_disconnect");
+
+    expect(provider.createdSessions[0]?.closeCount).toBe(1);
+    expect(provider.createdSessions[1]?.closeCount).toBe(1);
+  });
+
+  it("start_after_closeAll_does_not_create_a_session", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.closeAllSessions("native_disconnect");
+    await manager.startSession("page-1", "codex");
+
+    expect(provider.createdSessions).toEqual([]);
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Session has not been started",
+      code: "session_not_started"
+    });
+  });
+
+  it("reset_after_closeAll_does_not_create_a_session", async () => {
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.closeAllSessions("native_disconnect");
+    await manager.resetSession("page-1");
+
+    expect(provider.createdSessions).toEqual([]);
+  });
+
+  it("send_after_closeAll_during_hung_start_reports_session_not_started", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const manager = new BridgeSessionManager({
+      provider: createNeverResolvingProvider(),
+      emit: (message) => emitted.push(message)
+    });
+
+    void manager.startSession("page-1", "codex");
+    await manager.closeAllSessions("heartbeat_timeout");
+    await expect(withTimeout(manager.sendPrompt("page-1", { prompt: "After cleanup" }))).resolves.toBeUndefined();
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Session has not been started",
+      code: "session_not_started"
+    });
+  });
+
+  it("closeAll_reports_session_not_started_for_pending_start", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const manager = new BridgeSessionManager({
+      provider: createNeverResolvingProvider(),
+      emit: (message) => emitted.push(message)
+    });
+
+    void manager.startSession("page-1", "codex");
+    await manager.closeAllSessions("heartbeat_timeout");
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Session has not been started",
+      code: "session_not_started"
+    });
+  });
+
+  it("replacement_waits_for_old_provider_session_close_before_create", async () => {
+    const closeGate = deferred<void>();
+    const provider = createFakeProvider(() => {
+      if (provider.createdSessions.length === 0) return new GatedCloseAgentSession(closeGate.promise);
+      return new FakeAgentSession();
+    });
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    const reset = manager.resetSession("page-1");
+    await Promise.resolve();
+
+    expect(provider.createdSessions).toHaveLength(1);
+    closeGate.resolve();
+    await reset;
+    expect(provider.createdSessions).toHaveLength(2);
+  });
+
+  it("closeAll_suppresses_late_provider_start_failure", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createDeferredProvider();
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    const start = manager.startSession("page-1", "codex");
+    await provider.waitForRequestCount(1);
+    await manager.closeAllSessions("heartbeat_timeout");
+    provider.requests[0]?.reject(new Error("late failure"));
+    await start;
+
+    expect(emitted).toEqual([
+      {
+        type: "session.error",
+        version: 2,
+        clientSessionId: "page-1",
+        message: "Session has not been started",
+        code: "session_not_started"
+      }
+    ]);
+  });
+
+  it("cancel_after_closeAll_reports_session_not_started", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const manager = new BridgeSessionManager({
+      provider: createFakeProvider(),
+      emit: (message) => emitted.push(message)
+    });
+
+    await manager.closeAllSessions("heartbeat_timeout");
+    await manager.cancelTurn("page-1");
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Session has not been started",
+      code: "session_not_started"
+    });
+  });
+
+  it("queued_cancel_after_closeAll_reports_session_not_started", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createDeferredProvider();
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    const start = manager.startSession("page-1", "codex");
+    await provider.waitForRequestCount(1);
+    const cancel = manager.cancelTurn("page-1");
+    await manager.closeAllSessions("heartbeat_timeout");
+    provider.requests[0]?.resolve(new FakeAgentSession());
+    await Promise.all([start, cancel]);
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Session has not been started",
+      code: "session_not_started"
+    });
+    expect(emitted).not.toContainEqual(
+      expect.objectContaining({ type: "session.error", code: "no_in_flight_turn" })
+    );
+  });
+
+  it("closeSession_does_not_wait_for_never_resolving_session_start", async () => {
+    const manager = new BridgeSessionManager({ provider: createNeverResolvingProvider(), emit: () => {} });
+
+    void manager.startSession("page-1", "codex");
+    await expect(withTimeout(manager.closeSession("page-1"))).resolves.toBeUndefined();
+  });
+
+  it("cancel_does_not_wait_for_provider_stream_to_finish", async () => {
+    const provider = createFakeProvider(() => new FakeAgentSession(new ManualAsyncEvents()));
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    void manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForSendCount(1);
+
+    await expect(withTimeout(manager.cancelTurn("page-1"))).resolves.toBeUndefined();
+    expect(provider.createdSessions[0]?.sendSignals[0]?.aborted).toBe(true);
+  });
+
+  it("reset_can_recover_after_cancelled_provider_stream_ignores_abort", async () => {
+    const firstStream = new ManualAsyncEvents();
+    let createCount = 0;
+    const provider = createFakeProvider(() => {
+      createCount += 1;
+      return new FakeAgentSession(createCount === 1 ? firstStream : undefined);
+    });
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    void manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForSendCount(1);
+    await manager.cancelTurn("page-1");
+    await manager.resetSession("page-1");
+
+    expect(provider.createdSessions).toHaveLength(2);
+    expect(provider.createdSessions[0]?.sendSignals[0]?.aborted).toBe(true);
+  });
+
+  it("send_after_cancel_is_rejected_until_ignored_provider_stream_ends", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const provider = createFakeProvider(() => new FakeAgentSession(new ManualAsyncEvents()));
+    const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
+
+    await manager.startSession("page-1", "codex");
+    void manager.sendPrompt("page-1", { prompt: "First" });
+    await provider.createdSessions[0]?.waitForSendCount(1);
+    await manager.cancelTurn("page-1");
+    await manager.sendPrompt("page-1", { prompt: "Second" });
+
+    expect(provider.createdSessions[0]?.sentInputs).toEqual([{ prompt: "First" }]);
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "A turn is already in flight for this session",
+      code: "turn_in_flight"
+    });
+  });
+
+  it("closeSession_during_hung_start_allows_later_start_for_same_client_session", async () => {
+    const provider = createDeferredProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+    const firstSession = new FakeAgentSession();
+    const secondSession = new FakeAgentSession();
+
+    const firstStart = manager.startSession("page-1", "codex");
+    await provider.waitForRequestCount(1);
+    await manager.closeSession("page-1");
+    const secondStart = manager.startSession("page-1", "codex");
+    await provider.waitForRequestCount(2);
+    provider.requests[1]?.resolve(secondSession);
+    await secondStart;
+    provider.requests[0]?.resolve(firstSession);
+    await firstStart;
+
+    expect(firstSession.closeCount).toBe(1);
+    expect(secondSession.closeCount).toBe(0);
+  });
+});
+
 function createFakeProvider(createSession: () => FakeAgentSession = () => new FakeAgentSession()) {
   const createdSessions: FakeAgentSession[] = [];
   const provider: AgentProvider & { createdSessions: FakeAgentSession[] } = {
@@ -1156,6 +1566,16 @@ function createRejectingProvider(error: unknown): AgentProvider {
     id: "codex",
     async createSession() {
       throw error;
+    }
+  };
+}
+
+function createNeverResolvingProvider(): AgentProvider {
+  return {
+    id: "codex",
+    async createSession() {
+      await new Promise<never>(() => undefined);
+      throw new Error("unreachable");
     }
   };
 }
@@ -1278,6 +1698,42 @@ class RejectingCloseAgentSession extends FakeAgentSession {
   override async close() {
     this.closeCount += 1;
     throw new Error("close failed");
+  }
+}
+
+class HangingCloseAgentSession extends FakeAgentSession {
+  override async close() {
+    this.closeCount += 1;
+    await new Promise<never>(() => undefined);
+  }
+}
+
+class ThrowingCloseAgentSession extends FakeAgentSession {
+  override close(): Promise<void> {
+    this.closeCount += 1;
+    throw new Error("close failed synchronously");
+  }
+}
+
+class GatedCloseAgentSession extends FakeAgentSession {
+  constructor(private readonly closeGate: Promise<void>) {
+    super();
+  }
+
+  override async close() {
+    this.closeCount += 1;
+    await this.closeGate;
+  }
+}
+
+class CloseUnblocksAgentSession extends FakeAgentSession {
+  constructor() {
+    super(new ManualAsyncEvents());
+  }
+
+  override async close() {
+    this.closeCount += 1;
+    this.stream?.finish();
   }
 }
 
@@ -1451,4 +1907,13 @@ function readablePageContext() {
     textLength: "Captured page text".length,
     extractionMethod: "readability" as const
   };
+}
+
+function withTimeout(promise: Promise<void>) {
+  return Promise.race([
+    promise,
+    new Promise<void>((_, reject) => {
+      setTimeout(() => reject(new Error("Timed out waiting for cleanup")), 100);
+    })
+  ]);
 }

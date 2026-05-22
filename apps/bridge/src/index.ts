@@ -10,7 +10,13 @@ import {
   payloadTooLargeError,
   serializedJsonByteLength
 } from "./payload-limit.js";
-import { BridgeSessionManager, type AgentProvider, type AgentSendInput, type AgentSession } from "./session-manager.js";
+import {
+  BridgeSessionManager,
+  type AgentProvider,
+  type AgentSendInput,
+  type AgentSession,
+  type ConnectionCleanupReason
+} from "./session-manager.js";
 
 export type BridgeRuntime = {
   emit(message: BridgeToExtension): void;
@@ -19,10 +25,21 @@ export type BridgeRuntime = {
 export function createBridge(
   runtime: BridgeRuntime,
   provider: AgentProvider = createMockProvider(),
-  options: { hardPayloadByteLimit?: number } = {}
+  options: {
+    hardPayloadByteLimit?: number;
+    heartbeatTimeoutMs?: number;
+    setTimeout?: typeof setTimeout;
+    clearTimeout?: typeof clearTimeout;
+  } = {}
 ) {
   const sessions = new BridgeSessionManager({ provider, emit: (message) => runtime.emit(message) });
   const hardPayloadByteLimit = options.hardPayloadByteLimit ?? BRIDGE_HARD_PAYLOAD_BYTE_LIMIT;
+  const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 30_000;
+  const scheduleTimeout = options.setTimeout ?? setTimeout;
+  const cancelTimeout = options.clearTimeout ?? clearTimeout;
+  let heartbeatTimeout: ReturnType<typeof setTimeout> | undefined;
+
+  scheduleHeartbeatTimeout();
 
   async function handleMessage(input: unknown): Promise<void> {
     const payloadSize = serializedJsonByteLength(input);
@@ -69,11 +86,30 @@ export function createBridge(
         await sessions.respondToPermission(message.clientSessionId, message.requestId, message.decision);
         return;
       case "heartbeat":
+        scheduleHeartbeatTimeout();
         return;
     }
   }
 
-  return { handleMessage };
+  function scheduleHeartbeatTimeout(): void {
+    stopHeartbeatTimeout();
+    heartbeatTimeout = scheduleTimeout(() => {
+      void closeConnection("heartbeat_timeout").catch(() => undefined);
+    }, heartbeatTimeoutMs);
+  }
+
+  function stopHeartbeatTimeout(): void {
+    if (heartbeatTimeout === undefined) return;
+    cancelTimeout(heartbeatTimeout);
+    heartbeatTimeout = undefined;
+  }
+
+  async function closeConnection(reason: ConnectionCleanupReason): Promise<void> {
+    stopHeartbeatTimeout();
+    await sessions.closeAllSessions(reason);
+  }
+
+  return { handleMessage, closeConnection };
 }
 
 function createMockProvider(): AgentProvider {

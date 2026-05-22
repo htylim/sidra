@@ -5,6 +5,15 @@ import { SidePanelView } from "./side-panel-view";
 import "./styles.css";
 
 const sidePanelController = createChromeSidePanelController();
+let shutdownStarted = false;
+function shutdownSidePanel(): void {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  sidePanelController.shutdown();
+}
+
+window.addEventListener("pagehide", shutdownSidePanel);
+window.addEventListener("beforeunload", shutdownSidePanel);
 
 function SidePanel() {
   const snapshot = useSyncExternalStore(

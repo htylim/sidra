@@ -1,5 +1,5 @@
 import type { BridgeToExtension, ExtensionToBridge } from "@sidra/protocol";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BridgeConnection, type NativeBridgePort, SIDRA_NATIVE_HOST } from "./connection";
 
 class FakePort implements NativeBridgePort {
@@ -59,6 +59,10 @@ function createHarness() {
 }
 
 describe("BridgeConnection", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("connects explicitly and enters checking before bridge.ready", () => {
     const { connection, connectNative, ports } = createHarness();
 
@@ -314,6 +318,84 @@ describe("BridgeConnection", () => {
       ready: false,
       setupError: "post failed",
       availability: { status: "error", message: "post failed" }
+    });
+  });
+
+  it("starts_heartbeat_loop_when_native_port_connects", () => {
+    vi.useFakeTimers();
+    const { connection, ports } = createHarness();
+
+    connection.connect();
+    vi.advanceTimersByTime(10_000);
+
+    expect(ports[0].postedMessages).toContainEqual({ type: "heartbeat", version: 2 });
+  });
+
+  it("posts_heartbeat_only_to_the_current_native_port", () => {
+    vi.useFakeTimers();
+    const { connection, ports } = createHarness();
+
+    connection.connect();
+    connection.retry();
+    vi.advanceTimersByTime(10_000);
+
+    expect(ports[0].postedMessages).toEqual([]);
+    expect(ports[1].postedMessages).toEqual([{ type: "heartbeat", version: 2 }]);
+  });
+
+  it("stops_heartbeat_loop_when_native_port_disconnects", () => {
+    vi.useFakeTimers();
+    const { connection, ports } = createHarness();
+
+    connection.connect();
+    ports[0].emitDisconnect();
+    vi.advanceTimersByTime(30_000);
+
+    expect(ports[0].postedMessages).toEqual([]);
+  });
+
+  it("retry_replaces_heartbeat_loop_with_fresh_native_port", () => {
+    vi.useFakeTimers();
+    const { connection, ports } = createHarness();
+
+    connection.connect();
+    vi.advanceTimersByTime(10_000);
+    connection.retry();
+    vi.advanceTimersByTime(10_000);
+
+    expect(ports[0].postedMessages).toEqual([{ type: "heartbeat", version: 2 }]);
+    expect(ports[1].postedMessages).toEqual([{ type: "heartbeat", version: 2 }]);
+  });
+
+  it("disconnect_stops_heartbeat_loop_before_closing_port", () => {
+    vi.useFakeTimers();
+    const { connection, ports } = createHarness();
+
+    connection.connect();
+    connection.disconnect();
+    vi.advanceTimersByTime(10_000);
+
+    expect(ports[0].postedMessages).toEqual([]);
+  });
+
+  it("heartbeat_post_failure_marks_bridge_unavailable_and_stops_loop", () => {
+    vi.useFakeTimers();
+    const port = new FakePort();
+    vi.spyOn(port, "postMessage").mockImplementation(() => {
+      throw new Error("heartbeat failed");
+    });
+    const connection = new BridgeConnection({ connectNative: () => port });
+
+    connection.connect();
+    vi.advanceTimersByTime(10_000);
+    vi.advanceTimersByTime(10_000);
+
+    expect(port.postMessage).toHaveBeenCalledTimes(1);
+    expect(connection.getSnapshot()).toMatchObject({
+      connected: false,
+      ready: false,
+      setupError: "heartbeat failed",
+      availability: { status: "error", message: "heartbeat failed" }
     });
   });
 });
