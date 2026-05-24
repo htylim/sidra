@@ -32,7 +32,9 @@ describe("bridge runtime composition", () => {
         cwd: "/tmp/sidra-workspace",
         approvalPolicy: "on-request",
         approvalsReviewer: "user",
-        sandbox: "read-only"
+        sandbox: "read-only",
+        serviceName: "sidra",
+        ephemeral: false
       }
     });
   });
@@ -234,6 +236,9 @@ function createFakeRunningAppServer(options: { accountResponse?: unknown } = {})
       if (method === "account/read") return options.accountResponse ?? { account: { id: "account-1" }, requiresOpenaiAuth: false };
       if (method === "thread/start") return { thread: { id: "thread-1" } };
       return {};
+    },
+    async requestWithTimeout(method: string, params: unknown) {
+      return this.request(method, params);
     },
     onNotification(handler: (notification: never) => void) {
       notificationHandlers.add(handler);

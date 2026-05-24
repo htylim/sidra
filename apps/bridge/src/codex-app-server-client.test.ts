@@ -104,6 +104,53 @@ describe("CodexAppServerClient", () => {
   });
 });
 
+describe("CodexAppServerClient request timeout", () => {
+  it("rejects_and_forgets_timed_out_requests", async () => {
+    const protocolError = vi.fn();
+    const peer = createPeer();
+    const client = new CodexAppServerClient({ ...peer.clientStreams, onProtocolError: protocolError });
+
+    const response = client.requestWithTimeout("thread/name/set", { threadId: "thread-1", name: "Sidra: Test" }, 5);
+    await peer.readMessage();
+
+    await expect(response).rejects.toThrow("Codex App Server request timed out");
+    peer.writeMessage({ id: 1, result: {} });
+    await Promise.resolve();
+    expect(protocolError).not.toHaveBeenCalled();
+  });
+
+  it("ignores_late_response_for_timed_out_request_without_protocol_error", async () => {
+    const protocolError = vi.fn();
+    const peer = createPeer();
+    const client = new CodexAppServerClient({ ...peer.clientStreams, onProtocolError: protocolError });
+
+    const response = client.requestWithTimeout("thread/name/set", { threadId: "thread-1", name: "Sidra: Test" }, 5);
+    const request = await peer.readMessage();
+    await expect(response).rejects.toThrow("Codex App Server request timed out");
+    peer.writeMessage({ id: request.id, result: {} });
+    await Promise.resolve();
+
+    expect(protocolError).not.toHaveBeenCalled();
+  });
+
+  it("evicts_old_timed_out_request_ids_from_the_late_response_cache", async () => {
+    const protocolError = vi.fn();
+    const peer = createPeer();
+    const client = new CodexAppServerClient({ ...peer.clientStreams, onProtocolError: protocolError });
+
+    for (let requestIndex = 0; requestIndex < 260; requestIndex += 1) {
+      const response = client.requestWithTimeout("thread/name/set", { threadId: "thread-1", name: `Sidra: ${requestIndex}` }, 1);
+      await peer.readMessage();
+      await expect(response).rejects.toThrow("Codex App Server request timed out");
+    }
+
+    peer.writeMessage({ id: 1, result: {} });
+    await Promise.resolve();
+
+    expect(protocolError).toHaveBeenCalledWith(expect.objectContaining({ message: "Codex App Server emitted a response for an unknown request" }));
+  });
+});
+
 function createPeer() {
   const clientInput = new PassThrough();
   const clientOutput = new PassThrough();

@@ -29,7 +29,10 @@ type AppServerResponse = {
 type PendingRequest = {
   resolve(result: unknown): void;
   reject(error: Error): void;
+  timeout?: ReturnType<typeof setTimeout>;
 };
+
+const MAX_TIMED_OUT_REQUEST_IDS = 256;
 
 export type CodexAppServerClientOptions = {
   input: NodeJS.ReadableStream;
@@ -47,6 +50,8 @@ export type CodexAppServerClientOptions = {
  */
 export class CodexAppServerClient {
   private readonly pendingRequests = new Map<AppServerMessageId, PendingRequest>();
+  private readonly timedOutRequestIds = new Set<AppServerMessageId>();
+  private readonly timedOutRequestIdQueue: AppServerMessageId[] = [];
   private readonly notificationHandlers = new Set<(notification: AppServerNotification) => void>();
   private readonly serverRequestHandlers = new Set<(request: AppServerRequest) => void>();
   private nextRequestId = 1;
@@ -75,10 +80,28 @@ export class CodexAppServerClient {
   request(method: string, params: unknown): Promise<unknown> {
     if (this.closed) return Promise.reject(new Error("Codex App Server connection closed"));
 
+    return this.sendRequest(method, params);
+  }
+
+  requestWithTimeout(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
+    if (this.closed) return Promise.reject(new Error("Codex App Server connection closed"));
+
+    return this.sendRequest(method, params, timeoutMs);
+  }
+
+  private sendRequest(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     const id = this.nextRequestId++;
     const message: AppServerRequest = { id, method, params };
     const response = new Promise((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve, reject });
+      const pending: PendingRequest = { resolve, reject };
+      if (timeoutMs !== undefined) {
+        pending.timeout = setTimeout(() => {
+          this.pendingRequests.delete(id);
+          this.rememberTimedOutRequestId(id);
+          reject(new Error("Codex App Server request timed out"));
+        }, timeoutMs);
+      }
+      this.pendingRequests.set(id, pending);
     });
     this.writeMessage(message);
     return response;
@@ -173,11 +196,13 @@ export class CodexAppServerClient {
   private resolveResponse(response: AppServerResponse): void {
     const pending = this.pendingRequests.get(response.id);
     if (!pending) {
+      if (this.timedOutRequestIds.delete(response.id)) return;
       this.reportProtocolError("Codex App Server emitted a response for an unknown request");
       return;
     }
 
     this.pendingRequests.delete(response.id);
+    if (pending.timeout) clearTimeout(pending.timeout);
     if (response.error) {
       pending.reject(new Error(response.error.message ?? "Codex App Server request failed"));
       return;
@@ -190,7 +215,10 @@ export class CodexAppServerClient {
     this.closed = true;
     const pendingRequests = Array.from(this.pendingRequests.values());
     this.pendingRequests.clear();
+    this.timedOutRequestIds.clear();
+    this.timedOutRequestIdQueue.length = 0;
     for (const pending of pendingRequests) {
+      if (pending.timeout) clearTimeout(pending.timeout);
       pending.reject(new Error("Codex App Server connection closed"));
     }
   }
@@ -201,6 +229,15 @@ export class CodexAppServerClient {
 
   private reportProtocolError(message: string): void {
     this.options.onProtocolError?.(new Error(message));
+  }
+
+  private rememberTimedOutRequestId(id: AppServerMessageId): void {
+    this.timedOutRequestIds.add(id);
+    this.timedOutRequestIdQueue.push(id);
+    while (this.timedOutRequestIdQueue.length > MAX_TIMED_OUT_REQUEST_IDS) {
+      const evictedId = this.timedOutRequestIdQueue.shift();
+      if (evictedId !== undefined) this.timedOutRequestIds.delete(evictedId);
+    }
   }
 }
 

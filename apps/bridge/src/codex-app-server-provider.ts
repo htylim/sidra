@@ -1,9 +1,18 @@
-import type { AgentProvider, AgentSendInput, AgentSession, AgentPermissionRequester, SafeProviderTurnEvent } from "./session-manager.js";
+import type {
+  AgentProvider,
+  AgentSendInput,
+  AgentSession,
+  AgentPermissionRequester,
+  ProviderDisplayTitleSource,
+  SafeProviderTurnEvent
+} from "./session-manager.js";
 import type { AppServerNotification, AppServerRequest } from "./codex-app-server-client.js";
 import type { SafeAgentActivity } from "@sidra/protocol";
+import { buildSidraCodexThreadTitle } from "./codex-thread-title.js";
 
 type AppServerClientBoundary = {
   request(method: string, params: unknown): Promise<unknown>;
+  requestWithTimeout(method: string, params: unknown, timeoutMs: number): Promise<unknown>;
   onNotification(handler: (notification: AppServerNotification) => void): () => void;
   onServerRequest(handler: (request: AppServerRequest) => void): () => void;
   respond(id: number | string, result: unknown): void;
@@ -29,22 +38,47 @@ type PendingTurnRead = {
   reject(error: Error): void;
 };
 
+const SIDRA_CODEX_SERVICE_NAME = "sidra";
+const DEFAULT_SIDRA_CODEX_THREAD_EPHEMERAL = false;
+const SIDRA_CODEX_THREAD_NAME_SET_TIMEOUT_MS = 500;
+
 export function createCodexAppServerProvider(options: CodexAppServerProviderOptions): AgentProvider {
   return {
     id: "codex",
     async createSession() {
-      const response = await options.appServer.request("thread/start", {
-        cwd: options.workingDirectory,
-        approvalPolicy: "on-request",
-        approvalsReviewer: "user",
-        sandbox: "read-only"
-      });
+      const response = await startThread(options.appServer, options.workingDirectory);
       return new CodexAppServerSession(options.appServer, extractThreadId(response), options.workingDirectory);
     }
   };
 }
 
+async function startThread(appServer: AppServerClientBoundary, workingDirectory: string): Promise<unknown> {
+  const legacyParams = {
+    cwd: workingDirectory,
+    approvalPolicy: "on-request",
+    approvalsReviewer: "user",
+    sandbox: "read-only"
+  };
+  try {
+    return await appServer.request("thread/start", {
+      ...legacyParams,
+      serviceName: SIDRA_CODEX_SERVICE_NAME,
+      ephemeral: DEFAULT_SIDRA_CODEX_THREAD_EPHEMERAL
+    });
+  } catch (error) {
+    if (!isThreadStartCompatibilityError(error)) throw error;
+    return appServer.request("thread/start", legacyParams);
+  }
+}
+
+function isThreadStartCompatibilityError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /Invalid params|unknown field|failed to deserialize/i.test(message);
+}
+
 class CodexAppServerSession implements AgentSession {
+  private threadNameDecisionMade = false;
+
   constructor(
     private readonly appServer: AppServerClientBoundary,
     private readonly threadId: string,
@@ -56,12 +90,32 @@ class CodexAppServerSession implements AgentSession {
     signal: AbortSignal,
     permissions: AgentPermissionRequester
   ): AsyncIterable<SafeProviderTurnEvent> {
+    await this.decideThreadNameOnce(input.displayTitleSource);
     const turn = new CodexAppServerTurn(this.appServer, this.threadId, this.workingDirectory);
     yield* turn.run(input, signal, permissions);
   }
 
   async close(): Promise<void> {
     await this.appServer.request("thread/unsubscribe", { threadId: this.threadId });
+  }
+
+  private async decideThreadNameOnce(source: ProviderDisplayTitleSource | undefined): Promise<void> {
+    if (this.threadNameDecisionMade) return;
+    this.threadNameDecisionMade = true;
+    if (!source) return;
+
+    const title = buildSidraCodexThreadTitle(source);
+    if (!title) return;
+
+    try {
+      await this.appServer.requestWithTimeout(
+        "thread/name/set",
+        { threadId: this.threadId, name: title },
+        SIDRA_CODEX_THREAD_NAME_SET_TIMEOUT_MS
+      );
+    } catch {
+      // Thread naming is best effort. A naming failure must not block chat.
+    }
   }
 }
 

@@ -4,6 +4,7 @@ import {
   parseAgentEvent,
   type AgentEvent,
   type BridgeToExtension,
+  type PageContextMetadata,
   type PermissionDecision,
   type PermissionRequest,
   type PermissionRequestMetadata,
@@ -13,8 +14,14 @@ import { formatPromptForAgent, type BridgeTurnInput } from "./context-prompt.js"
 
 export type SafeProviderTurnEvent = AgentEvent;
 
+export type ProviderDisplayTitleSource = {
+  prompt: string;
+  pageMetadata?: Pick<PageContextMetadata, "title" | "canonicalUrl" | "url">;
+};
+
 export type AgentSendInput = {
   prompt: string;
+  displayTitleSource?: ProviderDisplayTitleSource;
 };
 
 export type ProviderPermissionRequest = {
@@ -137,8 +144,13 @@ export class BridgeSessionManager {
       done: Promise.resolve()
     };
 
+    const pageMetadata = pickTitlePageMetadata(input.pageContext?.metadata);
+    const displayTitleSource: ProviderDisplayTitleSource = pageMetadata
+      ? { prompt: input.prompt, pageMetadata }
+      : { prompt: input.prompt };
     const providerInput: AgentSendInput = {
-      prompt: formatPromptForAgent(input)
+      prompt: formatPromptForAgent(input),
+      displayTitleSource
     };
 
     const clearInFlight = () => {
@@ -545,4 +557,17 @@ export class BridgeSessionManager {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function pickTitlePageMetadata(
+  metadata: PageContextMetadata | undefined
+): Pick<PageContextMetadata, "title" | "canonicalUrl" | "url"> | undefined {
+  if (!metadata) return undefined;
+
+  const pageMetadata: Pick<PageContextMetadata, "title" | "canonicalUrl" | "url"> = {
+    url: metadata.url
+  };
+  if (metadata.title !== undefined) pageMetadata.title = metadata.title;
+  if (metadata.canonicalUrl !== undefined) pageMetadata.canonicalUrl = metadata.canonicalUrl;
+  return pageMetadata;
 }

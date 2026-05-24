@@ -10,7 +10,7 @@ User types prompt
 -> shared protocol validation
 -> local bridge
 -> provider session manager
--> mock assistant response
+-> Codex App Server
 -> React side panel renders transcript
 ```
 
@@ -64,7 +64,7 @@ What to notice:
 - `side-panel.tsx` creates one controller.
 - `useSyncExternalStore` subscribes React to non-React state.
 - `SidePanelView` receives data and callbacks as props.
-- The view owns local draft text because it is pure UI input state.
+- The view renders draft text from controller state and reports edits through callbacks.
 - The view does not own session startup, bridge readiness, or protocol messages.
 
 Beginner TypeScript ideas:
@@ -74,7 +74,7 @@ Beginner TypeScript ideas:
 
 Beginner React ideas:
 
-- `useState` is used for local UI state.
+- `useState` is used for transient local UI state.
 - `useSyncExternalStore` is used when state lives outside React.
 - The view is easier to test because it is mostly props in, JSX out.
 
@@ -171,7 +171,7 @@ What to notice:
 - `native-messaging.ts` reads and writes Chrome Native Messaging frames.
 - `index.ts` validates protocol messages and dispatches commands.
 - `session-manager.ts` owns provider sessions, in-flight turns, cancel, reset, and close.
-- The current provider is a mock provider that returns `Mock response to: <prompt>`.
+- The production provider talks to `codex app-server` through a bridge-owned adapter.
 
 Beginner Node idea:
 
@@ -203,10 +203,14 @@ Then trace the code:
 11. `BridgeSessionManager.startSession` creates a provider session.
 12. The bridge emits `session.started`.
 13. The extension receives `session.started` and flushes pending prompts as `session.send`.
-14. The mock provider yields `assistant.text.delta` and `assistant.done`.
-15. The extension receives `assistant.text.delta`.
-16. `addAssistantTextDelta` updates the transcript.
-17. React re-renders from the latest snapshot.
+14. `BridgeSessionManager` derives a provider-neutral display-title source from the raw user prompt plus selected page metadata.
+15. `BridgeSessionManager` formats the provider prompt with the untrusted page-context wrapper.
+16. The Codex provider derives a compact Sidra thread title from the display-title source and makes one bounded best-effort `thread/name/set` request before the first `turn/start`.
+17. The Codex provider sends `turn/start` with the formatted provider prompt.
+18. The provider yields `assistant.text.delta` and `assistant.done`.
+19. The extension receives `assistant.text.delta`.
+20. `addAssistantTextDelta` updates the transcript.
+21. React re-renders from the latest snapshot.
 
 ## 4. Exercises
 
@@ -335,7 +339,7 @@ The versioned message contract between extension and bridge.
 
 `Provider`
 
-The agent implementation used by the bridge. The current code uses a mock provider.
+The agent implementation used by the bridge. Production uses the Codex App Server provider. Mock providers are for tests and developer smoke paths.
 
 `Session`
 
@@ -355,7 +359,7 @@ These are the useful artifacts to create next.
 
 2. Guided walkthrough
 
-   A step-by-step trace of one prompt from UI to mock response. This guide now includes the first version.
+   A step-by-step trace of one prompt from UI to provider response. This guide now includes the first version.
 
 3. Exercise ladder
 

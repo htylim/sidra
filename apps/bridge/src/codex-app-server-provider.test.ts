@@ -17,7 +17,9 @@ describe("createCodexAppServerProvider", () => {
           cwd: "/tmp/sidra-workspace",
           approvalPolicy: "on-request",
           approvalsReviewer: "user",
-          sandbox: "read-only"
+          sandbox: "read-only",
+          serviceName: "sidra",
+          ephemeral: false
         }
       }
     ]);
@@ -373,6 +375,206 @@ describe("createCodexAppServerProvider", () => {
   });
 });
 
+describe("Codex App Server thread naming", () => {
+  it("starts_threads_with_sidra_service_name_and_explicit_ephemeral_false", async () => {
+    const appServer = createFakeAppServer();
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+
+    await provider.createSession();
+
+    expect(appServer.requests[0]).toEqual({
+      method: "thread/start",
+      params: {
+        cwd: "/tmp/sidra-workspace",
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+        sandbox: "read-only",
+        serviceName: "sidra",
+        ephemeral: false
+      }
+    });
+  });
+
+  it("falls_back_to_legacy_thread_start_when_optional_thread_metadata_is_rejected", async () => {
+    const appServer = createFakeAppServer();
+    appServer.rejectNextRequest = new Error("Invalid params: unknown field serviceName");
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+
+    await provider.createSession();
+
+    expect(appServer.requests).toEqual([
+      {
+        method: "thread/start",
+        params: {
+          cwd: "/tmp/sidra-workspace",
+          approvalPolicy: "on-request",
+          approvalsReviewer: "user",
+          sandbox: "read-only",
+          serviceName: "sidra",
+          ephemeral: false
+        }
+      },
+      {
+        method: "thread/start",
+        params: {
+          cwd: "/tmp/sidra-workspace",
+          approvalPolicy: "on-request",
+          approvalsReviewer: "user",
+          sandbox: "read-only"
+        }
+      }
+    ]);
+  });
+
+  it("sets_thread_name_before_first_turn_start", async () => {
+    const appServer = createFakeAppServer();
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+    const session = await provider.createSession();
+    appServer.nextResponse = { turn: { id: "turn-1" } };
+
+    const events = collectAsync(
+      session.send(
+        { prompt: "Wrapped prompt", displayTitleSource: { prompt: "Summarize this page" } },
+        new AbortController().signal,
+        ignoredPermissions()
+      )
+    );
+    await vi.waitFor(() => expect(appServer.requests.some((request) => request.method === "turn/start")).toBe(true));
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+    await events;
+
+    expect(appServer.requests.map((request) => request.method)).toEqual(["thread/start", "thread/name/set", "turn/start"]);
+  });
+
+  it("builds_thread_name_inside_codex_provider_from_display_title_source", async () => {
+    const appServer = createFakeAppServer();
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+    const session = await provider.createSession();
+    appServer.nextResponse = { turn: { id: "turn-1" } };
+
+    const events = collectAsync(
+      session.send(
+        {
+          prompt: "The user is viewing this browser page.",
+          displayTitleSource: {
+            prompt: "Summarize this page",
+            pageMetadata: { title: "Research notes", url: "https://example.com/article" }
+          }
+        },
+        new AbortController().signal,
+        ignoredPermissions()
+      )
+    );
+    await vi.waitFor(() => expect(appServer.requests.some((request) => request.method === "turn/start")).toBe(true));
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+    await events;
+
+    expect(appServer.requests).toContainEqual({
+      method: "thread/name/set",
+      params: { threadId: "thread-1", name: "Sidra: Research notes - Summarize this page" }
+    });
+  });
+
+  it("sets_thread_name_only_once_per_provider_session", async () => {
+    const appServer = createFakeAppServer();
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+    const session = await provider.createSession();
+
+    await runCompletedSend(appServer, session, { prompt: "First", displayTitleSource: { prompt: "First prompt" } }, "turn-1");
+    await runCompletedSend(appServer, session, { prompt: "Second", displayTitleSource: { prompt: "Second prompt" } }, "turn-2");
+
+    expect(appServer.requests.filter((request) => request.method === "thread/name/set")).toHaveLength(1);
+  });
+
+  it("continues_turn_start_when_thread_name_set_fails", async () => {
+    const appServer = createFakeAppServer();
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+    const session = await provider.createSession();
+    appServer.rejectNextTimeoutRequest = new Error("secret title failure");
+
+    await runCompletedSend(appServer, session, { prompt: "Prompt", displayTitleSource: { prompt: "Title prompt" } }, "turn-1");
+
+    expect(appServer.requests.some((request) => request.method === "turn/start")).toBe(true);
+  });
+
+  it("continues_turn_start_when_thread_name_set_does_not_resolve_before_timeout", async () => {
+    vi.useFakeTimers();
+    const appServer = createFakeAppServer();
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+    const session = await provider.createSession();
+    appServer.timeoutRequestMode = "hang";
+    appServer.nextResponse = { turn: { id: "turn-1" } };
+
+    const events = collectAsync(
+      session.send({ prompt: "Prompt", displayTitleSource: { prompt: "Title prompt" } }, new AbortController().signal, ignoredPermissions())
+    );
+    await vi.waitFor(() => expect(appServer.requests.some((request) => request.method === "thread/name/set")).toBe(true));
+    expect(appServer.requests.some((request) => request.method === "turn/start")).toBe(false);
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.waitFor(() => expect(appServer.requests.some((request) => request.method === "turn/start")).toBe(true));
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+    await events;
+    vi.useRealTimers();
+  });
+
+  it("does_not_emit_or_log_title_setting_failure", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const appServer = createFakeAppServer();
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+    const session = await provider.createSession();
+    appServer.rejectNextTimeoutRequest = new Error("secret title failure");
+
+    await runCompletedSend(appServer, session, { prompt: "Prompt", displayTitleSource: { prompt: "Private title" } }, "turn-1");
+
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(JSON.stringify(appServer.responses)).not.toContain("Private title");
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  it("does_not_set_thread_name_when_display_title_is_absent", async () => {
+    const appServer = createFakeAppServer();
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+    const session = await provider.createSession();
+
+    await runCompletedSend(appServer, session, { prompt: "Prompt" }, "turn-1");
+
+    expect(appServer.requests.some((request) => request.method === "thread/name/set")).toBe(false);
+  });
+
+  it("does_not_set_thread_name_on_second_send_when_first_send_had_no_display_title", async () => {
+    const appServer = createFakeAppServer();
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+    const session = await provider.createSession();
+
+    await runCompletedSend(appServer, session, { prompt: "First" }, "turn-1");
+    await runCompletedSend(appServer, session, { prompt: "Second", displayTitleSource: { prompt: "Second title" } }, "turn-2");
+
+    expect(appServer.requests.some((request) => request.method === "thread/name/set")).toBe(false);
+  });
+
+  it("new_provider_session_can_set_a_fresh_thread_name", async () => {
+    const appServer = createFakeAppServer();
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+    const firstSession = await provider.createSession();
+    await runCompletedSend(appServer, firstSession, { prompt: "First", displayTitleSource: { prompt: "First title" } }, "turn-1");
+    appServer.nextResponse = { thread: { id: "thread-2" } };
+    const secondSession = await provider.createSession();
+    await runCompletedSend(appServer, secondSession, { prompt: "Second", displayTitleSource: { prompt: "Second title" } }, "turn-2");
+
+    expect(appServer.requests).toContainEqual({
+      method: "thread/name/set",
+      params: { threadId: "thread-1", name: "Sidra: First title" }
+    });
+    expect(appServer.requests).toContainEqual({
+      method: "thread/name/set",
+      params: { threadId: "thread-2", name: "Sidra: Second title" }
+    });
+  });
+});
+
 function ignoredPermissions() {
   return {
     async requestPermission() {
@@ -387,6 +589,30 @@ async function collectAsync<T>(events: AsyncIterable<T>): Promise<T[]> {
   return collected;
 }
 
+async function runCompletedSend(
+  appServer: ReturnType<typeof createFakeAppServer>,
+  session: Awaited<ReturnType<ReturnType<typeof createCodexAppServerProvider>["createSession"]>>,
+  input: Parameters<typeof session.send>[0],
+  turnId: string
+) {
+  appServer.nextResponse = { turn: { id: turnId } };
+  const previousTurnStartCount = appServer.requests.filter((request) => request.method === "turn/start").length;
+  const events = collectAsync(session.send(input, new AbortController().signal, ignoredPermissions()));
+  await vi.waitFor(() =>
+    expect(appServer.requests.filter((request) => request.method === "turn/start")).toHaveLength(previousTurnStartCount + 1)
+  );
+  appServer.emitNotification({ method: "turn/completed", params: { threadId: currentThreadIdForTurn(appServer), turn: { id: turnId } } });
+  await events;
+}
+
+function currentThreadIdForTurn(appServer: ReturnType<typeof createFakeAppServer>): string {
+  const latestTurnStart = appServer.requests.findLast((request) => request.method === "turn/start");
+  const params = latestTurnStart?.params;
+  return typeof params === "object" && params !== null && "threadId" in params && typeof params.threadId === "string"
+    ? params.threadId
+    : "thread-1";
+}
+
 function createFakeAppServer() {
   const notificationHandlers = new Set<(notification: AppServerNotification) => void>();
   const serverRequestHandlers = new Set<(request: { id: number | string; method: string; params?: unknown }) => void>();
@@ -394,6 +620,9 @@ function createFakeAppServer() {
     requests: [] as Array<{ method: string; params: unknown }>,
     responses: [] as Array<{ id: number | string; result: unknown }>,
     nextResponse: { thread: { id: "thread-1" } } as unknown,
+    rejectNextRequest: undefined as Error | undefined,
+    rejectNextTimeoutRequest: undefined as Error | undefined,
+    timeoutRequestMode: "resolve" as "resolve" | "hang",
     onNotification(handler: (notification: AppServerNotification) => void) {
       notificationHandlers.add(handler);
       return () => notificationHandlers.delete(handler);
@@ -413,6 +642,23 @@ function createFakeAppServer() {
     },
     async request(method: string, params: unknown) {
       this.requests.push({ method, params });
+      if (this.rejectNextRequest) {
+        const error = this.rejectNextRequest;
+        this.rejectNextRequest = undefined;
+        throw error;
+      }
+      return this.nextResponse;
+    },
+    async requestWithTimeout(method: string, params: unknown, timeoutMs: number) {
+      this.requests.push({ method, params });
+      if (this.rejectNextTimeoutRequest) {
+        const error = this.rejectNextTimeoutRequest;
+        this.rejectNextTimeoutRequest = undefined;
+        throw error;
+      }
+      if (this.timeoutRequestMode === "hang") {
+        await new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Codex App Server request timed out")), timeoutMs));
+      }
       return this.nextResponse;
     }
   };

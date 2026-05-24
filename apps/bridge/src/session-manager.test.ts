@@ -1,5 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AgentEvent, BridgeToExtension } from "@sidra/protocol";
+
+const promptFormatterTrace = vi.hoisted(() => ({
+  events: [] as string[]
+}));
+
+vi.mock("./context-prompt.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./context-prompt.js")>();
+  return {
+    ...actual,
+    formatPromptForAgent(input: Parameters<typeof actual.formatPromptForAgent>[0]) {
+      promptFormatterTrace.events.push("format");
+      return actual.formatPromptForAgent(input);
+    }
+  };
+});
+
 import {
   BridgeSessionManager,
   type AgentPermissionRequester,
@@ -71,7 +87,7 @@ describe("BridgeSessionManager", () => {
     await manager.sendPrompt("page-1", { prompt: "After restart" });
 
     expect(firstSession.sentInputs).toEqual([]);
-    expect(secondSession.sentInputs).toEqual([{ prompt: "After restart" }]);
+    expect(secondSession.sentInputs).toEqual([providerInput("After restart")]);
   });
 
   it("emits session_not_started when sending before session.start", async () => {
@@ -149,7 +165,7 @@ describe("BridgeSessionManager", () => {
     stream.finish();
     await secondSend;
 
-    expect(provider.createdSessions[0]?.sentInputs).toEqual([{ prompt: "First" }, { prompt: "Second" }]);
+    expect(provider.createdSessions[0]?.sentInputs).toEqual([providerInput("First"), providerInput("Second")]);
     expect(emitted).toContainEqual({
       type: "agent.event",
       version: 2,
@@ -182,7 +198,7 @@ describe("BridgeSessionManager", () => {
     stream.finish();
     await firstSend;
 
-    expect(provider.createdSessions[0]?.sentInputs).toEqual([{ prompt: "First" }, { prompt: "Second" }]);
+    expect(provider.createdSessions[0]?.sentInputs).toEqual([providerInput("First"), providerInput("Second")]);
     expect(emitted).not.toContainEqual({
       type: "session.error",
       version: 2,
@@ -457,7 +473,7 @@ describe("BridgeSessionManager", () => {
     session?.stream?.finish();
     await firstSend;
 
-    expect(session?.sentInputs).toEqual([{ prompt: "First" }]);
+    expect(session?.sentInputs).toEqual([providerInput("First")]);
     expect(emitted).toContainEqual({
       type: "session.error",
       version: 2,
@@ -813,7 +829,14 @@ describe("BridgeSessionManager page context prompt formatting", () => {
 
     expect(provider.createdSessions[0]?.sentInputs).toEqual([
       {
-        prompt: expect.stringContaining("Untrusted page context JSON:")
+        prompt: expect.stringContaining("Untrusted page context JSON:"),
+        displayTitleSource: {
+          prompt: "Summarize this",
+          pageMetadata: {
+            title: "Example article",
+            url: "https://example.com/article"
+          }
+        }
       }
     ]);
     expect(provider.createdSessions[0]?.sentInputs[0]?.prompt).toContain("User request:\nSummarize this");
@@ -830,6 +853,102 @@ describe("BridgeSessionManager page context prompt formatting", () => {
     });
 
     expect(provider.createdSessions[0]?.sentInputs[0]).not.toHaveProperty("pageContext");
+  });
+});
+
+describe("BridgeSessionManager provider history title source", () => {
+  it("passes_display_title_source_from_raw_prompt_and_page_metadata_to_provider", async () => {
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", {
+      prompt: "Summarize this",
+      pageContext: readablePageContext()
+    });
+
+    expect(provider.createdSessions[0]?.sentInputs[0]?.displayTitleSource).toEqual({
+      prompt: "Summarize this",
+      pageMetadata: {
+        title: "Example article",
+        url: "https://example.com/article"
+      }
+    });
+  });
+
+  it("does_not_use_formatted_provider_prompt_as_display_title_source", async () => {
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", {
+      prompt: "Summarize this",
+      pageContext: readablePageContext()
+    });
+
+    expect(provider.createdSessions[0]?.sentInputs[0]?.displayTitleSource?.prompt).toBe("Summarize this");
+    expect(provider.createdSessions[0]?.sentInputs[0]?.displayTitleSource?.prompt).not.toContain(
+      "Untrusted page context JSON:"
+    );
+  });
+
+  it("omits_page_metadata_from_title_source_when_page_context_is_absent", async () => {
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", { prompt: "Plain prompt" });
+
+    expect(provider.createdSessions[0]?.sentInputs[0]?.displayTitleSource).toEqual({
+      prompt: "Plain prompt"
+    });
+  });
+
+  it("keeps_provider_prompt_wrapped_with_untrusted_page_context", async () => {
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", {
+      prompt: "Summarize this",
+      pageContext: readablePageContext()
+    });
+
+    expect(provider.createdSessions[0]?.sentInputs[0]?.prompt).toContain("Untrusted page context JSON:");
+    expect(provider.createdSessions[0]?.sentInputs[0]?.prompt).toContain("User request:\nSummarize this");
+  });
+
+  it("derives_display_title_source_before_formatting_provider_prompt", async () => {
+    promptFormatterTrace.events = [];
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+    const pageContext = pageContextWithMetadataAccessTrace(promptFormatterTrace.events);
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", {
+      prompt: "Summarize this",
+      pageContext
+    });
+
+    expect(promptFormatterTrace.events.indexOf("metadata.url")).toBeLessThan(promptFormatterTrace.events.indexOf("format"));
+    expect(promptFormatterTrace.events.indexOf("metadata.title")).toBeLessThan(promptFormatterTrace.events.indexOf("format"));
+  });
+
+  it("updates_existing_exact_provider_input_expectations_with_display_title_source", async () => {
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", { prompt: "First" });
+
+    expect(provider.createdSessions[0]?.sentInputs).toEqual([
+      {
+        prompt: "First",
+        displayTitleSource: {
+          prompt: "First"
+        }
+      }
+    ]);
   });
 });
 
@@ -917,7 +1036,7 @@ describe("BridgeSessionManager cancellation", () => {
     await firstSend;
     await manager.sendPrompt("page-1", { prompt: "Second" });
 
-    expect(provider.createdSessions[0]?.sentInputs).toEqual([{ prompt: "First" }, { prompt: "Second" }]);
+    expect(provider.createdSessions[0]?.sentInputs).toEqual([providerInput("First"), providerInput("Second")]);
   });
 
   it("emits session.error when cancelling a session with no in-flight turn", async () => {
@@ -1077,7 +1196,7 @@ describe("BridgeSessionManager reset and close", () => {
     await manager.sendPrompt("page-1", { prompt: "After reset" });
 
     expect(provider.createdSessions).toHaveLength(2);
-    expect(provider.createdSessions[1]?.sentInputs).toEqual([{ prompt: "After reset" }]);
+    expect(provider.createdSessions[1]?.sentInputs).toEqual([providerInput("After reset")]);
   });
 
   it("reset and close do not affect another client session", async () => {
@@ -1093,7 +1212,7 @@ describe("BridgeSessionManager reset and close", () => {
     expect(provider.createdSessions[0]?.closeCount).toBe(1);
     expect(provider.createdSessions[1]?.closeCount).toBe(0);
     expect(provider.createdSessions[2]?.closeCount).toBe(1);
-    expect(provider.createdSessions[1]?.sentInputs).toEqual([{ prompt: "Still active" }]);
+    expect(provider.createdSessions[1]?.sentInputs).toEqual([providerInput("Still active")]);
   });
 
   it("close is idempotent when the client session does not exist", async () => {
@@ -1516,7 +1635,7 @@ describe("BridgeSessionManager connection cleanup", () => {
     await manager.cancelTurn("page-1");
     await manager.sendPrompt("page-1", { prompt: "Second" });
 
-    expect(provider.createdSessions[0]?.sentInputs).toEqual([{ prompt: "First" }]);
+    expect(provider.createdSessions[0]?.sentInputs).toEqual([providerInput("First")]);
     expect(emitted).toContainEqual({
       type: "session.error",
       version: 2,
@@ -1628,6 +1747,15 @@ function deferred<T>(): Deferred<T> {
 
 function unsafeAgentEvent(value: unknown): AgentEvent {
   return value as AgentEvent;
+}
+
+function providerInput(prompt: string): AgentSendInput {
+  return {
+    prompt,
+    displayTitleSource: {
+      prompt
+    }
+  };
 }
 
 class FakeAgentSession implements AgentSession {
@@ -1902,6 +2030,29 @@ function readablePageContext() {
       url: "https://example.com/article",
       title: "Example article",
       capturedAt: "2026-05-10T12:00:00.000Z"
+    },
+    text: "Captured page text",
+    textLength: "Captured page text".length,
+    extractionMethod: "readability" as const
+  };
+}
+
+function pageContextWithMetadataAccessTrace(events: string[]) {
+  return {
+    kind: "readable" as const,
+    metadata: {
+      get url() {
+        events.push("metadata.url");
+        return "https://example.com/article";
+      },
+      get title() {
+        events.push("metadata.title");
+        return "Example article";
+      },
+      get capturedAt() {
+        events.push("metadata.capturedAt");
+        return "2026-05-10T12:00:00.000Z";
+      }
     },
     text: "Captured page text",
     textLength: "Captured page text".length,

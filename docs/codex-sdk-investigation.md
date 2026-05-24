@@ -154,6 +154,7 @@ The official app-server docs expose:
 - `account/read` for auth state.
 - `model/list` for model discovery.
 - `thread/start` and `thread/resume`.
+- `thread/name/set` for user-facing thread titles.
 - `turn/start`.
 - `turn/interrupt`.
 - `thread/read`, `thread/list`, `thread/unsubscribe`, archive/unarchive, and related lifecycle APIs.
@@ -336,7 +337,7 @@ Responsibilities:
 
 - `CodexAppServerProcess`: spawn and stop `codex app-server`; configure cwd, env, and `CODEX_HOME`; collect safe stderr diagnostics.
 - `CodexAppServerTransport`: JSON-RPC-lite over JSONL stdio; request IDs; pending request map; incoming requests; notifications; timeouts; shutdown.
-- `CodexAppServerClient`: typed methods for `initialize`, `account/read`, `model/list`, `thread/start`, `thread/resume`, `turn/start`, `turn/interrupt`, `thread/read`, `thread/unsubscribe`, and approval responses.
+- `CodexAppServerClient`: typed methods for `initialize`, `account/read`, `model/list`, `thread/start`, `thread/resume`, `turn/start`, `turn/interrupt`, `thread/read`, `thread/unsubscribe`, approval responses, and bounded auxiliary requests such as `thread/name/set`.
 - `CodexAppServerProvider`: implements Sidra's `AgentProvider` and `AgentSession`.
 - `CodexAppServerEventMapper`: maps app-server notifications and requests to Sidra `SafeProviderTurnEvent` and permission requests.
 - `CodexAppServerSchemas`: generated or checked-in protocol types from `codex app-server generate-ts`, plus local runtime validators.
@@ -413,8 +414,12 @@ Use read-only until Sidra intentionally exposes workspace-mutating workflows. Th
 For `session.send` from the extension:
 
 1. Bridge validates payload size and shape through `packages/protocol`.
-2. Bridge wraps page context as untrusted reference material.
-3. Bridge sends `turn/start`:
+2. Bridge derives provider-neutral display-title source from the raw user prompt plus selected page metadata: `title`, `canonicalUrl`, and `url`.
+3. Bridge wraps page context as untrusted reference material for the provider prompt.
+4. On the first send for a Codex thread, the Codex provider derives a compact Sidra thread title and makes one bounded best-effort `thread/name/set` request before `turn/start`.
+   - Title setting must not use captured body text, captured HTML, or the provider-facing safety wrapper.
+   - Title-setting failure or timeout must not fail the chat turn or log prompt/title content by default.
+5. Bridge sends `turn/start`:
 
 ```ts
 {
@@ -429,8 +434,8 @@ For `session.send` from the extension:
 }
 ```
 
-4. Bridge records returned `turnId`.
-5. Bridge emits normalized provider events back to the extension.
+6. Bridge records returned `turnId`.
+7. Bridge emits normalized provider events back to the extension.
 
 ### Streaming Event Mapping
 
@@ -553,6 +558,7 @@ Recommended V1 subset:
 - `thread/start`
 - `thread/resume`
 - `thread/read`
+- `thread/name/set`
 - `thread/unsubscribe`
 - `turn/start`
 - `turn/interrupt`
@@ -578,6 +584,8 @@ Add bridge tests with a fake app-server peer:
 - handshake sends `initialize` and `initialized`
 - unauthenticated `account/read` maps to setup error
 - `session.start` creates one app-server thread
+- `session.send` captures raw display-title source before prompt formatting
+- first titled `session.send` sends best-effort `thread/name/set` before `turn/start`
 - `session.send` sends `turn/start`
 - assistant deltas stream to extension protocol
 - command approval request blocks until extension response

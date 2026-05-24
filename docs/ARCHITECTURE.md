@@ -15,6 +15,7 @@ Use this map to decide where behavior belongs. It is not a file catalog.
 - `apps/bridge`: Local Native Messaging bridge.
   - Owns process IO, protocol command handling, provider session lifecycle, in-flight turn state, cancellation, reset/close, heartbeat/disconnect cleanup, and provider allowlisting.
   - Production Codex wiring starts `codex app-server` from bridge process configuration. It must use an explicit `SIDRA_CODEX_WORKSPACE_ROOT` value for Codex thread working directories and must not fall back to the Native Messaging process cwd.
+  - The Codex provider owns app-server thread naming for Sidra history UX. `BridgeSessionManager` may pass raw prompt plus selected page metadata as provider-neutral display-title source, but Codex-specific title derivation and `thread/name/set` belong to the Codex provider. Thread naming must not use captured body text, captured HTML, or the provider-facing safety wrapper.
   - Must keep raw transport, protocol dispatch, and provider session management in separate modules as those concerns grow.
 - `packages/protocol`: Versioned extension-to-bridge message contract.
   - Owns message types and runtime validation for the Native Messaging boundary.
@@ -97,6 +98,7 @@ Decision:
   - `NativeMessagingTransport`: frame parsing/writing and process IO only.
   - `BridgeProtocolHandler`: protocol validation, command dispatch, and safe error mapping.
   - `BridgeSessionManager`: provider-session map, per-session in-flight turn state, cancellation, reset/close, heartbeat/disconnect cleanup, and provider allowlist.
+    It may pass provider-neutral history title source from raw user prompt plus `title`, `canonicalUrl`, and `url` page metadata. It must not derive Codex titles or pass captured page body/HTML to providers as history metadata.
   - `ProviderAdapter`: Codex or mock provider implementation behind the same bridge-owned provider interface.
 - Protocol message shape belongs in `packages/protocol`. Runtime validation must happen at Native Messaging boundaries. The protocol package must be the hard boundary for message shape, avoid unsafe casts after shallow validation, and grow protocol commands before UI or bridge code depends on them.
 - Provider-affecting lifecycle operations such as New Chat, reset, close, and cancel must be represented in protocol and handled by the bridge before the UI exposes them. Local-only provider lifecycle behavior is a bug.
