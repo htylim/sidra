@@ -64,7 +64,7 @@ type PendingPermission = {
 };
 
 type BridgeSessionManagerOptions = {
-  provider: AgentProvider;
+  provider?: AgentProvider;
   emit(message: BridgeToExtension): void;
 };
 
@@ -202,7 +202,11 @@ export class BridgeSessionManager {
     const operationGeneration = this.cleanupGeneration;
     const sessionGeneration = this.advanceSessionGeneration(clientSessionId);
     await this.enqueueSessionOperation(clientSessionId, async () => {
-      const providerId = this.sessions.get(clientSessionId)?.providerId ?? this.options.provider.id;
+      const providerId = this.sessions.get(clientSessionId)?.providerId ?? this.options.provider?.id;
+      if (!providerId) {
+        this.emitProviderUnavailable(clientSessionId);
+        return;
+      }
       await this.replaceSession(clientSessionId, providerId, operationGeneration, sessionGeneration);
     });
   }
@@ -281,14 +285,8 @@ export class BridgeSessionManager {
   ): Promise<void> {
     if (this.cleanupGeneration !== operationGeneration) return;
     if (this.getSessionGeneration(clientSessionId) !== sessionGeneration) return;
-    if (providerId !== this.options.provider.id) {
-      this.options.emit({
-        type: "session.error",
-        version: PROTOCOL_VERSION,
-        clientSessionId,
-        message: "Provider is not available",
-        code: "provider_unavailable"
-      });
+    if (!this.options.provider || providerId !== this.options.provider.id) {
+      this.emitProviderUnavailable(clientSessionId);
       return;
     }
 
@@ -403,6 +401,16 @@ export class BridgeSessionManager {
       clientSessionId,
       message: "Permission request was not found.",
       code: "permission_not_found"
+    });
+  }
+
+  private emitProviderUnavailable(clientSessionId: string): void {
+    this.options.emit({
+      type: "session.error",
+      version: PROTOCOL_VERSION,
+      clientSessionId,
+      message: "Provider is not available",
+      code: "provider_unavailable"
     });
   }
 

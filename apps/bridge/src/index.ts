@@ -24,7 +24,7 @@ export type BridgeRuntime = {
 
 export function createBridge(
   runtime: BridgeRuntime,
-  provider: AgentProvider = createMockProvider(),
+  provider?: AgentProvider,
   options: {
     hardPayloadByteLimit?: number;
     heartbeatTimeoutMs?: number;
@@ -110,24 +110,6 @@ export function createBridge(
   }
 
   return { handleMessage, closeConnection };
-}
-
-function createMockProvider(): AgentProvider {
-  return {
-    id: "codex",
-    async createSession() {
-      return {
-        async *send(input: AgentSendInput) {
-          const text = input.prompt.includes("Untrusted page context JSON:")
-            ? "Mock response received."
-            : `Mock response to: ${input.prompt}`;
-          yield { type: "assistant.text.delta", text };
-          yield { type: "assistant.done" };
-        },
-        async close() {}
-      };
-    }
-  };
 }
 
 export { runNativeMessagingBridge } from "./native-messaging.js";

@@ -14,6 +14,7 @@ Use this map to decide where behavior belongs. It is not a file catalog.
   - Must expose application-level behavior to the side panel instead of leaking transport sequencing into React code.
 - `apps/bridge`: Local Native Messaging bridge.
   - Owns process IO, protocol command handling, provider session lifecycle, in-flight turn state, cancellation, reset/close, heartbeat/disconnect cleanup, and provider allowlisting.
+  - Production Codex wiring starts `codex app-server` from bridge process configuration. It must use an explicit `SIDRA_CODEX_WORKSPACE_ROOT` value for Codex thread working directories and must not fall back to the Native Messaging process cwd.
   - Must keep raw transport, protocol dispatch, and provider session management in separate modules as those concerns grow.
 - `packages/protocol`: Versioned extension-to-bridge message contract.
   - Owns message types and runtime validation for the Native Messaging boundary.

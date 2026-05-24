@@ -3,6 +3,21 @@ import type { BridgeToExtension } from "@sidra/protocol";
 import { createBridge, type AgentProvider, type AgentSession } from "./index.js";
 
 describe("createBridge connection heartbeat cleanup", () => {
+  it("default_provider_fails_closed_when_codex_provider_is_not_configured", async () => {
+    const emitted: BridgeToExtension[] = [];
+    const bridge = createBridge({ emit: (message) => emitted.push(message) });
+
+    await bridge.handleMessage({ type: "session.start", version: 2, clientSessionId: "page-1", providerId: "codex" });
+
+    expect(emitted).toContainEqual({
+      type: "session.error",
+      version: 2,
+      clientSessionId: "page-1",
+      message: "Provider is not available",
+      code: "provider_unavailable"
+    });
+  });
+
   it("heartbeat_extends_connection_deadline_without_closing_sessions", async () => {
     vi.useFakeTimers();
     const provider = createRecordingProvider();

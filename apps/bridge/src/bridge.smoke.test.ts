@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { PassThrough } from "node:stream";
 import { BRIDGE_PAYLOAD_TOO_LARGE_CODE, type BridgeToExtension } from "@sidra/protocol";
-import { createBridge, type AgentProvider, type AgentSession } from "./index.js";
+import { createBridge, type AgentProvider, type AgentSendInput, type AgentSession } from "./index.js";
 import { runNativeMessagingBridge } from "./native-messaging.js";
 import { BRIDGE_HARD_PAYLOAD_BYTE_LIMIT } from "./payload-limit.js";
 
 describe("mock bridge chat path", () => {
   it("starts a session and emits a mock assistant response for a prompt", async () => {
     const emitted: BridgeToExtension[] = [];
-    const bridge = createBridge({ emit: (message) => emitted.push(message) });
+    const bridge = createBridge({ emit: (message) => emitted.push(message) }, createMockProvider());
 
     await bridge.handleMessage({
       type: "session.start",
@@ -51,7 +51,7 @@ describe("mock bridge chat path", () => {
     const output = new PassThrough();
     const messages = collectNativeMessages(output, 4);
 
-    runNativeMessagingBridge(input, output);
+    runNativeMessagingBridge(input, output, { provider: createMockProvider() });
     input.write(
       Buffer.concat([
         encodeNativeMessage({
@@ -108,7 +108,7 @@ describe("mock bridge chat path", () => {
 
   it("emits invalid_message bridge.error for unknown extension commands", async () => {
     const emitted: BridgeToExtension[] = [];
-    const bridge = createBridge({ emit: (message) => emitted.push(message) });
+    const bridge = createBridge({ emit: (message) => emitted.push(message) }, createMockProvider());
 
     await bridge.handleMessage({ type: "session.delete", version: 2, clientSessionId: "page-1" });
 
@@ -249,7 +249,7 @@ describe("mock bridge chat path", () => {
 
   it("mock_provider_response_does_not_echo_captured_page_context", async () => {
     const emitted: BridgeToExtension[] = [];
-    const bridge = createBridge({ emit: (message) => emitted.push(message) });
+    const bridge = createBridge({ emit: (message) => emitted.push(message) }, createMockProvider());
 
     await bridge.handleMessage({
       type: "session.start",
@@ -419,6 +419,24 @@ function createRecordingProvider() {
     }
   };
   return provider;
+}
+
+function createMockProvider(): AgentProvider {
+  return {
+    id: "codex",
+    async createSession() {
+      return {
+        async *send(input: AgentSendInput) {
+          const text = input.prompt.includes("Untrusted page context JSON:")
+            ? "Mock response received."
+            : `Mock response to: ${input.prompt}`;
+          yield { type: "assistant.text.delta", text };
+          yield { type: "assistant.done" };
+        },
+        async close() {}
+      };
+    }
+  };
 }
 
 class RecordingSession implements AgentSession {

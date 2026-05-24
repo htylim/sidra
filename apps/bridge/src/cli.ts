@@ -1,3 +1,3 @@
-import { runNativeMessagingBridge } from "./native-messaging.js";
+import { runBridgeFromEnvironment } from "./bridge-runtime.js";
 
-runNativeMessagingBridge();
+await runBridgeFromEnvironment();
