@@ -29,6 +29,10 @@ the local native bridge and capture a real page.
 - Expect approval prompts in Codex for two steps: writing the Brave Native
   Messaging manifest under `~/Library/Application Support/...`, and launching
   Brave through Playwright.
+- For sidebar UI verification, use Computer Use in the user's existing Brave
+  window when the user allows it. Open Sidra through Brave's Extensions menu and
+  inspect the real side panel. Use the `side-panel.html` full-page path only as a
+  fallback when Computer Use is unavailable or for a fast DOM-only check.
 - Report the exact browser, extension ID, manifest path, and observed panel text.
 - If a browser cannot find the native host, check manifest path, host name,
   executable bit, absolute wrapper path, and `allowed_origins` before changing
@@ -75,7 +79,8 @@ Do not redirect `HOME` as a first fix:
 - Redirecting `HOME` can make Corepack lose cached `pnpm` state and try the
   network, which is blocked in the sandbox.
 
-Do not use Computer Use unless the user explicitly allows it.
+Do not use Computer Use unless the user explicitly allows it. When the user asks
+for real sidebar verification, Computer Use is the primary path.
 
 ## Manual Run Gotchas
 
@@ -165,7 +170,12 @@ Run this checklist for Chrome, Brave, or Helium after build and install:
 - Load `apps/extension/dist`.
 - Verify the extension ID is `mahnogfphkjigcjomjcjifkfdnocbokh`.
 - Inspect for stale manifests, including repo-local `.local/native-messaging-hosts`.
-- Click the toolbar action from a normal web page and confirm the real side panel opens or focuses.
+- In the user's existing Brave window, use Computer Use to open the real Sidra
+  side panel:
+  - Navigate the active tab to the target web page.
+  - Click Brave's Extensions menu in the toolbar.
+  - Click `Sidra`.
+  - Confirm the real side panel opens or focuses.
 - Confirm `.local/sidra-agent-bridge` has the intended `SIDRA_CODEX_WORKSPACE_ROOT` and Codex path.
 - Confirm the side panel connects to the native bridge.
 - If Codex setup fails, confirm the side panel surfaces a blocking setup error. `bridge.ready` is not expected when setup fails.
@@ -298,18 +308,45 @@ Leave the `sidra-brave-play-profile-detached` process running for the user.
 
 ## Gotchas
 
+- Real sidebar verification should use Computer Use when the user allows it.
+  Browser automation alone cannot reliably click Brave's extension action. Direct
+  `chrome.sidePanel.open()` calls from Playwright are rejected because they are
+  not user gestures.
 - Opening `side-panel.html` as a normal tab makes the extension page the active
   tab. Capture will be unavailable unless the article tab is brought to front
   before the panel reads active-tab state and before clicking `Capture + Send`.
 - The side panel is tested as `chrome-extension://<id>/side-panel.html`, not as
   a real browser side-panel surface. That is enough for bridge, capture, and UI
-  state verification.
+  state verification when real-sidebar Computer Use is unavailable.
+- To reproduce real-sidebar layout overflow in `side-panel.html`, force a
+  narrow viewport and inspect horizontal scroll. This catches Sidra DOM that is
+  wider than the side-panel viewport, even though it does not prove Brave's
+  native side-panel container behavior.
 - Native Messaging manifests are browser-specific. A manifest under Chrome does
   not install the host for Brave.
 - `allowed_origins` must include the exact extension ID and trailing slash.
 - The manifest path must point to an executable file.
 - Use an absolute Node path in the wrapper when in doubt.
 - Save screenshots only when the user asks for proof.
+
+## Narrow Side-Panel Overflow Repro
+
+Use this when debugging sidebar content that spills beyond the real side-panel
+width. The current known repro is a long Infobae page title:
+
+```text
+https://www.infobae.com/politica/2026/05/24/intendentes-buscan-armar-una-mesa-para-ordenar-la-interna-mientras-cristina-kirchner-emerge-en-la-centralidad/
+```
+
+Run from `apps/extension` after `pnpm build` and Brave native-host setup:
+
+```sh
+node --input-type=module -e "import { chromium } from '@playwright/test'; import { mkdtempSync } from 'node:fs'; import { tmpdir } from 'node:os'; import { join } from 'node:path'; const extensionPath='/Users/hernantylim/Dev/sandbox/sidra/apps/extension/dist'; const targetUrl='https://www.infobae.com/politica/2026/05/24/intendentes-buscan-armar-una-mesa-para-ordenar-la-interna-mientras-cristina-kirchner-emerge-en-la-centralidad/'; const widths=[280,300,320,360]; const context=await chromium.launchPersistentContext(mkdtempSync(join(tmpdir(),'sidra-overflow-')), { executablePath:'/Applications/Brave Browser.app/Contents/MacOS/Brave Browser', headless:false, args:['--no-first-run','--no-default-browser-check','--disable-crash-reporter','--disable-crashpad','--disable-breakpad','--disable-extensions-except='+extensionPath,'--load-extension='+extensionPath] }); const serviceWorker=context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker', { timeout:15000 }); const extensionId=new URL(serviceWorker.url()).host; const target=await context.newPage(); await target.goto(targetUrl, { waitUntil:'domcontentloaded', timeout:60000 }); for (const width of widths) { const panel=await context.newPage(); await panel.setViewportSize({ width, height:900 }); await panel.goto('chrome-extension://'+extensionId+'/side-panel.html', { waitUntil:'domcontentloaded', timeout:60000 }); await target.bringToFront(); await panel.waitForTimeout(3000); const result=await panel.evaluate(() => ({ viewport: document.documentElement.clientWidth, documentScrollWidth: document.documentElement.scrollWidth, bodyScrollWidth: document.body.scrollWidth, offenders: [...document.querySelectorAll('*')].map((element) => { const rect=element.getBoundingClientRect(); return { tag: element.tagName.toLowerCase(), className: String(element.className), text: (element.textContent || '').replace(/\s+/g,' ').trim().slice(0,80), left: Math.round(rect.left), right: Math.round(rect.right), width: Math.round(rect.width) }; }).filter((box) => box.right > window.innerWidth + 1 || box.left < -1).slice(0,12) })); console.log(JSON.stringify({ width, overflowing: result.documentScrollWidth > result.viewport || result.bodyScrollWidth > result.viewport, ...result }, null, 2)); await panel.close(); } await context.close();"
+```
+
+The bug is reproduced when either `documentScrollWidth` or `bodyScrollWidth` is
+greater than `viewport`, or when the offenders list is not empty. A fixed panel
+should report no overflow at all tested widths.
 
 ## Cleanup
 
