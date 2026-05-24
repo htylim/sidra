@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm -r test",
+    "test": "pnpm -r test && pnpm test:native-hosts",
+    "test:native-hosts": "node --test tools/native-hosts/*.test.mjs",
     "test:e2e": "pnpm --filter @sidra/extension test:e2e",
     "check": "pnpm -r check"
   },

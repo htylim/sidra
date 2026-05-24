@@ -110,6 +110,8 @@ export type SessionErrorCode =
   | "permission_response_invalid"
   | "unknown_error";
 
+export type BridgeErrorCode = "invalid_message" | "internal_error" | "payload_too_large" | "codex_setup_failed";
+
 export type BridgeToExtension =
   | {
       type: "session.started";
@@ -131,7 +133,7 @@ export type BridgeToExtension =
     }
   | { type: "session.error"; version: 2; clientSessionId: string; message: string; code?: SessionErrorCode }
   | { type: "bridge.ready"; version: 2 }
-  | { type: "bridge.error"; version: 2; message: string; code?: string };
+  | { type: "bridge.error"; version: 2; message: string; code?: BridgeErrorCode };
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -327,7 +329,7 @@ export function parseBridgeToExtension(input: unknown): ParseResult<BridgeToExte
         return invalid("Message has invalid fields");
       }
       if (!isNonEmptyString(input.message)) return invalid("message is required");
-      if (!optionalString(input.code)) return invalid("code is invalid");
+      if (!optionalBridgeErrorCode(input.code)) return invalid("code is invalid");
       {
         const value: BridgeToExtension = { type: "bridge.error", version: PROTOCOL_VERSION, message: input.message };
         if (input.code !== undefined) value.code = input.code;
@@ -514,6 +516,19 @@ function isPermissionDecision(value: unknown): value is PermissionDecision {
 
 function optionalSessionErrorCode(value: unknown): value is SessionErrorCode | undefined {
   return value === undefined || isSessionErrorCode(value);
+}
+
+function optionalBridgeErrorCode(value: unknown): value is BridgeErrorCode | undefined {
+  return value === undefined || isBridgeErrorCode(value);
+}
+
+function isBridgeErrorCode(value: unknown): value is BridgeErrorCode {
+  return (
+    value === "invalid_message" ||
+    value === "internal_error" ||
+    value === "payload_too_large" ||
+    value === "codex_setup_failed"
+  );
 }
 
 function isSessionErrorCode(value: unknown): value is SessionErrorCode {

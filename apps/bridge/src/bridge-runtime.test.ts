@@ -101,6 +101,125 @@ describe("bridge runtime composition", () => {
 
     expect(appServer.close).toHaveBeenCalledOnce();
   });
+
+  it("runBridgeFromEnvironment_emits_bridge_error_when_codex_auth_is_required", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 1);
+    const appServer = createFakeRunningAppServer({ accountResponse: { account: null, requiresOpenaiAuth: true } });
+
+    await runBridgeFromEnvironment(
+      input,
+      output,
+      { SIDRA_CODEX_WORKSPACE_ROOT: "/tmp/sidra-workspace" },
+      { startCodexAppServer: vi.fn(async () => appServer) }
+    );
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" }
+    ]);
+  });
+
+  it("runBridgeFromEnvironment_emits_bridge_error_when_codex_app_server_start_fails", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 1);
+
+    await runBridgeFromEnvironment(
+      input,
+      output,
+      { SIDRA_CODEX_WORKSPACE_ROOT: "/tmp/sidra-workspace" },
+      {
+        startCodexAppServer: vi.fn(async () => {
+          throw new Error("spawn failed with private stderr");
+        })
+      }
+    );
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" }
+    ]);
+  });
+
+  it("runBridgeFromEnvironment_emits_bridge_error_when_sidra_codex_workspace_root_is_missing", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 1);
+
+    await runBridgeFromEnvironment(input, output, {}, { startCodexAppServer: vi.fn() });
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" }
+    ]);
+  });
+
+  it("runBridgeFromEnvironment_emits_bridge_ready_after_codex_setup_succeeds", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 1);
+    const appServer = createFakeRunningAppServer();
+
+    await runBridgeFromEnvironment(
+      input,
+      output,
+      { SIDRA_CODEX_WORKSPACE_ROOT: "/tmp/sidra-workspace" },
+      { startCodexAppServer: vi.fn(async () => appServer) }
+    );
+
+    await expect(messages).resolves.toEqual([{ type: "bridge.ready", version: 2 }]);
+  });
+
+  it("runBridgeFromEnvironment_keeps_native_connection_alive_after_provider_setup_error", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 2);
+
+    await runBridgeFromEnvironment(input, output, {}, { startCodexAppServer: vi.fn() });
+    input.write(encodeNativeMessage({ type: "heartbeat", version: 2 }));
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" },
+      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" }
+    ]);
+  });
+
+  it("runBridgeFromEnvironment_does_not_emit_bridge_ready_after_provider_setup_error", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+
+    await runBridgeFromEnvironment(input, output, {}, { startCodexAppServer: vi.fn() });
+
+    const messages = await collectNativeMessagesUntilIdle(output, 20);
+    expect(messages).not.toContainEqual({ type: "bridge.ready", version: 2 });
+  });
+
+  it("runBridgeFromEnvironment_rejects_chat_commands_after_provider_setup_error_without_provider_unavailable_fallback", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 2);
+
+    await runBridgeFromEnvironment(input, output, {}, { startCodexAppServer: vi.fn() });
+    input.write(encodeNativeMessage({ type: "session.start", version: 2, clientSessionId: "page-1", providerId: "codex" }));
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" },
+      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" }
+    ]);
+  });
+
+  it("runBridgeFromEnvironment_reports_invalid_message_after_provider_setup_error", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 2);
+
+    await runBridgeFromEnvironment(input, output, {}, { startCodexAppServer: vi.fn() });
+    input.write(encodeNativeMessage({ type: "session.delete", version: 2, clientSessionId: "page-1" }));
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" },
+      { type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }
+    ]);
+  });
 });
 
 function createFakeRunningAppServer(options: { accountResponse?: unknown } = {}): RunningCodexAppServer & {
@@ -134,6 +253,67 @@ function encodeNativeMessage(message: unknown) {
   const header = Buffer.alloc(4);
   header.writeUInt32LE(encoded.length, 0);
   return Buffer.concat([header, encoded]);
+}
+
+function collectNativeMessages(output: PassThrough, expectedCount: number) {
+  const messages: unknown[] = [];
+  let buffer = Buffer.alloc(0);
+
+  return new Promise<unknown[]>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${expectedCount} native messages`)), 1_000);
+
+    output.on("data", (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk]);
+
+      while (buffer.length >= 4) {
+        const messageLength = buffer.readUInt32LE(0);
+        if (buffer.length < messageLength + 4) return;
+
+        const raw = buffer.subarray(4, messageLength + 4).toString("utf8");
+        buffer = buffer.subarray(messageLength + 4);
+        messages.push(JSON.parse(raw));
+
+        if (messages.length === expectedCount) {
+          clearTimeout(timeout);
+          resolve(messages);
+          return;
+        }
+      }
+    });
+  });
+}
+
+function collectNativeMessagesUntilIdle(output: PassThrough, idleMs: number) {
+  const messages: unknown[] = [];
+  let buffer = Buffer.alloc(0);
+
+  return new Promise<unknown[]>((resolve) => {
+    let idleTimer = setTimeout(() => resolve(messages), idleMs);
+    const resetIdleTimer = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        output.off("data", onData);
+        resolve(messages);
+      }, idleMs);
+    };
+
+    const onData = (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk]);
+
+      while (buffer.length >= 4) {
+        const messageLength = buffer.readUInt32LE(0);
+        if (buffer.length < messageLength + 4) break;
+
+        const raw = buffer.subarray(4, messageLength + 4).toString("utf8");
+        buffer = buffer.subarray(messageLength + 4);
+        messages.push(JSON.parse(raw));
+      }
+
+      resetIdleTimer();
+    };
+
+    output.on("data", onData);
+  });
 }
 
 async function waitForRequest(requests: Array<{ method: string }>, method: string): Promise<void> {

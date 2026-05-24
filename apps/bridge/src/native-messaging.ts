@@ -35,8 +35,6 @@ export function runNativeMessagingBridge(
   let oversizedBytesToDiscard = 0;
   let cleanupStarted = false;
 
-  writeNativeMessage(output, { type: "bridge.ready", version: PROTOCOL_VERSION });
-
   function enqueueRawMessage(raw: string) {
     let message: unknown;
     try {

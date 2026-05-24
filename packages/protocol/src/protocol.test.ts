@@ -651,7 +651,7 @@ describe("bridge-to-extension protocol validation", () => {
         type: "bridge.error",
         version: 2,
         message: "failed",
-        code: "setup-error"
+        code: "internal_error"
       })
     ).toMatchObject({ ok: true });
 
@@ -697,6 +697,32 @@ describe("bridge-to-extension protocol validation", () => {
         code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
       }
     });
+  });
+
+  it("accepts_known_bridge_error_codes", () => {
+    for (const code of ["invalid_message", "internal_error", "payload_too_large"]) {
+      expect(parseBridgeToExtension({ type: "bridge.error", version: 2, message: "failed", code })).toMatchObject({
+        ok: true
+      });
+    }
+  });
+
+  it("rejects_unknown_bridge_error_codes", () => {
+    expect(parseBridgeToExtension({ type: "bridge.error", version: 2, message: "failed", code: "setup-error" })).toEqual({
+      ok: false,
+      error: "code is invalid"
+    });
+  });
+
+  it("accepts_codex_setup_failed_bridge_error_code", () => {
+    expect(
+      parseBridgeToExtension({
+        type: "bridge.error",
+        version: 2,
+        message: "Codex setup failed.",
+        code: "codex_setup_failed"
+      })
+    ).toMatchObject({ ok: true });
   });
 });
 

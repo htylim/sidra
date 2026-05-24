@@ -49,7 +49,7 @@ describe("mock bridge chat path", () => {
   it("processes back-to-back native messages in frame order", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const messages = collectNativeMessages(output, 4);
+    const messages = collectNativeMessages(output, 3);
 
     runNativeMessagingBridge(input, output, { provider: createMockProvider() });
     input.write(
@@ -70,7 +70,6 @@ describe("mock bridge chat path", () => {
     );
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 2 },
       {
         type: "session.started",
         version: 2,
@@ -95,15 +94,12 @@ describe("mock bridge chat path", () => {
   it("reports invalid native-message JSON without crashing", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const messages = collectNativeMessages(output, 2);
+    const messages = collectNativeMessages(output, 1);
 
     runNativeMessagingBridge(input, output);
     input.write(encodeRawNativeMessage("{"));
 
-    await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 2 },
-      { type: "bridge.error", version: 2, message: "Invalid JSON", code: "invalid_message" }
-    ]);
+    await expect(messages).resolves.toEqual([{ type: "bridge.error", version: 2, message: "Invalid JSON", code: "invalid_message" }]);
   });
 
   it("emits invalid_message bridge.error for unknown extension commands", async () => {
@@ -223,7 +219,7 @@ describe("mock bridge chat path", () => {
   it("native_messaging_custom_limit_is_used_by_default_inner_bridge", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const messages = collectNativeMessages(output, 2);
+    const messages = collectNativeMessages(output, 1);
 
     runNativeMessagingBridge(input, output, { hardPayloadByteLimit: 2_000_000 });
     input.write(
@@ -236,7 +232,6 @@ describe("mock bridge chat path", () => {
     );
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 2 },
       {
         type: "session.error",
         version: 2,

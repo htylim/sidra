@@ -195,21 +195,18 @@ describe("native messaging dispatch", () => {
   it("continues to report invalid JSON without crashing", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const messages = collectNativeMessages(output, 2);
+    const messages = collectNativeMessages(output, 1);
 
     runNativeMessagingBridge(input, output);
     input.write(encodeRawNativeMessage("{"));
 
-    await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 2 },
-      { type: "bridge.error", version: 2, message: "Invalid JSON", code: "invalid_message" }
-    ]);
+    await expect(messages).resolves.toEqual([{ type: "bridge.error", version: 2, message: "Invalid JSON", code: "invalid_message" }]);
   });
 
   it("reports bridge handler rejections without blocking later dispatch", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const messages = collectNativeMessages(output, 2);
+    const messages = collectNativeMessages(output, 1);
     let secondMessageDispatched: (() => void) | undefined;
     const sawSecondMessage = new Promise<void>((resolve) => {
       secondMessageDispatched = resolve;
@@ -234,37 +231,30 @@ describe("native messaging dispatch", () => {
     );
 
     await withTimeout(sawSecondMessage);
-    expect(await messages).toEqual([
-      { type: "bridge.ready", version: 2 },
-      { type: "bridge.error", version: 2, message: "Bridge message failed", code: "internal_error" }
-    ]);
+    expect(await messages).toEqual([{ type: "bridge.error", version: 2, message: "Bridge message failed", code: "internal_error" }]);
   });
 
   it("reports parser validation errors from framed native messages", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const messages = collectNativeMessages(output, 2);
+    const messages = collectNativeMessages(output, 1);
 
     runNativeMessagingBridge(input, output);
     input.write(encodeNativeMessage({ type: "session.delete", version: 2, clientSessionId: "page-1" }));
 
-    await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 2 },
-      { type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }
-    ]);
+    await expect(messages).resolves.toEqual([{ type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }]);
   });
 
   it("rejects_oversized_native_message_before_json_parsing", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const messages = collectNativeMessages(output, 2);
+    const messages = collectNativeMessages(output, 1);
     const invalidOversizedJson = "{".padEnd(101, "x");
 
     runNativeMessagingBridge(input, output, { hardPayloadByteLimit: 100 });
     input.write(encodeRawNativeMessage(invalidOversizedJson));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 2 },
       { type: "bridge.error", version: 2, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE }
     ]);
   });
@@ -272,7 +262,7 @@ describe("native messaging dispatch", () => {
   it("continues_after_rejecting_oversized_native_message_frame", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const messages = collectNativeMessages(output, 3);
+    const messages = collectNativeMessages(output, 2);
 
     runNativeMessagingBridge(input, output, { hardPayloadByteLimit: 100 });
     input.write(
@@ -287,7 +277,6 @@ describe("native messaging dispatch", () => {
     );
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 2 },
       { type: "bridge.error", version: 2, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
       { type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }
     ]);
@@ -296,7 +285,7 @@ describe("native messaging dispatch", () => {
   it("discards_chunked_oversized_native_message_without_buffering_payload", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const messages = collectNativeMessages(output, 3);
+    const messages = collectNativeMessages(output, 2);
     const oversizedFrame = encodeRawNativeMessage("x".repeat(101));
     const nextFrame = encodeNativeMessage({
       type: "session.delete",
@@ -309,7 +298,6 @@ describe("native messaging dispatch", () => {
     input.write(Buffer.concat([oversizedFrame.subarray(10), nextFrame]));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 2 },
       { type: "bridge.error", version: 2, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
       { type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }
     ]);
@@ -318,7 +306,7 @@ describe("native messaging dispatch", () => {
   it("discards_later_oversized_chunks_before_buffering_them_for_parsing", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const messages = collectNativeMessages(output, 3);
+    const messages = collectNativeMessages(output, 2);
     const oversizedFrame = encodeRawNativeMessage("x".repeat(101));
     const nextFrame = encodeNativeMessage({
       type: "session.delete",
@@ -331,7 +319,6 @@ describe("native messaging dispatch", () => {
     input.write(Buffer.concat([oversizedFrame.subarray(4), nextFrame]));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 2 },
       { type: "bridge.error", version: 2, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
       { type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }
     ]);
@@ -340,7 +327,7 @@ describe("native messaging dispatch", () => {
   it("rejects_header_plus_oversized_payload_in_one_chunk_without_parsing_payload_bytes", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const messages = collectNativeMessages(output, 3);
+    const messages = collectNativeMessages(output, 2);
     const oversizedFrame = encodeRawNativeMessage("{".repeat(101));
     const nextFrame = encodeNativeMessage({
       type: "session.delete",
@@ -352,7 +339,6 @@ describe("native messaging dispatch", () => {
     input.write(Buffer.concat([oversizedFrame, nextFrame]));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 2 },
       { type: "bridge.error", version: 2, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE },
       { type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }
     ]);
@@ -361,15 +347,23 @@ describe("native messaging dispatch", () => {
   it("default_native_messaging_bridge_rejects_oversized_frames_with_the_hard_payload_limit", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const messages = collectNativeMessages(output, 2);
+    const messages = collectNativeMessages(output, 1);
 
     runNativeMessagingBridge(input, output);
     input.write(encodeRawNativeMessage("x".repeat(BRIDGE_HARD_PAYLOAD_BYTE_LIMIT + 1)));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.ready", version: 2 },
       { type: "bridge.error", version: 2, message: "Payload is too large.", code: BRIDGE_PAYLOAD_TOO_LARGE_CODE }
     ]);
+  });
+
+  it("native_messaging_transport_does_not_emit_startup_readiness", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+
+    runNativeMessagingBridge(input, output);
+
+    await expect(collectNativeMessagesUntilIdle(output, 20)).resolves.toEqual([]);
   });
 });
 
@@ -454,7 +448,7 @@ describe("native messaging connection cleanup", () => {
 
     runNativeMessagingBridge(input, output, { provider, heartbeatTimeoutMs: 10 });
     input.write(encodeNativeMessage({ type: "session.start", version: 2, clientSessionId: "page-1", providerId: "codex" }));
-    await collectNativeMessages(output, 2);
+    await collectNativeMessages(output, 1);
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(provider.createdSessions[0]?.closeCount).toBe(1);

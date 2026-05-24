@@ -108,55 +108,7 @@ This must produce:
 - `apps/extension/dist`
 - `apps/bridge/dist/cli.js`
 
-## Install The Bridge Wrapper
-
-Create a repo-local executable wrapper. Use absolute paths because browsers
-launch native hosts with a minimal environment.
-
-```sh
-mkdir -p .local
-cat > .local/sidra-agent-bridge <<'SH'
-#!/bin/sh
-exec "/Users/hernantylim/.nvm/versions/node/v22.14.0/bin/node" "/Users/hernantylim/Dev/sandbox/sidra/apps/bridge/dist/cli.js"
-SH
-chmod +x .local/sidra-agent-bridge
-```
-
-If Node moves, update the wrapper with the current absolute Node path from
-`command -v node`. Do not leave `command -v node` inside the wrapper. The browser
-launches native hosts with a minimal environment.
-
-Check the wrapper emits a Native Messaging frame:
-
-```sh
-.local/sidra-agent-bridge >/tmp/sidra-bridge-test.bin &
-pid=$!
-sleep 1
-kill "$pid" 2>/dev/null || true
-od -An -t x1 -N 48 /tmp/sidra-bridge-test.bin
-```
-
-Expected bytes start with a four-byte length, then JSON containing:
-
-```json
-{"type":"bridge.ready","version":2}
-```
-
-A sandbox warning like `nice(5) failed: operation not permitted` is not fatal if
-the frame is emitted.
-
-## Get The Extension ID
-
-The Brave extension ID is stable for the current unpacked extension path:
-
-```text
-dkogbjooeahemlnkpdnhhjbhojhdlnpd
-```
-
-If the path or manifest key changes, relaunch Brave with the extension and read
-the service worker URL host from Playwright.
-
-## Install The Brave Native Host Manifest
+## Install The Native Host
 
 The extension calls:
 
@@ -166,158 +118,97 @@ chrome.runtime.connectNative("com.sidra.agent_bridge")
 
 The manifest filename and `name` must match that host name exactly.
 
-Install this file:
+Use the installer. It creates `.local/sidra-agent-bridge`, makes it executable,
+sets `SIDRA_CODEX_WORKSPACE_ROOT` to the repo root, puts the directory
+containing `codex` on `PATH`, and writes the selected browser manifest.
 
-```text
-~/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.sidra.agent_bridge.json
+Brave:
+
+```sh
+node tools/native-hosts/install-macos-native-hosts.mjs --browser brave --codex "$(command -v codex)"
 ```
 
-Content:
+Chrome:
 
-```json
-{
-  "name": "com.sidra.agent_bridge",
-  "description": "Sidra local agent bridge",
-  "path": "/Users/hernantylim/Dev/sandbox/sidra/.local/sidra-agent-bridge",
-  "type": "stdio",
-  "allowed_origins": ["chrome-extension://dkogbjooeahemlnkpdnhhjbhojhdlnpd/"]
-}
+```sh
+node tools/native-hosts/install-macos-native-hosts.mjs --browser chrome --codex "$(command -v codex)"
+```
+
+Helium:
+
+```sh
+node tools/native-hosts/install-macos-native-hosts.mjs --browser helium --codex "$(command -v codex)"
 ```
 
 Writing under `~/Library/Application Support/...` may require sandbox
 escalation. Ask for escalation when the write fails with `operation not
 permitted`.
 
-In Codex, installing this manifest is different from using an already configured
-browser from the Codex app. A fresh Playwright-launched Brave profile still needs
-the browser-level manifest so `chrome.runtime.connectNative` can resolve
-`com.sidra.agent_bridge`.
-
-Use this setup command from the repo root:
-
-```sh
-mkdir -p "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts"
-cat > "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.sidra.agent_bridge.json" <<'JSON'
-{
-  "name": "com.sidra.agent_bridge",
-  "description": "Sidra local agent bridge",
-  "path": "/Users/hernantylim/Dev/sandbox/sidra/.local/sidra-agent-bridge",
-  "type": "stdio",
-  "allowed_origins": ["chrome-extension://dkogbjooeahemlnkpdnhhjbhojhdlnpd/"]
-}
-JSON
-```
-
-## Manual Smoke With Playwright
-
-Use this shape for a manual smoke check. It starts a local article page, launches
-Brave with the unpacked extension, opens the side panel page, keeps the article
-tab active, clicks `Capture + Send`, and verifies the bridge response.
-
-Run from `apps/extension` after build and manifest install:
-
-```sh
-/Users/hernantylim/.nvm/versions/node/v22.14.0/bin/node --input-type=module -e '
-import { chromium } from "@playwright/test";
-import { createServer } from "node:http";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-
-const html = `<!doctype html>
-<html>
-  <head><title>Manual Sidra Article</title></head>
-  <body>
-    <article>
-      <h1>Manual Sidra Article</h1>
-      <p>This is a local article used for Sidra manual extension verification.</p>
-      <p>Sidra should attach page context and send the prompt through the native bridge.</p>
-    </article>
-  </body>
-</html>`;
-
-const server = createServer((_, response) => {
-  response.writeHead(200, { "content-type": "text/html" });
-  response.end(html);
-});
-
-await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-const port = server.address().port;
-const articleUrl = `http://127.0.0.1:${port}/article`;
-
-const extensionPath = resolve("dist");
-const userDataDir = await mkdtemp(join(tmpdir(), "sidra-brave-profile-"));
-
-const context = await chromium.launchPersistentContext(userDataDir, {
-  executablePath: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-  headless: false,
-  args: [
-    "--disable-crash-reporter",
-    "--disable-crashpad",
-    "--disable-breakpad",
-    `--disable-extensions-except=${extensionPath}`,
-    `--load-extension=${extensionPath}`
-  ]
-});
-
-try {
-  const articlePage = await context.newPage();
-  await articlePage.goto(articleUrl);
-
-  const serviceWorker =
-    context.serviceWorkers()[0] ??
-    (await context.waitForEvent("serviceworker", { timeout: 10000 }));
-  const extensionId = new URL(serviceWorker.url()).host;
-
-  const sidePanelPage = await context.newPage();
-  await sidePanelPage.goto(`chrome-extension://${extensionId}/side-panel.html`);
-  await sidePanelPage.waitForLoadState("domcontentloaded");
-
-  await articlePage.bringToFront();
-  await sidePanelPage.waitForFunction(
-    () =>
-      document.body.innerText.includes("Manual Sidra Article") &&
-      !document.querySelector("textarea")?.disabled,
-    undefined,
-    { timeout: 10000 }
-  );
-
-  await sidePanelPage.locator("textarea").evaluate((element, value) => {
-    const textarea = element;
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-    setter?.call(textarea, value);
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
-  }, "Summarize this local article");
-
-  await articlePage.bringToFront();
-  await sidePanelPage.getByRole("button", { name: "Capture + Send" }).dispatchEvent("click");
-
-  await sidePanelPage.waitForFunction(
-    () =>
-      document.body.innerText.includes("Page context attached") &&
-      document.body.innerText.includes("Mock response"),
-    undefined,
-    { timeout: 10000 }
-  );
-
-  console.log(await sidePanelPage.locator("body").innerText());
-} finally {
-  await context.close();
-  server.close();
-}
-'
-```
-
-Expected output includes:
+The pinned development extension ID is:
 
 ```text
-Manual Sidra Article
-Context attached
-Page context attached
-Summarize this local article
-Session started
-Mock response received.
+mahnogfphkjigcjomjcjifkfdnocbokh
 ```
+
+The manifest `allowed_origins` must contain:
+
+```text
+chrome-extension://mahnogfphkjigcjomjcjifkfdnocbokh/
+```
+
+## Manual Smoke Checklist
+
+Run this checklist for Chrome, Brave, or Helium after build and install:
+
+- Run `pnpm build`.
+- Install the selected manifest with the script above.
+- Load `apps/extension/dist`.
+- Verify the extension ID is `mahnogfphkjigcjomjcjifkfdnocbokh`.
+- Inspect for stale manifests, including repo-local `.local/native-messaging-hosts`.
+- Click the toolbar action from a normal web page and confirm the real side panel opens or focuses.
+- Confirm `.local/sidra-agent-bridge` has the intended `SIDRA_CODEX_WORKSPACE_ROOT` and Codex path.
+- Confirm the side panel connects to the native bridge.
+- If Codex setup fails, confirm the side panel surfaces a blocking setup error. `bridge.ready` is not expected when setup fails.
+- Send a prompt only after the bridge and Codex provider are ready.
+
+Report:
+
+- browser name and version
+- extension ID
+- manifest path
+- bridge executable path
+- whether Codex App Server authenticated
+- observed side panel status text
+
+Known local smoke status on 2026-05-24:
+
+- Brave: verified with the pinned extension ID, the user-level Native Messaging
+  manifest, toolbar action side-panel opening, and a ready bridge.
+- Chrome 148: verified by manual install with the pinned extension ID, toolbar
+  action side-panel opening, and a ready bridge.
+- Helium 0.12.4.1: verified by manual install with the pinned extension ID,
+  toolbar action side-panel opening, and a ready bridge.
+
+Troubleshooting setup failures:
+
+- Missing `SIDRA_CODEX_WORKSPACE_ROOT`: rerun the installer and inspect `.local/sidra-agent-bridge`.
+- `codex` not found: pass `--codex "$(command -v codex)"` and confirm the wrapper `PATH`.
+- Codex account/auth failure: run `codex` directly and complete auth.
+- App Server startup or handshake failure: rerun `pnpm build`, inspect the wrapper, then click Retry.
+- Native host lookup failure: verify manifest path, manifest `name`, executable bit, absolute wrapper path, and `allowed_origins`.
+
+### Helium Research Notes
+
+- Main repo: `imputnet/helium`
+- macOS packaging repo: `imputnet/helium-macos`
+- Installed app path verified on 2026-05-24: `/Applications/Helium.app`
+- Installed app version verified on 2026-05-24: `0.12.4.1`
+- Chromium version verified on 2026-05-24: `148.0.7778.178`
+- Bundle identifier verified on 2026-05-24: `net.imput.helium`
+- Native Messaging host directory verified on 2026-05-24:
+  `~/Library/Application Support/net.imput.helium/NativeMessagingHosts`
+- `chrome.sidePanel`, `chrome.sidePanel.open({ tabId })`, and browser toolbar
+  action side-panel opening were verified.
 
 ### Full DOM Smoke
 
@@ -350,185 +241,10 @@ Full DOM skipped; content too large
 
 Raw DOM should not appear in the transcript.
 
-### Agent Full DOM Smoke Script
-
-Use this script when an agent should validate readable capture, full DOM capture,
-and oversized full DOM in one run. Run it from `apps/extension` after build,
-wrapper install, and Brave manifest install.
-
-```sh
-/Users/hernantylim/.nvm/versions/node/v22.14.0/bin/node --input-type=module -e '
-import { chromium } from "@playwright/test";
-import { createServer } from "node:http";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-
-const largeText = "oversized-dom-content ".repeat(120);
-const html = `<!doctype html>
-<html>
-  <head><title>Manual Sidra Article</title></head>
-  <body>
-    <article>
-      <h1>Manual Sidra Article</h1>
-      <p>This is a local article used for Sidra manual extension verification.</p>
-      <p>Sidra should attach page context and send the prompt through the native bridge.</p>
-      <section id="large-dom-section">${largeText}</section>
-    </article>
-  </body>
-</html>`;
-
-const server = createServer((_, response) => {
-  response.writeHead(200, { "content-type": "text/html" });
-  response.end(html);
-});
-
-await new Promise((resolveServer) => server.listen(0, "127.0.0.1", resolveServer));
-const port = server.address().port;
-const articleUrl = `http://127.0.0.1:${port}/article`;
-const extensionPath = resolve("dist");
-const userDataDir = await mkdtemp(join(tmpdir(), "sidra-brave-profile-"));
-
-const context = await chromium.launchPersistentContext(userDataDir, {
-  executablePath: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-  headless: false,
-  args: [
-    "--disable-crash-reporter",
-    "--disable-crashpad",
-    "--disable-breakpad",
-    `--disable-extensions-except=${extensionPath}`,
-    `--load-extension=${extensionPath}`
-  ]
-});
-
-const result = { browser: "Brave", articleUrl, extensionId: "", userDataDir, checks: [] };
-const pass = (name, details = {}) => result.checks.push({ name, ok: true, ...details });
-const fail = (name, details = {}) => result.checks.push({ name, ok: false, ...details });
-
-async function setPrompt(sidePanelPage, text) {
-  await sidePanelPage.locator("textarea").evaluate((element, value) => {
-    const textarea = element;
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-    setter?.call(textarea, value);
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
-  }, text);
-}
-
-async function captureAndWait(articlePage, sidePanelPage, prompt, expectedMarker) {
-  await setPrompt(sidePanelPage, prompt);
-  await articlePage.bringToFront();
-  await sidePanelPage.getByRole("button", { name: "Capture + Send" }).dispatchEvent("click");
-  await sidePanelPage.waitForFunction(
-    ([marker, promptText]) =>
-      document.body.innerText.includes(marker) &&
-      document.body.innerText.includes(promptText) &&
-      document.body.innerText.includes("Mock response"),
-    [expectedMarker, prompt],
-    { timeout: 10000 }
-  );
-  return await sidePanelPage.locator("body").innerText();
-}
-
-try {
-  const articlePage = await context.newPage();
-  await articlePage.goto(articleUrl);
-
-  const serviceWorker =
-    context.serviceWorkers()[0] ??
-    (await context.waitForEvent("serviceworker", { timeout: 10000 }));
-  const extensionId = new URL(serviceWorker.url()).host;
-  result.extensionId = extensionId;
-
-  const sidePanelPage = await context.newPage();
-  await sidePanelPage.goto(`chrome-extension://${extensionId}/side-panel.html`);
-  await sidePanelPage.waitForLoadState("domcontentloaded");
-
-  await articlePage.bringToFront();
-  await sidePanelPage.waitForFunction(
-    () =>
-      document.body.innerText.includes("Manual Sidra Article") &&
-      !document.querySelector("textarea")?.disabled,
-    undefined,
-    { timeout: 10000 }
-  );
-  pass("side panel connected to native bridge and active article", { extensionId });
-
-  const readableText = await captureAndWait(
-    articlePage,
-    sidePanelPage,
-    "Summarize this local article",
-    "Page context attached"
-  );
-  if (
-    readableText.includes("Context attached") &&
-    readableText.includes("Session started") &&
-    readableText.includes("Mock response received.")
-  ) {
-    pass("readable Capture + Send shows expected markers");
-  } else {
-    fail("readable Capture + Send shows expected markers", { body: readableText });
-  }
-
-  await sidePanelPage.getByRole("button", { name: "Prompt options" }).click();
-  await sidePanelPage.getByRole("checkbox", { name: "Send Full DOM" }).check();
-  const checked = await sidePanelPage.getByRole("checkbox", { name: "Send Full DOM" }).isChecked();
-  if (checked) pass("Send Full DOM toggle can be enabled");
-  else fail("Send Full DOM toggle can be enabled");
-
-  const fullDomText = await captureAndWait(articlePage, sidePanelPage, "Send full DOM now", "Full DOM attached");
-  if (
-    fullDomText.includes("Full DOM attached") &&
-    !fullDomText.includes("<html") &&
-    !fullDomText.includes("<body") &&
-    !fullDomText.includes("large-dom-section")
-  ) {
-    pass("full DOM send shows marker without raw HTML in transcript");
-  } else {
-    fail("full DOM send shows marker without raw HTML in transcript", { body: fullDomText });
-  }
-
-  await sidePanelPage.evaluate(async () => {
-    await chrome.storage.local.set({
-      "sidra.settings.v1": {
-        readableContentLimitCharacters: 120000,
-        domContentLimitCharacters: 1000
-      }
-    });
-  });
-  await sidePanelPage.waitForTimeout(250);
-
-  const oversizedText = await captureAndWait(
-    articlePage,
-    sidePanelPage,
-    "Send oversized full DOM",
-    "Full DOM skipped; content too large"
-  );
-  if (
-    oversizedText.includes("Full DOM skipped: too large") &&
-    oversizedText.includes("Full DOM skipped; content too large") &&
-    !oversizedText.includes("<html") &&
-    !oversizedText.includes("large-dom-section")
-  ) {
-    pass("oversized full DOM sends metadata-only marker without raw HTML");
-  } else {
-    fail("oversized full DOM sends metadata-only marker without raw HTML", { body: oversizedText });
-  }
-
-  console.log(JSON.stringify(result, null, 2));
-} finally {
-  await context.close();
-  server.close();
-}
-'
-```
-
-All checks should return `"ok": true`. Clean up the manifest and temporary
-profile listed in the JSON result after the run.
-
 ## Manual Play Setup For The User
 
 Use this path when the user wants a browser left open so they can test manually.
-Do the build, bridge wrapper, and Brave manifest steps above first.
+Do the build and installer steps above first.
 
 Launch a detached Brave window from the repo root:
 
@@ -542,8 +258,7 @@ open -na "Brave Browser" --args \
   --disable-breakpad \
   --disable-extensions-except=/Users/hernantylim/Dev/sandbox/sidra/apps/extension/dist \
   --load-extension=/Users/hernantylim/Dev/sandbox/sidra/apps/extension/dist \
-  https://example.com \
-  chrome-extension://dkogbjooeahemlnkpdnhhjbhojhdlnpd/side-panel.html
+  https://example.com
 ```
 
 This leaves Brave running after the agent command exits.
@@ -553,8 +268,7 @@ Report these details to the user:
 - Browser: Brave
 - Manual profile: `/private/tmp/sidra-brave-play-profile-detached`
 - Extension path: `/Users/hernantylim/Dev/sandbox/sidra/apps/extension/dist`
-- Extension ID: `dkogbjooeahemlnkpdnhhjbhojhdlnpd`
-- Side panel URL: `chrome-extension://dkogbjooeahemlnkpdnhhjbhojhdlnpd/side-panel.html`
+- Extension ID: `mahnogfphkjigcjomjcjifkfdnocbokh`
 - Native host manifest:
   `~/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.sidra.agent_bridge.json`
 

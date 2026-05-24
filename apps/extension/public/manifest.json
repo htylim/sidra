@@ -3,6 +3,7 @@
   "name": "Sidra",
   "version": "0.0.0",
   "description": "Chat with a local AI agent about the current page.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxPfkWvJY2kdyEY2XJrYv8SLDnC2yPA+Vu4NbPs5En0kSZ+il0tf+cSZ+db8yv53KdN1waUWZCsaeamelhGgwJcZ3BO96M4sc5dh9LQs9jZhtcZlfu9TZwYGWK1DRPjepZQnqNF/L1xeFRtnQHZTA36qN6KCm4pEQL1kVwaQaur/OyZLRAy7yKH0sveHQ0/ee7y5K1EriaVTeqioR1cuv11itwF8/9D6YZiZtBMSNJA5ntd7zBPeILEdhC598HzM99x1JsLyanTFjcd4Tufs+pduqG6Ou59jGayjNhMqhpWU8qZ8UM3VaZxeMUdcJm5TmQz3sCx84RZFjfcAOhkCWAQIDAQAB",
   "permissions": ["sidePanel", "nativeMessaging", "storage", "tabs", "scripting"],
   "host_permissions": ["<all_urls>"],
   "side_panel": {
