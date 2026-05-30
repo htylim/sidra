@@ -1,8 +1,32 @@
 import { useEffect, useState } from "react";
 import type { PermissionDecision } from "@sidra/protocol";
+import { AlertTriangle, FileText, Plus, Settings, Sparkles } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { CaptureMode } from "./capture-mode";
 import type { SidePanelSnapshot } from "./side-panel-controller";
 import { TranscriptView } from "./transcript-view";
+
+type IconName = "alert" | "file-text" | "plus" | "settings" | "sparkle";
+
+function SidraIcon(props: { name: IconName; className?: string }) {
+  const IconByName: Record<IconName, LucideIcon> = {
+    alert: AlertTriangle,
+    "file-text": FileText,
+    plus: Plus,
+    settings: Settings,
+    sparkle: Sparkles
+  };
+  const Icon = IconByName[props.name];
+
+  return (
+    <Icon
+      aria-hidden="true"
+      className={`sidra-icon${props.className ? ` ${props.className}` : ""}`}
+      focusable={false}
+      strokeWidth={2.35}
+    />
+  );
+}
 
 export function SidePanelView(props: {
   snapshot: SidePanelSnapshot;
@@ -60,15 +84,17 @@ export function SidePanelView(props: {
         <div className="brand-mark">S</div>
         <h1>Sidra</h1>
         <button type="button" className="toolbar-button" aria-label="Settings" onClick={props.onOpenSettings}>
-          ⚙
+          <SidraIcon name="settings" />
         </button>
         <button type="button" className="toolbar-button" aria-label="New chat" onClick={props.onNewChat}>
-          +
+          <SidraIcon name="plus" />
         </button>
       </header>
 
       <section className="page-card" aria-label="Current page">
-        <div className="page-icon">□</div>
+        <div className="page-icon">
+          <SidraIcon name="file-text" />
+        </div>
         <div className="page-copy">
           <div className="page-title" title={pageCard.title}>
             {pageCard.title}
@@ -88,7 +114,9 @@ export function SidePanelView(props: {
           <UnsupportedPagePanel reason={props.snapshot.activePage.reason} />
         ) : props.snapshot.activeSession.transcript.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">✦</div>
+            <div className="empty-icon">
+              <SidraIcon name="sparkle" />
+            </div>
             <h2>Ask anything about this page</h2>
             <p>Use the actions below or ask your own question.</p>
             {props.snapshot.activeSession.quickActions.length > 0 ? (
@@ -104,7 +132,7 @@ export function SidePanelView(props: {
                       void props.onQuickAction(action.id);
                     }}
                   >
-                    <span aria-hidden="true">✦</span>
+                    <SidraIcon name="sparkle" className="quick-action-icon" />
                     <span>{action.label}</span>
                   </button>
                 ))}
@@ -142,7 +170,7 @@ export function SidePanelView(props: {
             disabled={promptEntryDisabled}
             onClick={() => setPromptOptionsOpen((open) => !open)}
           >
-            ⚙
+            <SidraIcon name="settings" />
           </button>
           {promptOptionsOpen && !promptEntryDisabled ? (
             <div className="prompt-options-popover" id="prompt-options-popover" role="group" aria-label="Prompt options">
@@ -199,7 +227,9 @@ function UnsupportedPagePanel(props: {
 }) {
   return (
     <div className="setup-panel unsupported">
-      <div className="setup-icon">!</div>
+      <div className="setup-icon">
+        <SidraIcon name="alert" />
+      </div>
       <h2>Capture unavailable</h2>
       <p>{unsupportedPageLabel(props.reason)}</p>
     </div>
@@ -218,7 +248,9 @@ function BridgeSetupPanel(props: {
 
   return (
     <div className={`setup-panel ${props.availability.status}`}>
-      <div className="setup-icon">!</div>
+      <div className="setup-icon">
+        <SidraIcon name="alert" />
+      </div>
       <h2>{heading}</h2>
       <p>{message}</p>
       {retryable ? (

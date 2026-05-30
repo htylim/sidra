@@ -75,11 +75,23 @@ textarea {
 .toolbar-button,
 .options-button {
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
   border: 1px solid #cfd9d5;
   border-radius: 6px;
   background: #ffffff;
+  color: #17201f;
+  line-height: 0;
+}
+
+.sidra-icon {
+  display: block;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  pointer-events: none;
 }
 
 .page-card {
@@ -97,7 +109,16 @@ textarea {
 
 .page-icon {
   flex: 0 0 auto;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
   color: #087c71;
+}
+
+.page-icon .sidra-icon {
+  width: 20px;
+  height: 20px;
 }
 
 .page-copy {
@@ -165,6 +186,12 @@ textarea {
   color: #087c71;
   background: #eef8f5;
   font-weight: 700;
+}
+
+.setup-icon .sidra-icon,
+.empty-icon .sidra-icon {
+  width: 24px;
+  height: 24px;
 }
 
 .setup-panel.error .setup-icon,
@@ -254,6 +281,11 @@ textarea {
   min-height: 40px;
   padding: 8px 10px;
   text-align: left;
+}
+
+.quick-action-icon {
+  width: 18px;
+  height: 18px;
 }
 
 .quick-action-button span:last-child {
@@ -637,7 +669,7 @@ textarea {
 
 .send-button {
   min-width: 0;
-  min-height: 32px;
+  min-height: 36px;
   padding: 0 12px;
   overflow-wrap: anywhere;
   white-space: normal;
