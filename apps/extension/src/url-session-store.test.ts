@@ -842,13 +842,18 @@ describe("UrlSessionStore context state", () => {
   it("does_not_update_context_state_when_context_submission_is_rejected", () => {
     const { store } = createStoreHarness();
     store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPromptWithContext({ prompt: "describe", pageContext: metadataOnlyPageContext() });
+    store.updateActiveDraftPrompt("keep draft");
 
     expect(store.sendPromptWithContext({ prompt: "   ", pageContext: readablePageContext() })).toBe(false);
 
     expect(store.getSnapshot().activeSession.contextState).toEqual({
-      status: "none",
-      label: "No context sent yet"
+      status: "metadata_only",
+      label: "Metadata attached",
+      capturedAt: "2026-05-10T12:00:00.000Z",
+      reason: "no_usable_text"
     });
+    expect(store.getSnapshot().activeSession.draftPrompt).toBe("keep draft");
   });
 
   it("keeps_context_state_scoped_to_the_url_session", () => {
@@ -882,6 +887,7 @@ describe("UrlSessionStore context state", () => {
   it("records_capture_unavailable_for_the_active_session_without_clearing_draft", () => {
     const { store, transport } = createStoreHarness();
     store.selectPage(pageIdentity("https://example.com/a"));
+    store.updateActiveSendMode("send");
     store.updateActiveDraftPrompt("keep this");
 
     store.recordCaptureUnavailable({ message: "Could not capture this page." });
@@ -889,6 +895,7 @@ describe("UrlSessionStore context state", () => {
     expect(transport.postedMessages).toEqual([]);
     expect(store.getSnapshot().activeSession).toMatchObject({
       draftPrompt: "keep this",
+      sendMode: "send",
       contextState: {
         status: "capture_unavailable",
         label: "Capture unavailable",
@@ -898,6 +905,94 @@ describe("UrlSessionStore context state", () => {
     expect(store.getSnapshot().activeSession.transcript).toEqual([
       expect.objectContaining({ role: "status", tone: "error", text: "Could not capture this page." })
     ]);
+  });
+
+  it("record_capture_unavailable_preserves_default_capture_send_mode", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    store.recordCaptureUnavailable({ message: "Could not capture this page." });
+
+    expect(store.getSnapshot().activeSession.sendMode).toBe("capture");
+  });
+});
+
+describe("UrlSessionStore send mode state", () => {
+  it("new_url_session_defaults_to_capture_send", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.getSnapshot().activeSession.sendMode).toBe("capture");
+  });
+
+  it("successful_context_send_switches_active_session_to_plain_send", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.sendPromptWithContext({ prompt: "summarize", pageContext: readablePageContext() })).toBe(true);
+
+    expect(store.getSnapshot().activeSession.sendMode).toBe("send");
+  });
+
+  it("accepted_metadata_only_context_send_switches_active_session_to_plain_send", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.sendPromptWithContext({ prompt: "describe", pageContext: metadataOnlyPageContext() })).toBe(true);
+
+    expect(store.getSnapshot().activeSession.sendMode).toBe("send");
+  });
+
+  it("rejected_context_send_preserves_send_mode", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.updateActiveSendMode("send");
+
+    expect(store.sendPromptWithContext({ prompt: "   ", pageContext: readablePageContext() })).toBe(false);
+
+    expect(store.getSnapshot().activeSession.sendMode).toBe("send");
+  });
+
+  it("rejected_context_send_preserves_default_capture_send_mode", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.sendPromptWithContext({ prompt: "   ", pageContext: readablePageContext() })).toBe(false);
+
+    expect(store.getSnapshot().activeSession.sendMode).toBe("capture");
+  });
+
+  it("manual_send_mode_before_context_is_preserved_for_plain_send", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    store.updateActiveSendMode("send");
+    expect(store.sendPrompt("plain")).toBe(true);
+
+    expect(store.getSnapshot().activeSession.sendMode).toBe("send");
+  });
+
+  it("send_mode_is_scoped_per_url_session", () => {
+    const { store } = createStoreHarness({ clientSessionIds: ["client-a", "client-b"] });
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.sendPromptWithContext({ prompt: "summarize", pageContext: readablePageContext() });
+    store.selectPage(pageIdentity("https://example.com/b"));
+
+    expect(store.getSnapshot().activeSession.sendMode).toBe("capture");
+
+    const sessions = sessionsByClientSessionId(store);
+    expect(sessions.get("client-a")?.sendMode).toBe("send");
+    expect(sessions.get("client-b")?.sendMode).toBe("capture");
+  });
+
+  it("new_chat_resets_send_mode_to_capture", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.updateActiveSendMode("send");
+
+    store.newChat();
+
+    expect(store.getSnapshot().activeSession.sendMode).toBe("capture");
   });
 });
 

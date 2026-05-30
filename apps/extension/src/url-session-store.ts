@@ -28,10 +28,13 @@ export type ContextState =
     }
   | { status: "capture_unavailable"; label: "Capture unavailable"; message: string };
 
+export type SendMode = "capture" | "send";
+
 export type UrlSessionSnapshot = {
   pageKey: PageKey;
   clientSessionId: string;
   captureMode: CaptureMode;
+  sendMode: SendMode;
   draftPrompt: string;
   contextState: ContextState;
   transcript: TranscriptEntry[];
@@ -59,6 +62,7 @@ type UrlSessionRecord = {
   pageIdentity: Extract<PageIdentity, { status: "ready" }>;
   clientSessionId: string;
   captureMode: CaptureMode;
+  sendMode: SendMode;
   draftPrompt: string;
   contextState: ContextState;
   approvals: SessionApprovalState;
@@ -126,7 +130,10 @@ export class UrlSessionStore {
     };
   }
 
-  selectPage(identity: PageIdentity, options: { initialCaptureMode?: CaptureMode } = {}): boolean {
+  selectPage(
+    identity: PageIdentity,
+    options: { initialCaptureMode?: CaptureMode; initialSendMode?: SendMode } = {}
+  ): boolean {
     if (identity.status !== "ready") {
       if (this.activePageKey === undefined) return false;
       this.activePageKey = undefined;
@@ -139,7 +146,13 @@ export class UrlSessionStore {
     if (existingRecord) {
       existingRecord.pageIdentity = identity;
     } else {
-      this.recordsByPageKey.set(identity.pageKey, this.createRecord(identity, options.initialCaptureMode));
+      this.recordsByPageKey.set(
+        identity.pageKey,
+        this.createRecord(identity, {
+          captureMode: options.initialCaptureMode,
+          sendMode: options.initialSendMode
+        })
+      );
       created = true;
     }
 
@@ -165,6 +178,14 @@ export class UrlSessionStore {
     this.emit();
   }
 
+  updateActiveSendMode(sendMode: SendMode): void {
+    const activeRecord = this.getActiveRecord();
+    if (!activeRecord || activeRecord.sendMode === sendMode) return;
+
+    activeRecord.sendMode = sendMode;
+    this.emit();
+  }
+
   sendPrompt(prompt?: string): boolean {
     const activeRecord = this.getActiveRecord();
     if (!activeRecord) return false;
@@ -187,6 +208,7 @@ export class UrlSessionStore {
 
     activeRecord.draftPrompt = "";
     activeRecord.contextState = contextStateForPageContext(input.pageContext);
+    activeRecord.sendMode = "send";
     this.emit();
     return true;
   }
@@ -252,6 +274,7 @@ export class UrlSessionStore {
     activeRecord.draftPrompt = "";
     activeRecord.contextState = INITIAL_CONTEXT_STATE;
     activeRecord.captureMode = "readable";
+    activeRecord.sendMode = "capture";
     activeRecord.approvals.clear();
     activeRecord.coordinator.newChat();
     this.emit();
@@ -285,14 +308,15 @@ export class UrlSessionStore {
 
   private createRecord(
     identity: Extract<PageIdentity, { status: "ready" }>,
-    initialCaptureMode: CaptureMode = "readable"
+    options: { captureMode?: CaptureMode; sendMode?: SendMode } = {}
   ): UrlSessionRecord {
     const clientSessionId = this.createClientSessionId();
     const coordinator = this.createCoordinator(clientSessionId);
     const record: UrlSessionRecord = {
       pageIdentity: identity,
       clientSessionId,
-      captureMode: initialCaptureMode,
+      captureMode: options.captureMode ?? "readable",
+      sendMode: options.sendMode ?? "capture",
       draftPrompt: "",
       contextState: INITIAL_CONTEXT_STATE,
       approvals: new InMemorySessionApprovalState(),
@@ -333,6 +357,7 @@ export class UrlSessionStore {
       pageKey: record.pageIdentity.pageKey,
       clientSessionId: record.clientSessionId,
       captureMode: record.captureMode,
+      sendMode: record.sendMode,
       draftPrompt: record.draftPrompt,
       contextState: record.contextState,
       transcript: coordinatorSnapshot.transcript,
@@ -396,6 +421,7 @@ function createEmptySessionSnapshot(): UrlSessionSnapshot {
     pageKey: EMPTY_PAGE_KEY,
     clientSessionId: "",
     captureMode: "readable",
+    sendMode: "capture",
     draftPrompt: "",
     contextState: INITIAL_CONTEXT_STATE,
     transcript: [],

@@ -4,6 +4,7 @@ import type { CaptureMode } from "./capture-mode";
 import { CurrentPageCard } from "./current-page-card";
 import { SidraIcon } from "./sidra-icon";
 import type { SidePanelSnapshot } from "./side-panel-controller";
+import type { SendMode } from "./url-session-store";
 import { TranscriptView } from "./transcript-view";
 
 export function SidePanelView(props: {
@@ -15,11 +16,13 @@ export function SidePanelView(props: {
   onRespondToPermission(requestId: string, decision: PermissionDecision): boolean;
   onDraftPromptChange(text: string): void;
   onCaptureModeChange(captureMode: CaptureMode): void;
+  onSendModeChange(sendMode: SendMode): void;
   onNewChat(): void;
   onRetryBridge(): void;
   onOpenSettings(): void;
 }) {
   const [promptOptionsOpen, setPromptOptionsOpen] = useState(false);
+  const [sendModeMenuOpen, setSendModeMenuOpen] = useState(false);
   const bridgeBlocked = props.snapshot.bridge.availability.status !== "ready";
   const pageUnsupported = props.snapshot.activePage.status === "unsupported";
   const chatUnavailable = !props.snapshot.bridge.canUseChat || pageUnsupported;
@@ -30,9 +33,14 @@ export function SidePanelView(props: {
   const draftPrompt = props.snapshot.activeSession.draftPrompt;
   const sendFullDom = props.snapshot.activeSession.captureMode === "full_dom";
   const promptOptionsVisible = promptOptionsOpen && !promptEntryDisabled;
+  const sendMode = props.snapshot.activeSession.sendMode;
+  const sendActionLabel = sendMode === "capture" ? "Capture + Send" : "Send";
 
   useEffect(() => {
-    if (promptEntryDisabled) setPromptOptionsOpen(false);
+    if (promptEntryDisabled) {
+      setPromptOptionsOpen(false);
+      setSendModeMenuOpen(false);
+    }
   }, [promptEntryDisabled]);
 
   useEffect(() => {
@@ -46,13 +54,23 @@ export function SidePanelView(props: {
     return () => document.removeEventListener("keydown", handleEscape);
   }, [cancelDisabled, props.onCancelTurn]);
 
-  function sendPrompt() {
+  function submitPrompt() {
     if (promptEntryDisabled) return;
 
     const prompt = draftPrompt.trim();
     if (!prompt) return;
 
-    void props.onCaptureAndSend(prompt);
+    if (sendMode === "capture") {
+      void props.onCaptureAndSend(prompt);
+      return;
+    }
+
+    props.onSendPrompt(prompt);
+  }
+
+  function selectSendMode(nextSendMode: SendMode) {
+    props.onSendModeChange(nextSendMode);
+    setSendModeMenuOpen(false);
   }
 
   const pageCard = getPageCardDisplay(props.snapshot);
@@ -130,7 +148,7 @@ export function SidePanelView(props: {
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
-              sendPrompt();
+              submitPrompt();
             }
           }}
         />
@@ -144,7 +162,10 @@ export function SidePanelView(props: {
             aria-controls="prompt-options-popover"
             data-state={promptOptionsVisible ? "open" : "closed"}
             disabled={promptEntryDisabled}
-            onClick={() => setPromptOptionsOpen((open) => !open)}
+            onClick={() => {
+              setSendModeMenuOpen(false);
+              setPromptOptionsOpen((open) => !open);
+            }}
           >
             <SidraIcon name="settings" />
           </button>
@@ -164,14 +185,61 @@ export function SidePanelView(props: {
               </label>
             </div>
           ) : null}
-          <button
-            type="button"
-            className={`send-button${turnRunning ? " cancel-button" : ""}`}
-            onClick={turnRunning ? props.onCancelTurn : sendPrompt}
-            disabled={turnRunning ? cancelDisabled : promptEntryDisabled}
-          >
-            {turnRunning ? "Cancel" : "Capture + Send"}
-          </button>
+          {turnRunning ? (
+            <button
+              type="button"
+              className="send-button cancel-button"
+              onClick={props.onCancelTurn}
+              disabled={cancelDisabled}
+            >
+              Cancel
+            </button>
+          ) : (
+            <div className="send-split-button">
+              <button
+                type="button"
+                className="send-button split-main-button"
+                onClick={submitPrompt}
+                disabled={promptEntryDisabled}
+              >
+                {sendActionLabel}
+              </button>
+              <button
+                type="button"
+                className="send-mode-menu-button"
+                aria-label="Choose send mode"
+                aria-expanded={sendModeMenuOpen}
+                aria-controls="send-mode-menu"
+                disabled={promptEntryDisabled}
+                onClick={() => {
+                  setPromptOptionsOpen(false);
+                  setSendModeMenuOpen((open) => !open);
+                }}
+              >
+                <SidraIcon name="chevron-down" />
+              </button>
+              {sendModeMenuOpen && !promptEntryDisabled ? (
+                <div className="send-mode-menu" id="send-mode-menu" role="group" aria-label="Send mode">
+                  <button
+                    type="button"
+                    className="send-mode-menu-item"
+                    aria-pressed={sendMode === "capture"}
+                    onClick={() => selectSendMode("capture")}
+                  >
+                    Capture + Send
+                  </button>
+                  <button
+                    type="button"
+                    className="send-mode-menu-item"
+                    aria-pressed={sendMode === "send"}
+                    onClick={() => selectSendMode("send")}
+                  >
+                    Send
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
       </footer>
     </main>
