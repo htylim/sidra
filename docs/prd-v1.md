@@ -116,10 +116,9 @@ The UI mockups establish these V1 layout details:
 - Keep the panel dense enough for repeated use, not a marketing-style interface.
 - Use compact bordered controls and cards with subtle radius.
 - Show the current page as a persistent card near the top of the sidebar.
-- Use a document/page icon in the current page card.
+- Show the browser tab favicon in the current page card when available. Fall back to a document/page icon.
 - Truncate long page titles with ellipsis.
 - Show page context status in the card, such as `No context sent yet` or `Context attached`.
-- Include a chevron on the page card for future expansion/details.
 - Empty state should be centered in the chat area with a small chat illustration/icon, a short heading, helper text, and quick actions.
 - The composer should be visually separated at the bottom with a large text area, context/options button on the left, and split send button on the right.
 - The send button should use an icon plus text, such as `Capture + Send` or `Send`.
@@ -131,10 +130,9 @@ The side panel should always show the currently active page identity above the t
 
 The current page card displays:
 
-- page/document icon
+- browser tab favicon, or a page/document fallback icon
 - truncated page title
 - context state
-- expand/collapse chevron
 
 Context states include:
 
@@ -147,8 +145,6 @@ Context states include:
 - `Capture unavailable`
 
 This card is session-specific. When the active tab/page changes, the card updates with that URL session.
-
-Expanded page-card details can show the normalized/canonical URL and what context has been attached, but full raw page content should not be shown in V1.
 
 ## Prompt Options Popover
 

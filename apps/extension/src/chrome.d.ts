@@ -5,6 +5,7 @@ declare namespace chrome {
       windowId?: number;
       url?: string;
       title?: string;
+      favIconUrl?: string;
     };
 
     type QueryInfo = {
@@ -20,6 +21,7 @@ declare namespace chrome {
     type TabChangeInfo = {
       url?: string;
       title?: string;
+      favIconUrl?: string;
     };
 
     function query(queryInfo: QueryInfo): Promise<Tab[]>;

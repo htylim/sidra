@@ -145,10 +145,10 @@ it("preserves_active_page_favicon_url_in_controller_snapshot", () => {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Phase 1 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts src/side-panel-controller.test.ts -t "favicon"`
-- [ ] Phase 1 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts src/side-panel-controller.test.ts -t "favicon"`
-- [ ] No related extension tests regress: `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts src/side-panel-controller.test.ts`
-- [ ] Type checking passes: `pnpm --filter @sidra/extension check`
+- [x] Phase 1 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts src/side-panel-controller.test.ts -t "favicon"`
+- [x] Phase 1 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts src/side-panel-controller.test.ts -t "favicon"`
+- [x] No related extension tests regress: `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts src/side-panel-controller.test.ts`
+- [x] Type checking passes: `pnpm --filter @sidra/extension check`
 
 #### Manual Verification:
 - [ ] TDD data-flow work is covered by automated tests in this phase. Manual browser verification is deferred to Phase 2, where the favicon is visible in the UI.
@@ -285,10 +285,10 @@ export type CurrentPageCardProps = {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Phase 2 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx src/side-panel-boundary.test.ts -t "current page card|current_page_card|browser api|snapshot_favicon|no_chevron"`
-- [ ] Phase 2 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx src/side-panel-boundary.test.ts -t "current page card|current_page_card|browser api|snapshot_favicon|no_chevron"`
-- [ ] Full current page card, side-panel view, and boundary tests pass: `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx src/side-panel-boundary.test.ts`
-- [ ] Type checking passes: `pnpm --filter @sidra/extension check`
+- [x] Phase 2 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx src/side-panel-boundary.test.ts -t "current page card|current_page_card|browser api|snapshot_favicon|no_chevron"`
+- [x] Phase 2 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx src/side-panel-boundary.test.ts -t "current page card|current_page_card|browser api|snapshot_favicon|no_chevron"`
+- [x] Full current page card, side-panel view, and boundary tests pass: `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx src/side-panel-boundary.test.ts`
+- [x] Type checking passes: `pnpm --filter @sidra/extension check`
 
 #### Manual Verification:
 - [ ] Before any manual extension verification, read `docs/MANUAL-E2E-RUNBOOK.md` and follow its known-good real side-panel path and reporting rules.
@@ -345,9 +345,9 @@ rg -n "Use a document/page icon|page/document icon" docs/prd-v1.md
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Documentation search confirms stale chevron wording is gone from durable docs and production source: `rg -n "chevron|expand/collapse" docs README.md apps/extension/src -g '!docs/specs/**' -g '!docs/issues/**' -g '!*.test.ts' -g '!*.test.tsx'`
-- [ ] Documentation search confirms stale document-icon-only wording is gone from the PRD: `rg -n "Use a document/page icon|page/document icon" docs/prd-v1.md`
-- [ ] Type checking still passes after doc changes are staged with code changes: `pnpm --filter @sidra/extension check`
+- [x] Documentation search confirms stale chevron wording is gone from durable docs and production source: `rg -n "chevron|expand/collapse" docs README.md apps/extension/src -g '!docs/specs/**' -g '!docs/issues/**' -g '!*.test.ts' -g '!*.test.tsx'`
+- [x] Documentation search confirms stale document-icon-only wording is gone from the PRD: `rg -n "Use a document/page icon|page/document icon" docs/prd-v1.md`
+- [x] Type checking still passes after doc changes are staged with code changes: `pnpm --filter @sidra/extension check`
 
 #### Manual Verification:
 - [ ] Before any manual extension verification, read `docs/MANUAL-E2E-RUNBOOK.md` and follow its known-good real side-panel path and reporting rules.

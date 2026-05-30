@@ -1359,6 +1359,22 @@ describe("SidePanelController URL sessions", () => {
     });
   });
 
+  it("preserves_active_page_favicon_url_in_controller_snapshot", () => {
+    const { controller, activePage } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/a")
+    });
+
+    activePage.emit({
+      ...pageIdentityWithTitle("https://example.com/a", "Page A"),
+      favIconUrl: "https://example.com/favicon.ico"
+    });
+
+    expect(controller.getSnapshot().activePage).toMatchObject({
+      status: "ready",
+      favIconUrl: "https://example.com/favicon.ico"
+    });
+  });
+
   it("refreshes_unsupported_page_details_when_the_page_stays_unsupported", () => {
     const { controller, activePage } = createHarnessWithOptions({
       initialPage: { status: "unsupported", reason: "missing_url" }

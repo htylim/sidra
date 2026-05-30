@@ -34,6 +34,20 @@ describe("side panel architecture boundary", () => {
     expect(source).not.toContain("connectNative");
   });
 
+  it("keeps_current_page_card_presentation_files_free_of_browser_api_usage", () => {
+    const presentationSources = ["./side-panel-view.tsx", "./current-page-card.tsx", "./sidra-icon.tsx"].map(
+      (relativePath) => readSource(relativePath)
+    );
+
+    for (const source of presentationSources) {
+      expect(source).not.toContain("chrome.");
+      expect(source).not.toContain("connectNative");
+      expect(source).not.toContain("chrome.scripting");
+      expect(source).not.toContain("executeScript");
+      expect(source).not.toContain("document.body");
+    }
+  });
+
   it("creates Chrome-backed dependencies only through the controller composition factory", () => {
     const source = readSource("./side-panel.tsx");
 

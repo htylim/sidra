@@ -14,6 +14,7 @@ afterEach(() => {
 
 type SnapshotOptions = {
   title?: string;
+  favIconUrl?: string;
   contextLabel?: string;
   contextState?: SidePanelSnapshot["activeSession"]["contextState"];
   captureMode?: SidePanelSnapshot["activeSession"]["captureMode"];
@@ -32,7 +33,8 @@ function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
       status: "ready",
       pageKey: "https://example.com/article" as PageKey,
       url: "https://example.com/article",
-      displayTitle: options.title ?? "Example Article"
+      displayTitle: options.title ?? "Example Article",
+      favIconUrl: options.favIconUrl
     },
     activeSession: {
       pageKey: "https://example.com/article" as SidePanelSnapshot["activeSession"]["pageKey"],
@@ -526,6 +528,25 @@ describe("SidePanelView URL sessions", () => {
   it("keeps_empty_state_scoped_to_the_active_session", () => {
     const markup = renderPageSnapshot(snapshotForPage({ transcript: [] }));
     expect(markup).toContain("Ask anything about this page");
+  });
+
+  describe("current page card integration", () => {
+    it("renders_snapshot_favicon_and_no_chevron_in_the_side_panel", () => {
+      renderInteractiveSnapshot(
+        snapshotForPage({
+          title: "Readable Article",
+          favIconUrl: "https://example.com/favicon.ico",
+          contextState: { status: "attached", label: "Context attached", capturedAt: "2026-05-10T12:00:00.000Z" }
+        })
+      );
+
+      expect(screen.getByLabelText("Current page")).not.toBeNull();
+      expect(screen.getByText("Readable Article")).not.toBeNull();
+      expect(screen.getByText("Context attached")).not.toBeNull();
+      expect(document.querySelector("img.page-favicon")?.getAttribute("src")).toBe("https://example.com/favicon.ico");
+      expect(document.querySelector(`.${"chev"}${"ron"}`)).toBeNull();
+      expect(screen.queryByText("›")).toBeNull();
+    });
   });
 });
 

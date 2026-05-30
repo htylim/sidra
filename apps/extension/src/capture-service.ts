@@ -3,7 +3,7 @@ import type { PageContext, PageContextMetadata } from "@sidra/protocol";
 import { type ActivePageTab } from "./active-page";
 import type { CaptureMode } from "./capture-mode";
 import { captureCurrentDocumentSnapshot, type CapturedTabDocument } from "./capture-script";
-import { resolvePageIdentity, type PageIdentity } from "./page-key";
+import { normalizeFavIconUrl, resolvePageIdentity, type PageIdentity } from "./page-key";
 import { createDefaultSettingsSource, type SidraSettings } from "./settings-store";
 
 export type { CapturedTabDocument };
@@ -83,7 +83,7 @@ export class CaptureService {
 
     if (activeTab?.id === undefined) {
       return unavailable(
-        resolvePageIdentity({ url: activeTab?.url, title: activeTab?.title }),
+        resolvePageIdentity({ url: activeTab?.url, title: activeTab?.title, favIconUrl: activeTab?.favIconUrl }),
         "Could not capture this page."
       );
     }
@@ -93,7 +93,13 @@ export class CaptureService {
       capturedDocument = await this.gateway.readTabDocument(activeTab.id);
     } catch {
       return unavailable(
-        { status: "unsupported", reason: "active_tab_unavailable", url: activeTab.url, title: activeTab.title },
+        {
+          status: "unsupported",
+          reason: "active_tab_unavailable",
+          url: activeTab.url,
+          title: activeTab.title,
+          favIconUrl: normalizeFavIconUrl(activeTab.favIconUrl)
+        },
         "Could not capture this page."
       );
     }
@@ -101,7 +107,8 @@ export class CaptureService {
     const pageIdentity = resolvePageIdentity({
       url: capturedDocument.documentUrl,
       canonicalUrl: capturedDocument.canonicalUrl,
-      title: capturedDocument.title
+      title: capturedDocument.title,
+      favIconUrl: activeTab.favIconUrl
     });
     if (pageIdentity.status !== "ready") {
       return unavailable(pageIdentity, "Could not capture this page.");

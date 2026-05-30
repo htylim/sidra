@@ -628,20 +628,99 @@ describe("CaptureService", () => {
       language: "en"
     });
   });
+
+  describe("capture-time favicon preservation", () => {
+    it("carries_active_tab_favicon_url_when_capture_recomputes_page_identity", async () => {
+      const service = new CaptureService({
+        gateway: new FakeCaptureGateway({
+          tab: {
+            id: 7,
+            url: "https://example.com/stale",
+            title: "Tab title",
+            favIconUrl: "https://example.com/favicon.ico"
+          },
+          document: capturedDocument({
+            canonicalUrl: "https://example.com/canonical",
+            documentUrl: "https://example.com/current"
+          })
+        })
+      });
+
+      const result = await service.captureActivePageDocument();
+
+      expect(result.status).toBe("captured");
+      if (result.status !== "captured") throw new Error("expected captured result");
+      expect(result.pageIdentity).toMatchObject({
+        status: "ready",
+        pageKey: "https://example.com/canonical",
+        favIconUrl: "https://example.com/favicon.ico"
+      });
+    });
+
+    it("carries_active_tab_favicon_url_when_capture_is_unavailable", async () => {
+      const service = new CaptureService({
+        gateway: new FakeCaptureGateway({
+          tab: {
+            id: 7,
+            url: "https://example.com/current",
+            title: "Tab title",
+            favIconUrl: "https://example.com/favicon.ico"
+          },
+          readError: new Error("Cannot access tab")
+        })
+      });
+
+      const result = await service.captureActivePageDocument();
+
+      expect(result).toMatchObject({
+        status: "unavailable",
+        pageIdentity: {
+          status: "unsupported",
+          reason: "active_tab_unavailable",
+          favIconUrl: "https://example.com/favicon.ico"
+        }
+      });
+    });
+
+    it("omits_blank_active_tab_favicon_url_when_capture_is_unavailable", async () => {
+      const service = new CaptureService({
+        gateway: new FakeCaptureGateway({
+          tab: {
+            id: 7,
+            url: "https://example.com/current",
+            title: "Tab title",
+            favIconUrl: "   "
+          },
+          readError: new Error("Cannot access tab")
+        })
+      });
+
+      const result = await service.captureActivePageDocument();
+
+      expect(result).toMatchObject({
+        status: "unavailable",
+        pageIdentity: {
+          status: "unsupported",
+          reason: "active_tab_unavailable"
+        }
+      });
+      expect(result.pageIdentity).toEqual(expect.not.objectContaining({ favIconUrl: expect.any(String) }));
+    });
+  });
 });
 
 class FakeCaptureGateway implements CaptureGateway {
   queryCount = 0;
   readCount = 0;
   lastReadTabId?: number;
-  private readonly tab?: { id?: number; url?: string; title?: string };
+  private readonly tab?: { id?: number; url?: string; title?: string; favIconUrl?: string };
   nextDocument: CapturedTabDocument;
   private readonly queryError?: Error;
   private readonly readError?: Error;
 
   constructor(
     options: {
-      tab?: { id?: number; url?: string; title?: string };
+      tab?: { id?: number; url?: string; title?: string; favIconUrl?: string };
       document?: CapturedTabDocument;
       queryError?: Error;
       readError?: Error;

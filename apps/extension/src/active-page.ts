@@ -5,12 +5,15 @@ export type ActivePageTab = {
   windowId?: number;
   url?: string;
   title?: string;
+  favIconUrl?: string;
 };
 
 export type ActivePageGateway = {
   queryActiveTab(): Promise<ActivePageTab | undefined>;
   onActivated(listener: (info: { tabId: number; windowId: number }) => void): () => void;
-  onUpdated(listener: (tabId: number, changeInfo: { url?: string; title?: string }) => void): () => void;
+  onUpdated(
+    listener: (tabId: number, changeInfo: { url?: string; title?: string; favIconUrl?: string }) => void
+  ): () => void;
   onWindowFocusChanged?(listener: (windowId: number) => void): () => void;
 };
 
@@ -68,7 +71,8 @@ export class ActivePageTracker {
     this.setSnapshot(
       resolvePageIdentity({
         url: activeTab?.url,
-        title: activeTab?.title
+        title: activeTab?.title,
+        favIconUrl: activeTab?.favIconUrl
       })
     );
   }
@@ -88,7 +92,10 @@ export class ActivePageTracker {
     this.unsubscribeCallbacks.push(
       this.gateway.onUpdated((tabId, changeInfo) => {
         const activeTabChanged = this.activeTabId === undefined || tabId === this.activeTabId;
-        if (activeTabChanged && (changeInfo.url !== undefined || changeInfo.title !== undefined)) {
+        if (
+          activeTabChanged &&
+          (changeInfo.url !== undefined || changeInfo.title !== undefined || changeInfo.favIconUrl !== undefined)
+        ) {
           void this.refresh();
         }
       })

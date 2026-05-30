@@ -88,7 +88,7 @@ Decision:
 - The extension application boundary should expose commands such as `sendPrompt`, `captureAndSend`, `cancelTurn`, `newChat`, `retryBridge`, and `respondToPermission`, backed by non-React modules.
 - Extension modules should separate at least these responsibilities before related behavior expands:
   - `BridgeConnection`: Chrome Native Messaging connection, reconnect, disconnect, raw protocol IO, and bridge availability.
-  - `ActivePageTracker`: active tab URL/title metadata reads and tab/window change subscriptions. It must not use scripting or page content extraction.
+  - `ActivePageTracker`: active tab display metadata reads, including URL, title, and favicon URL, plus tab/window change subscriptions. It must not use scripting or page content extraction.
   - `UrlSessionStore`: page-keyed URL sessions, session-scoped `CaptureMode`, Draft Prompt, Context State, session approval state, New Chat approval clearing, running state, and Client Session IDs. Transcript and provider-session state are derived from each session's coordinator.
   - `SidePanelController`: application commands, active-page selection, bridge availability composition, quick-action command routing, and derived UI snapshots.
   - `CaptureService`: active-tab capture, extraction, size decisions, and page-context construction.
