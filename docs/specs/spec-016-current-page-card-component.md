@@ -63,6 +63,14 @@ it("preserves_favicon_url_for_ready_page_identity", () => {
 it("preserves_favicon_url_for_unsupported_page_identity", () => {
   // asserts: unsupported identities still preserve tab favicon metadata when available.
 });
+
+it("omits_blank_favicon_url_for_ready_page_identity", () => {
+  // asserts: resolvePageIdentity does not expose favIconUrl for empty or whitespace-only input on supported pages.
+});
+
+it("omits_blank_favicon_url_for_unsupported_page_identity", () => {
+  // asserts: resolvePageIdentity does not expose favIconUrl for empty or whitespace-only input on unsupported pages.
+});
 ```
 
 **File**: `apps/extension/src/active-page.test.ts`
@@ -91,6 +99,20 @@ it("carries_active_tab_favicon_url_when_capture_recomputes_page_identity", async
 it("carries_active_tab_favicon_url_when_capture_is_unavailable", async () => {
   // asserts: unavailable capture identity keeps activeTab.favIconUrl for card display.
 });
+
+it("omits_blank_active_tab_favicon_url_when_capture_is_unavailable", async () => {
+  // asserts: unavailable capture identity does not expose favIconUrl when Chrome reports an empty string.
+});
+```
+
+**File**: `apps/extension/src/side-panel-controller.test.ts`
+**Changes**: Add this test:
+
+```ts
+// Group: active page favicon snapshot
+it("preserves_active_page_favicon_url_in_controller_snapshot", () => {
+  // asserts: SidePanelController snapshot.activePage includes favIconUrl supplied by the active page tracker.
+});
 ```
 
 #### 2. Implementation (GREEN)
@@ -98,7 +120,8 @@ it("carries_active_tab_favicon_url_when_capture_is_unavailable", async () => {
 **Changes**:
 - Add `favIconUrl?: string` to `PageIdentityInput`.
 - Add `favIconUrl?: string` to both `PageIdentity` variants.
-- Copy a trimmed non-empty `favIconUrl` into the returned identity.
+- Add and export `normalizeFavIconUrl(value: string | undefined): string | undefined`.
+- Use the helper inside `resolvePageIdentity` so ready and unsupported identities copy only trimmed non-empty `favIconUrl`.
 
 **File**: `apps/extension/src/active-page.ts`
 **Changes**:
@@ -116,21 +139,21 @@ it("carries_active_tab_favicon_url_when_capture_is_unavailable", async () => {
 **Changes**:
 - Pass `activeTab?.favIconUrl` into every `resolvePageIdentity` call based on active tab metadata.
 - Preserve `activeTab.favIconUrl` when returning unsupported identities after `readTabDocument` fails.
+- Use `normalizeFavIconUrl` before creating direct unsupported identities so the `active_tab_unavailable` reason is preserved without leaking empty favicon values.
 - When capture succeeds, recompute URL/title/canonical URL from the captured document but keep favicon from the active tab.
 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Phase 1 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts -t "favicon"`
-- [ ] Phase 1 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts -t "favicon"`
+- [ ] Phase 1 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts src/side-panel-controller.test.ts -t "favicon"`
+- [ ] Phase 1 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts src/side-panel-controller.test.ts -t "favicon"`
 - [ ] No related extension tests regress: `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts src/side-panel-controller.test.ts`
 - [ ] Type checking passes: `pnpm --filter @sidra/extension check`
 
 #### Manual Verification:
-- [ ] Inspect a controller snapshot in a local side panel session and confirm `activePage.favIconUrl` exists for a normal page with a tab favicon.
-- [ ] Switch to a page without a favicon and confirm the snapshot omits `favIconUrl` rather than using a guessed URL.
+- [ ] TDD data-flow work is covered by automated tests in this phase. Manual browser verification is deferred to Phase 2, where the favicon is visible in the UI.
 
-**Implementation Note**: After completing this phase and all automated verification passes, pause here for manual confirmation from the human that the manual testing was successful before proceeding to the next phase.
+**Implementation Note**: After completing this phase and all automated verification passes, proceed to Phase 2. No manual confirmation is required for Phase 1 because browser-visible behavior is introduced in Phase 2.
 
 ---
 
@@ -142,7 +165,7 @@ Move current page card rendering out of `SidePanelView` into a dedicated `Curren
 
 ### Why This Phase Can Be Validated Independently
 
-The extracted component can be tested directly, and `SidePanelView` can be tested only for wiring the active page display data into that component. Tests can prove the card still displays page state, uses favicon data, resets favicon error fallback state, and no longer renders the chevron.
+The extracted component can be tested directly. Tests can prove the card still displays page state, uses favicon data, resets favicon error fallback state, and no longer renders the chevron.
 
 ### Changes Required:
 
@@ -153,13 +176,19 @@ The extracted component can be tested directly, and `SidePanelView` can be teste
 **Changes**: Add these tests:
 
 ```tsx
+// @vitest-environment jsdom
+
 describe("current page card", () => {
 it("renders_favicon_image_when_available", () => {
-  // asserts: a ready page with favIconUrl renders an img with that src.
+  // asserts: favIconUrl renders a decorative img with that src, using a DOM query or test id instead of role/name.
+});
+
+it("preserves_full_title_tooltip_for_truncated_titles", () => {
+  // asserts: the page title element keeps title={title} for full-title hover/accessibility affordance.
 });
 
 it("falls_back_to_document_icon_when_favicon_is_missing", () => {
-  // asserts: no img is rendered and the document fallback icon remains visible.
+  // asserts: no favicon img is rendered and the document fallback icon remains visible.
 });
 
 it("falls_back_to_document_icon_when_favicon_image_errors", async () => {
@@ -181,13 +210,23 @@ it("renders_unsupported_page_state_in_current_page_card", () => {
 ```
 
 **File**: `apps/extension/src/side-panel-view.test.tsx`
-**Changes**: Add this test:
+**Changes**: Add this behavior-only test. Do not mock `CurrentPageCard`, assert component imports, or assert that the card is no longer inline.
 
 ```tsx
 describe("current page card integration", () => {
-it("renders_current_page_card_from_side_panel_snapshot", () => {
-  // asserts: SidePanelView delegates current page display data to CurrentPageCard.
+it("renders_snapshot_favicon_and_no_chevron_in_the_side_panel", () => {
+  // asserts: SidePanelView output for activePage.favIconUrl renders a decorative favicon img and contains no .chevron element or chevron glyph.
 });
+});
+```
+
+**File**: `apps/extension/src/side-panel-boundary.test.ts`
+**Changes**: Add this exact named test. It may share a helper with existing view-boundary tests, but the test name must stay filterable by the Phase 2 selector.
+
+```ts
+// Group: side panel architecture boundary
+it("keeps_current_page_card_presentation_files_free_of_browser_api_usage", () => {
+  // asserts: current-page-card.tsx and sidra-icon.tsx do not use chrome.*, connectNative, chrome.scripting, executeScript, or document.body.
 });
 ```
 
@@ -211,6 +250,7 @@ export type CurrentPageCardProps = {
 - existing `file-text` fallback icon when favicon is absent or fails to load
 - title and status label
 - Do not render a chevron.
+- Preserve the existing full-title affordance by setting `title={title}` on the truncated `.page-title` element.
 - Keep the favicon image decorative with empty `alt` and `aria-hidden="true"` because the title text names the page.
 - Reset any image-error fallback state when `favIconUrl` changes so switching pages can show a new favicon after a previous broken favicon.
 
@@ -218,7 +258,9 @@ export type CurrentPageCardProps = {
 **Changes**:
 - Import `CurrentPageCard`.
 - Remove inline page card markup.
-- Pass `title`, `statusLabel`, and `favIconUrl` from `getPageCardDisplay`.
+- Update `getPageCardDisplay` to return `{ title: string; statusLabel: string; favIconUrl?: string }`.
+- Return `favIconUrl` from both ready and unsupported page branches when present.
+- Pass `title`, `statusLabel`, and `favIconUrl` from `getPageCardDisplay` to `CurrentPageCard`.
 - Keep `SidePanelView` responsible for top-level layout and user intent wiring.
 - Do not import `SidraIcon` back from `side-panel-view.tsx` into `CurrentPageCard`; that would create a circular dependency.
 
@@ -227,6 +269,12 @@ export type CurrentPageCardProps = {
 - Move the shared `SidraIcon` component and `IconName` type out of `side-panel-view.tsx`.
 - Import `SidraIcon` from this module in both `SidePanelView` and `CurrentPageCard`.
 - Avoid duplicating SVG paths.
+
+**File**: `apps/extension/src/side-panel-boundary.test.ts`
+**Changes**:
+- Add a helper that checks all side-panel presentation files involved in this card, including `side-panel-view.tsx`, `current-page-card.tsx`, and `sidra-icon.tsx`.
+- Guard those files against browser APIs and capture/page-content APIs directly.
+- Keep the explicit `keeps_current_page_card_presentation_files_free_of_browser_api_usage` test name so the Phase 2 filtered verification command runs this guard.
 
 **File**: `apps/extension/src/styles.css`
 **Changes**:
@@ -237,13 +285,15 @@ export type CurrentPageCardProps = {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Phase 2 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx -t "current page card"`
-- [ ] Phase 2 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx -t "current page card"`
-- [ ] Full current page card and side-panel view tests pass: `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx`
+- [ ] Phase 2 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx src/side-panel-boundary.test.ts -t "current page card|current_page_card|browser api|snapshot_favicon|no_chevron"`
+- [ ] Phase 2 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx src/side-panel-boundary.test.ts -t "current page card|current_page_card|browser api|snapshot_favicon|no_chevron"`
+- [ ] Full current page card, side-panel view, and boundary tests pass: `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx src/side-panel-boundary.test.ts`
 - [ ] Type checking passes: `pnpm --filter @sidra/extension check`
 
 #### Manual Verification:
+- [ ] Before any manual extension verification, read `docs/MANUAL-E2E-RUNBOOK.md` and follow its known-good real side-panel path and reporting rules.
 - [ ] Open Sidra on a normal web page with a visible tab favicon and confirm the same favicon appears in the current page card.
+- [ ] Use `Capture + Send` on that page and confirm the favicon remains visible after capture updates the active page identity.
 - [ ] Open Sidra on a page without a favicon and confirm the document fallback icon appears.
 - [ ] Confirm the right-side chevron is gone.
 - [ ] Confirm the card still does not look clickable.
@@ -266,31 +316,41 @@ This phase is documentation-only. TDD does not apply. The verification is a sour
 
 > **TDD ordering**: This phase is documentation-only. No RED/GREEN test cycle applies.
 
-#### 1. Documentation Verification
-**Command**:
-
-```sh
-rg -n "chevron|expand/collapse" docs README.md apps/extension/src -g '!docs/specs/**' -g '!docs/issues/**'
-```
-
-**Expected result**:
-- No durable docs or source files describe a chevron in the current page card.
-- Source may still contain unrelated chevron references only if they are not about this card.
-
-#### 2. Documentation Update
+#### 1. Documentation Update
 **File**: `docs/prd-v1.md`
 **Changes**:
 - Remove the current page card chevron requirement.
 - Update every current page card icon reference to say the card displays the page favicon when available and falls back to a document/page icon.
 - Keep the expanded-details paragraph only if expansion is still planned. If it remains planned, state that V1 does not show an expansion affordance until details exist.
 
+**File**: `docs/ARCHITECTURE.md`
+**Changes**:
+- Update the `ActivePageTracker` ownership description from URL/title metadata to active tab display metadata, including URL, title, and favicon URL.
+- Keep the boundary clear that active page tracking still must not use scripting or page content extraction.
+
+#### 2. Documentation Verification
+**Command**:
+
+```sh
+rg -n "chevron|expand/collapse" docs README.md apps/extension/src -g '!docs/specs/**' -g '!docs/issues/**' -g '!*.test.ts' -g '!*.test.tsx'
+rg -n "Use a document/page icon|page/document icon" docs/prd-v1.md
+```
+
+**Expected result**:
+- Both commands exit with status `1` and no output.
+- No durable docs or production source files describe a chevron in the current page card.
+- `docs/prd-v1.md` no longer contains the stale document-icon-only wording for the current page card.
+- Source may still contain unrelated chevron references only if they are not about this card.
+
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Documentation search confirms stale chevron wording is gone from durable docs and source: `rg -n "chevron|expand/collapse" docs README.md apps/extension/src -g '!docs/specs/**' -g '!docs/issues/**'`
+- [ ] Documentation search confirms stale chevron wording is gone from durable docs and production source: `rg -n "chevron|expand/collapse" docs README.md apps/extension/src -g '!docs/specs/**' -g '!docs/issues/**' -g '!*.test.ts' -g '!*.test.tsx'`
+- [ ] Documentation search confirms stale document-icon-only wording is gone from the PRD: `rg -n "Use a document/page icon|page/document icon" docs/prd-v1.md`
 - [ ] Type checking still passes after doc changes are staged with code changes: `pnpm --filter @sidra/extension check`
 
 #### Manual Verification:
+- [ ] Before any manual extension verification, read `docs/MANUAL-E2E-RUNBOOK.md` and follow its known-good real side-panel path and reporting rules.
 - [ ] Read the updated `docs/prd-v1.md` section and confirm it matches the implemented card behavior.
 
 **Implementation Note**: After completing this phase and all verification passes, pause here for manual confirmation from the human that the documentation matches the product decision.
@@ -304,13 +364,14 @@ rg -n "chevron|expand/collapse" docs README.md apps/extension/src -g '!docs/spec
 - `ActivePageTracker` emits snapshots when favicon metadata changes.
 - `CaptureService` preserves favicon metadata through capture success and unavailable paths.
 - `CurrentPageCard` renders favicon, fallback icon, no chevron, resets image-error fallback on favicon URL changes, and preserves unsupported-page display state.
-- `SidePanelView` renders the extracted current page card from its snapshot.
+- Boundary tests keep `CurrentPageCard` and its shared icon module free of browser and capture APIs.
 
 ### Integration Tests:
 - Existing side-panel controller tests should keep passing because `SidePanelSnapshot.activePage` remains the source of page identity.
 - No bridge or protocol integration tests are needed because favicon is browser-side UI metadata only.
 
 ### Manual Testing Steps:
+0. Read `docs/MANUAL-E2E-RUNBOOK.md` before launching a browser, unpacked extension, or local Native Messaging bridge verification.
 1. Open Sidra on a site with a visible tab favicon.
 2. Confirm the current page card shows that favicon.
 3. Send a captured prompt and confirm the favicon remains after capture.

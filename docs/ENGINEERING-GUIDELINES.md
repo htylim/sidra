@@ -44,6 +44,7 @@ Use these rules when implementing, reviewing, or planning changes. They are inte
 - Every bug fix should first have a failing test that proves the bug.
 - Every architectural refactor should keep behavior tests green and may add targeted boundary tests when the boundary itself is important.
 - Avoid tests that pass only because they bypass the real interaction being changed.
+- When refactoring or removing behavior, do not test that an old class, component, function, or file no longer exists. Test the remaining expected behavior through the owning public interface.
 
 ## Temporary Code
 
