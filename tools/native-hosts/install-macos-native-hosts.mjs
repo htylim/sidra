@@ -15,7 +15,9 @@ const BROWSER_TARGETS = Object.freeze({
   },
   brave: {
     browser: "brave",
-    manifestDirectory: "Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts",
+    // Brave 148 resolves macOS Native Messaging hosts from Chromium's
+    // Google Chrome directory, not BraveSoftware/Brave-Browser.
+    manifestDirectory: "Library/Application Support/Google/Chrome/NativeMessagingHosts",
     researchOnly: false
   },
   helium: {

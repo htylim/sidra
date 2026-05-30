@@ -190,10 +190,11 @@ Report:
 - whether Codex App Server authenticated
 - observed side panel status text
 
-Known local smoke status on 2026-05-24:
+Known local smoke status on 2026-05-30:
 
 - Brave: verified with the pinned extension ID, the user-level Native Messaging
-  manifest, toolbar action side-panel opening, and a ready bridge.
+  manifest at `~/Library/Application Support/Google/Chrome/NativeMessagingHosts`,
+  toolbar action side-panel opening, and a ready bridge.
 - Chrome 148: verified by manual install with the pinned extension ID, toolbar
   action side-panel opening, and a ready bridge.
 - Helium 0.12.4.1: verified by manual install with the pinned extension ID,
@@ -280,7 +281,7 @@ Report these details to the user:
 - Extension path: `/Users/hernantylim/Code/sidra/apps/extension/dist`
 - Extension ID: `mahnogfphkjigcjomjcjifkfdnocbokh`
 - Native host manifest:
-  `~/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.sidra.agent_bridge.json`
+  `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.sidra.agent_bridge.json`
 
 Tell the user how to play:
 
@@ -350,16 +351,16 @@ should report no overflow at all tested widths.
 
 ## Cleanup
 
-Remove the Brave manifest:
+Remove the Brave/Chrome shared manifest:
 
 ```sh
-rm -f "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.sidra.agent_bridge.json"
+rm -f "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.sidra.agent_bridge.json"
 ```
 
 Remove manifests created during failed browser experiments, if present:
 
 ```sh
-rm -f "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.sidra.agent_bridge.json"
+rm -f "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.sidra.agent_bridge.json"
 rm -f "$HOME/Library/Application Support/Google/Chrome for Testing/NativeMessagingHosts/com.sidra.agent_bridge.json"
 rm -f "$HOME/Library/Application Support/Google/ChromeForTesting/NativeMessagingHosts/com.sidra.agent_bridge.json"
 rm -f "$HOME/Library/Application Support/Chromium/NativeMessagingHosts/com.sidra.agent_bridge.json"

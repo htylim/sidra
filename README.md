@@ -97,10 +97,12 @@ The expected allowlisted origin is:
 "chrome-extension://mahnogfphkjigcjomjcjifkfdnocbokh/"
 ```
 
-Manual smoke status as of 2026-05-24: Chrome, Brave, and Helium are verified
-with the pinned extension ID. Helium support was verified against
-`/Applications/Helium.app` version `0.12.4.1`; its Native Messaging manifest
-path is `~/Library/Application Support/net.imput.helium/NativeMessagingHosts`.
+Manual smoke status as of 2026-05-30: Chrome, Brave, and Helium are verified
+with the pinned extension ID. Brave 148 resolves the Sidra host from
+`~/Library/Application Support/Google/Chrome/NativeMessagingHosts`. Helium
+support was verified against `/Applications/Helium.app` version `0.12.4.1`;
+its Native Messaging manifest path is
+`~/Library/Application Support/net.imput.helium/NativeMessagingHosts`.
 
 4. Load the unpacked extension:
 

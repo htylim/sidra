@@ -26,7 +26,7 @@ describe("macOS native host manifest model", () => {
   it("builds_brave_manifest_path", () => {
     assert.equal(
       buildNativeHostManifestPath({ browser: "brave", homeDirectory: "/Users/tester" }),
-      "/Users/tester/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.sidra.agent_bridge.json"
+      "/Users/tester/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.sidra.agent_bridge.json"
     );
   });
 
