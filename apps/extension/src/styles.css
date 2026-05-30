@@ -317,6 +317,7 @@ textarea {
   margin-left: auto;
   background: #087c71;
   color: #ffffff;
+  white-space: pre-wrap;
 }
 
 .message.assistant {

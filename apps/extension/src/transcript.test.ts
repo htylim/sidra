@@ -25,6 +25,12 @@ describe("transcript reducer", () => {
       ]);
     });
 
+    it("preserves_internal_user_prompt_line_breaks", () => {
+      expect(addUserPrompt([], "  First line\n\n- Second line\nThird line  ")).toEqual([
+        { kind: "user_message", role: "user", text: "First line\n\n- Second line\nThird line" }
+      ]);
+    });
+
     it("appends_assistant_text_deltas_to_a_streaming_turn", () => {
       const transcript = addAssistantTextDelta(addAssistantTextDelta([], "Hi"), " there");
 
