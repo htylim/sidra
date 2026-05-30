@@ -4,6 +4,7 @@ export type PageIdentityInput = {
   url?: string;
   canonicalUrl?: string;
   title?: string;
+  favIconUrl?: string;
 };
 
 export type PageIdentity =
@@ -14,12 +15,14 @@ export type PageIdentity =
       canonicalUrl?: string;
       title?: string;
       displayTitle: string;
+      favIconUrl?: string;
     }
   | {
       status: "unsupported";
       reason: "missing_url" | "unsupported_url" | "active_tab_unavailable";
       url?: string;
       title?: string;
+      favIconUrl?: string;
     };
 
 export type PageIdentityResolution = PageIdentity;
@@ -43,13 +46,15 @@ export function resolvePageIdentity(input: PageIdentityInput): PageIdentityResol
   const canonicalPageKey = input.canonicalUrl ? normalizePageKeyUrl(input.canonicalUrl) : null;
   const currentPageKey = input.url ? normalizePageKeyUrl(input.url) : null;
   const pageKey = canonicalPageKey ?? currentPageKey;
+  const favIconUrl = cleanOptionalText(input.favIconUrl);
 
   if (!pageKey) {
     return {
       status: "unsupported",
       reason: input.url ? "unsupported_url" : "missing_url",
       url: input.url,
-      title: input.title
+      title: input.title,
+      favIconUrl
     };
   }
 
@@ -61,8 +66,14 @@ export function resolvePageIdentity(input: PageIdentityInput): PageIdentityResol
     url: currentPageKey ?? pageKey,
     canonicalUrl: canonicalPageKey ?? undefined,
     title: input.title,
-    displayTitle
+    displayTitle,
+    favIconUrl
   };
+}
+
+function cleanOptionalText(value: string | undefined): string | undefined {
+  const cleaned = value?.trim();
+  return cleaned || undefined;
 }
 
 function normalizePageKeyUrl(rawUrl: string): PageKey | null {

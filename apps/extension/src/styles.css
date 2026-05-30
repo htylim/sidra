@@ -121,6 +121,13 @@ textarea {
   height: 20px;
 }
 
+.page-favicon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
 .page-copy {
   min-width: 0;
   flex: 1;
@@ -140,12 +147,6 @@ textarea {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.chevron {
-  flex: 0 0 auto;
-  color: #62716d;
-  font-size: 20px;
 }
 
 .chat {

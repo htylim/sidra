@@ -52,4 +52,32 @@ describe("resolvePageIdentity", () => {
     if (first.status !== "ready" || second.status !== "ready") throw new Error("expected ready pages");
     expect(first.pageKey).not.toBe(second.pageKey);
   });
+
+  describe("favicon identity modeling", () => {
+    it("preserves_favicon_url_for_ready_page_identity", () => {
+      expect(
+        resolvePageIdentity({
+          url: "https://example.com/article",
+          favIconUrl: " https://example.com/favicon.ico "
+        })
+      ).toMatchObject({
+        status: "ready",
+        favIconUrl: "https://example.com/favicon.ico"
+      });
+    });
+
+    it("preserves_favicon_url_for_unsupported_page_identity", () => {
+      expect(
+        resolvePageIdentity({
+          url: "chrome://extensions",
+          title: "Extensions",
+          favIconUrl: "https://example.com/favicon.ico"
+        })
+      ).toMatchObject({
+        status: "unsupported",
+        reason: "unsupported_url",
+        favIconUrl: "https://example.com/favicon.ico"
+      });
+    });
+  });
 });

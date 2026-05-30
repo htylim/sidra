@@ -83,7 +83,7 @@ export class CaptureService {
 
     if (activeTab?.id === undefined) {
       return unavailable(
-        resolvePageIdentity({ url: activeTab?.url, title: activeTab?.title }),
+        resolvePageIdentity({ url: activeTab?.url, title: activeTab?.title, favIconUrl: activeTab?.favIconUrl }),
         "Could not capture this page."
       );
     }
@@ -93,7 +93,13 @@ export class CaptureService {
       capturedDocument = await this.gateway.readTabDocument(activeTab.id);
     } catch {
       return unavailable(
-        { status: "unsupported", reason: "active_tab_unavailable", url: activeTab.url, title: activeTab.title },
+        {
+          status: "unsupported",
+          reason: "active_tab_unavailable",
+          url: activeTab.url,
+          title: activeTab.title,
+          favIconUrl: cleanOptionalText(activeTab.favIconUrl)
+        },
         "Could not capture this page."
       );
     }
@@ -101,7 +107,8 @@ export class CaptureService {
     const pageIdentity = resolvePageIdentity({
       url: capturedDocument.documentUrl,
       canonicalUrl: capturedDocument.canonicalUrl,
-      title: capturedDocument.title
+      title: capturedDocument.title,
+      favIconUrl: activeTab.favIconUrl
     });
     if (pageIdentity.status !== "ready") {
       return unavailable(pageIdentity, "Could not capture this page.");
@@ -231,6 +238,11 @@ function extractReadableText(html: string): string {
 
 function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+function cleanOptionalText(value: string | undefined): string | undefined {
+  const cleaned = value?.trim();
+  return cleaned || undefined;
 }
 
 function isUsableText(text: string): boolean {

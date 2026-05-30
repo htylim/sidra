@@ -1,32 +1,10 @@
 import { useEffect, useState } from "react";
 import type { PermissionDecision } from "@sidra/protocol";
-import { AlertTriangle, FileText, Plus, Settings, Sparkles } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import type { CaptureMode } from "./capture-mode";
+import { CurrentPageCard } from "./current-page-card";
+import { SidraIcon } from "./sidra-icon";
 import type { SidePanelSnapshot } from "./side-panel-controller";
 import { TranscriptView } from "./transcript-view";
-
-type IconName = "alert" | "file-text" | "plus" | "settings" | "sparkle";
-
-function SidraIcon(props: { name: IconName; className?: string }) {
-  const IconByName: Record<IconName, LucideIcon> = {
-    alert: AlertTriangle,
-    "file-text": FileText,
-    plus: Plus,
-    settings: Settings,
-    sparkle: Sparkles
-  };
-  const Icon = IconByName[props.name];
-
-  return (
-    <Icon
-      aria-hidden="true"
-      className={`sidra-icon${props.className ? ` ${props.className}` : ""}`}
-      focusable={false}
-      strokeWidth={2.35}
-    />
-  );
-}
 
 export function SidePanelView(props: {
   snapshot: SidePanelSnapshot;
@@ -91,18 +69,7 @@ export function SidePanelView(props: {
         </button>
       </header>
 
-      <section className="page-card" aria-label="Current page">
-        <div className="page-icon">
-          <SidraIcon name="file-text" />
-        </div>
-        <div className="page-copy">
-          <div className="page-title" title={pageCard.title}>
-            {pageCard.title}
-          </div>
-          <div className="page-status">{pageCard.statusLabel}</div>
-        </div>
-        <div className="chevron">›</div>
-      </section>
+      <CurrentPageCard title={pageCard.title} statusLabel={pageCard.statusLabel} favIconUrl={pageCard.favIconUrl} />
 
       <section className="chat" aria-live="polite">
         {bridgeBlocked ? (
@@ -202,17 +169,19 @@ export function SidePanelView(props: {
   );
 }
 
-function getPageCardDisplay(snapshot: SidePanelSnapshot): { title: string; statusLabel: string } {
+function getPageCardDisplay(snapshot: SidePanelSnapshot): { title: string; statusLabel: string; favIconUrl?: string } {
   if (snapshot.activePage.status === "unsupported") {
     return {
       title: snapshot.activePage.title?.trim() || snapshot.activePage.url || "No active page",
-      statusLabel: unsupportedPageLabel(snapshot.activePage.reason)
+      statusLabel: unsupportedPageLabel(snapshot.activePage.reason),
+      favIconUrl: snapshot.activePage.favIconUrl
     };
   }
 
   return {
     title: snapshot.activePage.displayTitle || snapshot.activePage.url,
-    statusLabel: snapshot.activeSession.contextState.label
+    statusLabel: snapshot.activeSession.contextState.label,
+    favIconUrl: snapshot.activePage.favIconUrl
   };
 }
 

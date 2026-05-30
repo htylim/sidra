@@ -121,10 +121,10 @@ it("carries_active_tab_favicon_url_when_capture_is_unavailable", async () => {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Phase 1 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts -t "favicon"`
-- [ ] Phase 1 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts -t "favicon"`
-- [ ] No related extension tests regress: `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts src/side-panel-controller.test.ts`
-- [ ] Type checking passes: `pnpm --filter @sidra/extension check`
+- [x] Phase 1 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts -t "favicon"`
+- [x] Phase 1 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts -t "favicon"`
+- [x] No related extension tests regress: `pnpm --filter @sidra/extension test -- src/page-key.test.ts src/active-page.test.ts src/capture-service.test.ts src/side-panel-controller.test.ts`
+- [x] Type checking passes: `pnpm --filter @sidra/extension check`
 
 #### Manual Verification:
 - [ ] Inspect a controller snapshot in a local side panel session and confirm `activePage.favIconUrl` exists for a normal page with a tab favicon.
@@ -237,10 +237,10 @@ export type CurrentPageCardProps = {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Phase 2 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx -t "current page card"`
-- [ ] Phase 2 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx -t "current page card"`
-- [ ] Full current page card and side-panel view tests pass: `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx`
-- [ ] Type checking passes: `pnpm --filter @sidra/extension check`
+- [x] Phase 2 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx -t "current page card"`
+- [x] Phase 2 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx -t "current page card"`
+- [x] Full current page card and side-panel view tests pass: `pnpm --filter @sidra/extension test -- src/current-page-card.test.tsx src/side-panel-view.test.tsx`
+- [x] Type checking passes: `pnpm --filter @sidra/extension check`
 
 #### Manual Verification:
 - [ ] Open Sidra on a normal web page with a visible tab favicon and confirm the same favicon appears in the current page card.
@@ -287,8 +287,8 @@ rg -n "chevron|expand/collapse" docs README.md apps/extension/src -g '!docs/spec
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Documentation search confirms stale chevron wording is gone from durable docs and source: `rg -n "chevron|expand/collapse" docs README.md apps/extension/src -g '!docs/specs/**' -g '!docs/issues/**'`
-- [ ] Type checking still passes after doc changes are staged with code changes: `pnpm --filter @sidra/extension check`
+- [x] Documentation search confirms stale chevron wording is gone from durable docs and source: `rg -n "chevron|expand/collapse" docs README.md apps/extension/src -g '!docs/specs/**' -g '!docs/issues/**'`
+- [x] Type checking still passes after doc changes are staged with code changes: `pnpm --filter @sidra/extension check`
 
 #### Manual Verification:
 - [ ] Read the updated `docs/prd-v1.md` section and confirm it matches the implemented card behavior.

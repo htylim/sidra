@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { ActivePageTracker, type ActivePageGateway, type ActivePageTab } from "./active-page";
 
-type ActivatedTabInput = { tabId: number; windowId: number; url?: string; title?: string };
+type ActivatedTabInput = { tabId: number; windowId: number; url?: string; title?: string; favIconUrl?: string };
 
 class FakeActivePageGateway implements ActivePageGateway {
   readonly queryActiveTab = vi.fn(async () => this.activeTab);
   private readonly activatedListeners = new Set<(info: { tabId: number; windowId: number }) => void>();
   private readonly updatedListeners = new Set<
-    (tabId: number, changeInfo: { url?: string; title?: string }) => void
+    (tabId: number, changeInfo: { url?: string; title?: string; favIconUrl?: string }) => void
   >();
   private readonly tabsById = new Map<number, ActivePageTab>();
   private activeTab?: ActivePageTab;
@@ -27,12 +27,18 @@ class FakeActivePageGateway implements ActivePageGateway {
   }
 
   async emitActivated(input: ActivatedTabInput): Promise<void> {
-    this.setActiveTab({ id: input.tabId, windowId: input.windowId, url: input.url, title: input.title });
+    this.setActiveTab({
+      id: input.tabId,
+      windowId: input.windowId,
+      url: input.url,
+      title: input.title,
+      favIconUrl: input.favIconUrl
+    });
     for (const listener of this.activatedListeners) listener({ tabId: input.tabId, windowId: input.windowId });
     await Promise.resolve();
   }
 
-  async emitUpdated(tabId: number, changeInfo: { url?: string; title?: string }): Promise<void> {
+  async emitUpdated(tabId: number, changeInfo: { url?: string; title?: string; favIconUrl?: string }): Promise<void> {
     const currentTab = this.tabsById.get(tabId) ?? { id: tabId, windowId: 1 };
     const nextTab = { ...currentTab, ...changeInfo };
     this.tabsById.set(tabId, nextTab);
@@ -64,7 +70,9 @@ class DeferredActivePageGateway implements ActivePageGateway {
     return () => undefined;
   }
 
-  onUpdated(_listener: (tabId: number, changeInfo: { url?: string; title?: string }) => void): () => void {
+  onUpdated(
+    _listener: (tabId: number, changeInfo: { url?: string; title?: string; favIconUrl?: string }) => void
+  ): () => void {
     return () => undefined;
   }
 
@@ -148,6 +156,41 @@ describe("ActivePageTracker", () => {
     expect(harness.tracker.getSnapshot()).toMatchObject({
       status: "unsupported",
       reason: "active_tab_unavailable"
+    });
+  });
+
+  describe("active tab favicon tracking", () => {
+    it("reads_favicon_url_from_initial_active_tab", async () => {
+      const harness = createActivePageHarness({
+        activeTab: {
+          id: 1,
+          windowId: 1,
+          url: "https://example.com/a",
+          title: "Page A",
+          favIconUrl: "https://example.com/favicon.ico"
+        }
+      });
+
+      await harness.tracker.start();
+
+      expect(harness.tracker.getSnapshot()).toMatchObject({
+        status: "ready",
+        favIconUrl: "https://example.com/favicon.ico"
+      });
+    });
+
+    it("emits_page_change_when_active_tab_favicon_changes", async () => {
+      const harness = createActivePageHarness({
+        activeTab: { id: 1, windowId: 1, url: "https://example.com/a", title: "Page A" }
+      });
+      await harness.tracker.start();
+
+      await harness.gateway.emitUpdated(1, { favIconUrl: "https://example.com/favicon.ico" });
+
+      expect(harness.tracker.getSnapshot()).toMatchObject({
+        status: "ready",
+        favIconUrl: "https://example.com/favicon.ico"
+      });
     });
   });
 });
