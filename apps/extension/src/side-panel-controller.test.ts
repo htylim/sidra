@@ -2113,6 +2113,206 @@ describe("SidePanelController Capture + Send", () => {
   });
 });
 
+describe("SidePanelController send mode", () => {
+  it("controller_snapshot_exposes_active_session_send_mode", () => {
+    const { controller } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/a")
+    });
+
+    expect(controller.getSnapshot().activeSession.sendMode).toBe("capture");
+  });
+
+  it("capture_and_send_switches_snapshot_send_mode_to_plain_send_after_success", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+
+    await controller.captureAndSend("summarize");
+
+    expect(controller.getSnapshot().activeSession.sendMode).toBe("send");
+  });
+
+  it("plain_send_after_context_posts_without_page_context_and_does_not_capture", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+
+    await controller.captureAndSend("summarize");
+    ports[0].emitMessage(sessionStarted());
+    ports[0].emitMessage({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "client-1",
+      event: { type: "assistant.done" }
+    });
+
+    expect(controller.sendPrompt("follow up")).toBe(true);
+
+    expect(captureService.captureCalls).toBe(1);
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.send",
+      version: 2,
+      clientSessionId: "client-1",
+      prompt: "follow up"
+    });
+  });
+
+  it("manual_capture_mode_recaptures_context_after_context_was_attached", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+
+    await controller.captureAndSend("summarize");
+    ports[0].emitMessage(sessionStarted());
+    ports[0].emitMessage({
+      type: "agent.event",
+      version: 2,
+      clientSessionId: "client-1",
+      event: { type: "assistant.done" }
+    });
+    controller.updateSendMode("capture");
+    await controller.captureAndSend("recapture");
+
+    expect(captureService.captureCalls).toBe(2);
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        prompt: "recapture",
+        pageContext: expect.any(Object)
+      })
+    );
+    expect(controller.getSnapshot().activeSession.sendMode).toBe("send");
+  });
+
+  it("manual_send_mode_before_context_sends_plain_prompt", () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+
+    controller.updateSendMode("send");
+
+    expect(controller.sendPrompt("plain first")).toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(captureService.captureCalls).toBe(0);
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.send",
+      version: 2,
+      clientSessionId: "client-1",
+      prompt: "plain first"
+    });
+  });
+
+  it("send_mode_is_scoped_to_the_captured_canonical_url_session", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/canonical"),
+      pageContext: readablePageContext()
+    };
+    const { controller, ports, activePage } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/canonical"),
+      clientSessionIds: ["client-canonical", "client-other"],
+      captureService
+    });
+    ports[0].emitMessage(bridgeReady());
+    await controller.captureAndSend("summarize");
+    activePage.emit(pageIdentity("https://example.com/other"));
+
+    expect(controller.getSnapshot().activeSession.sendMode).toBe("capture");
+
+    activePage.emit(pageIdentity("https://example.com/canonical"));
+    expect(controller.getSnapshot().activeSession.sendMode).toBe("send");
+  });
+
+  it("new_canonical_url_session_inherits_pre_capture_send_mode", async () => {
+    const captureService = new FakeCaptureService();
+    const canonicalDocument = capturedDocument({ html: "<html>New canonical page</html>" });
+    captureService.nextDocumentResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/canonical-new"),
+      capturedDocument: canonicalDocument
+    };
+    const { controller, ports } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/pre-capture"),
+      captureService
+    });
+    ports[0].emitMessage(bridgeReady());
+    controller.updateSendMode("send");
+    captureService.onBuildPageContext = () => {
+      expect(controller.getSnapshot().activeSession).toMatchObject({
+        pageKey: "https://example.com/canonical-new",
+        sendMode: "send"
+      });
+    };
+
+    await controller.captureAndSend("summarize");
+  });
+
+  it("existing_canonical_url_session_keeps_its_own_send_mode", async () => {
+    const captureService = new FakeCaptureService();
+    const canonicalDocument = capturedDocument({ html: "<html>Existing canonical page</html>" });
+    captureService.nextDocumentResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/canonical-existing"),
+      capturedDocument: canonicalDocument
+    };
+    const { controller, ports, activePage } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/canonical-existing"),
+      clientSessionIds: ["client-canonical", "client-stale"],
+      captureService
+    });
+    ports[0].emitMessage(bridgeReady());
+    activePage.emit(pageIdentity("https://example.com/stale"));
+    controller.updateSendMode("send");
+    captureService.onBuildPageContext = () => {
+      expect(controller.getSnapshot().activeSession).toMatchObject({
+        pageKey: "https://example.com/canonical-existing",
+        sendMode: "capture"
+      });
+    };
+
+    await controller.captureAndSend("summarize");
+  });
+
+  it("failed_capture_preserves_send_mode", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "unavailable",
+      pageIdentity: pageIdentity("https://example.com/a"),
+      message: "Could not capture this page."
+    };
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+    controller.updateSendMode("send");
+
+    await expect(controller.captureAndSend("summarize")).resolves.toBe(false);
+
+    expect(controller.getSnapshot().activeSession.sendMode).toBe("send");
+  });
+
+  it("quick_action_still_uses_capture_send_by_default", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+    controller.updateSendMode("send");
+
+    await expect(controller.sendQuickAction("summarize-page")).resolves.toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(captureService.captureCalls).toBe(1);
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        prompt: DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT,
+        pageContext: expect.any(Object)
+      })
+    );
+    expect(controller.getSnapshot().activeSession.sendMode).toBe("send");
+  });
+});
+
 describe("SidePanelController quick actions", () => {
   it("exposes_default_quick_actions_for_empty_sessions", async () => {
     const { controller, ports } = createHarness();

@@ -31,6 +31,7 @@ function SidePanel() {
       onRespondToPermission={sidePanelController.respondToPermission}
       onDraftPromptChange={sidePanelController.updateDraftPrompt}
       onCaptureModeChange={sidePanelController.updateCaptureMode}
+      onSendModeChange={sidePanelController.updateSendMode}
       onNewChat={sidePanelController.newChat}
       onRetryBridge={sidePanelController.retryBridge}
       onOpenSettings={sidePanelController.openSettings}

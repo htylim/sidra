@@ -146,11 +146,21 @@ Context states include:
 
 This card is session-specific. When the active tab/page changes, the card updates with that URL session.
 
+## Composer Send Mode
+
+The composer uses a split send button.
+
+- The main button runs the selected action.
+- The secondary arrow opens a compact menu with `Capture + Send` and `Send`.
+- Selecting an action changes the default main-button action for that URL session.
+
+The first prompt in a new URL session defaults to `Capture + Send`. After a successful context send, the main button changes to `Send`.
+
 ## Prompt Options Popover
 
 The prompt options control opens a compact popover. This is a general options surface, not exclusively a context settings surface.
 
-For V1, the popover contains only one option:
+For V1, the popover contains one capture-content option:
 
 - `Send Full DOM`, default off.
 
@@ -223,6 +233,7 @@ It must:
 - Close the current provider session/thread for that URL.
 - Clear the current transcript and draft.
 - Clear session-scoped permissions.
+- Reset the default composer action to `Capture + Send`.
 - Start a new provider session/thread for that same page key.
 - Show empty-state quick actions again.
 

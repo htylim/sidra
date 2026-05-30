@@ -18,6 +18,7 @@ type SnapshotOptions = {
   contextLabel?: string;
   contextState?: SidePanelSnapshot["activeSession"]["contextState"];
   captureMode?: SidePanelSnapshot["activeSession"]["captureMode"];
+  sendMode?: SidePanelSnapshot["activeSession"]["sendMode"];
   draftPrompt?: string;
   transcript?: SidePanelSnapshot["activeSession"]["transcript"];
   quickActions?: SidePanelSnapshot["activeSession"]["quickActions"];
@@ -40,6 +41,7 @@ function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
       pageKey: "https://example.com/article" as SidePanelSnapshot["activeSession"]["pageKey"],
       clientSessionId: "client-1",
       captureMode: options.captureMode ?? "readable",
+      sendMode: options.sendMode ?? "capture",
       draftPrompt: options.draftPrompt ?? "",
       contextState: options.contextState ?? { status: "none", label: "No context sent yet" },
       transcript: options.transcript ?? [],
@@ -85,6 +87,7 @@ function renderSnapshot(bridge: SidePanelSnapshot["bridge"]): string {
       onRespondToPermission={() => false}
       onDraftPromptChange={() => undefined}
       onCaptureModeChange={() => undefined}
+      onSendModeChange={() => undefined}
       onNewChat={() => undefined}
       onRetryBridge={() => undefined}
       onOpenSettings={() => undefined}
@@ -103,6 +106,7 @@ function renderPageSnapshot(snapshot: SidePanelSnapshot): string {
       onRespondToPermission={() => false}
       onDraftPromptChange={() => undefined}
       onCaptureModeChange={() => undefined}
+      onSendModeChange={() => undefined}
       onNewChat={() => undefined}
       onRetryBridge={() => undefined}
       onOpenSettings={() => undefined}
@@ -120,6 +124,7 @@ function renderInteractiveSnapshot(
     onRespondToPermission(requestId: string, decision: "allow_once" | "allow_for_session" | "deny"): boolean;
     onDraftPromptChange(text: string): void;
     onCaptureModeChange(captureMode: SidePanelSnapshot["activeSession"]["captureMode"]): void;
+    onSendModeChange(sendMode: SidePanelSnapshot["activeSession"]["sendMode"]): void;
     onNewChat(): void;
     onOpenSettings(): void;
   }> = {}
@@ -152,6 +157,14 @@ function renderInteractiveSnapshot(
           overrides.onCaptureModeChange?.(captureMode);
           renderedView.rerender(viewElement());
         }}
+        onSendModeChange={(sendMode) => {
+          currentSnapshot = {
+            ...currentSnapshot,
+            activeSession: { ...currentSnapshot.activeSession, sendMode }
+          };
+          overrides.onSendModeChange?.(sendMode);
+          renderedView.rerender(viewElement());
+        }}
         onNewChat={overrides.onNewChat ?? (() => undefined)}
         onRetryBridge={() => undefined}
         onOpenSettings={overrides.onOpenSettings ?? (() => undefined)}
@@ -182,6 +195,14 @@ function renderInteractiveSnapshot(
             activeSession: { ...currentSnapshot.activeSession, captureMode }
           };
           overrides.onCaptureModeChange?.(captureMode);
+          renderedView.rerender(viewElement());
+        }}
+        onSendModeChange={(sendMode) => {
+          currentSnapshot = {
+            ...currentSnapshot,
+            activeSession: { ...currentSnapshot.activeSession, sendMode }
+          };
+          overrides.onSendModeChange?.(sendMode);
           renderedView.rerender(viewElement());
         }}
         onNewChat={overrides.onNewChat ?? (() => undefined)}
@@ -466,6 +487,7 @@ describe("SidePanelView URL sessions", () => {
         onRespondToPermission={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
+        onSendModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
@@ -487,6 +509,7 @@ describe("SidePanelView URL sessions", () => {
         onRespondToPermission={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
+        onSendModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
@@ -700,6 +723,7 @@ describe("SidePanelView Capture + Send", () => {
         onRespondToPermission={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
+        onSendModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
@@ -1188,6 +1212,120 @@ describe("SidePanelView rich transcript rendering", () => {
   });
 });
 
+describe("SidePanelView send mode UI", () => {
+  it("renders_capture_send_button_when_send_mode_is_capture", () => {
+    renderInteractiveSnapshot(snapshotForPage({ sendMode: "capture" }));
+
+    expect(screen.getByRole("button", { name: "Capture + Send" })).not.toBeNull();
+  });
+
+  it("renders_send_button_when_send_mode_is_send", () => {
+    renderInteractiveSnapshot(snapshotForPage({ sendMode: "send" }));
+
+    expect(screen.getByRole("button", { name: "Send" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Capture + Send" })).toBeNull();
+  });
+
+  it("clicking_split_button_main_action_in_capture_mode_calls_onCaptureAndSend", async () => {
+    const user = userEvent.setup();
+    const onCaptureAndSend = vi.fn(() => true);
+    const onSendPrompt = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "  summarize  ", sendMode: "capture" }), {
+      onCaptureAndSend,
+      onSendPrompt
+    });
+
+    await user.click(screen.getByRole("button", { name: "Capture + Send" }));
+
+    expect(onCaptureAndSend).toHaveBeenCalledWith("summarize");
+    expect(onSendPrompt).not.toHaveBeenCalled();
+  });
+
+  it("clicking_split_button_main_action_in_send_mode_calls_onSendPrompt", async () => {
+    const user = userEvent.setup();
+    const onCaptureAndSend = vi.fn(() => true);
+    const onSendPrompt = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "  follow up  ", sendMode: "send" }), {
+      onCaptureAndSend,
+      onSendPrompt
+    });
+
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(onSendPrompt).toHaveBeenCalledWith("follow up");
+    expect(onCaptureAndSend).not.toHaveBeenCalled();
+  });
+
+  it("pressing_enter_in_send_mode_calls_onSendPrompt", async () => {
+    const user = userEvent.setup();
+    const onCaptureAndSend = vi.fn(() => true);
+    const onSendPrompt = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "follow up", sendMode: "send" }), {
+      onCaptureAndSend,
+      onSendPrompt
+    });
+
+    await user.click(screen.getByRole("textbox"));
+    await user.keyboard("{Enter}");
+
+    expect(onSendPrompt).toHaveBeenCalledWith("follow up");
+    expect(onCaptureAndSend).not.toHaveBeenCalled();
+  });
+
+  it("split_button_arrow_opens_send_mode_menu", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(snapshotForPage());
+
+    await user.click(screen.getByRole("button", { name: "Choose send mode" }));
+
+    const sendModeGroup = screen.getByRole("group", { name: "Send mode" });
+    expect(sendModeGroup).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Capture + Send", pressed: true })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Send", pressed: false })).not.toBeNull();
+  });
+
+  it("selecting_capture_send_in_split_button_menu_calls_onSendModeChange", async () => {
+    const user = userEvent.setup();
+    const onSendModeChange = vi.fn();
+    renderInteractiveSnapshot(snapshotForPage({ sendMode: "send" }), { onSendModeChange });
+
+    await user.click(screen.getByRole("button", { name: "Choose send mode" }));
+    await user.click(screen.getByRole("button", { name: "Capture + Send" }));
+
+    expect(onSendModeChange).toHaveBeenCalledWith("capture");
+    expect(screen.getByRole("button", { name: "Capture + Send" })).not.toBeNull();
+  });
+
+  it("selecting_send_in_split_button_menu_calls_onSendModeChange", async () => {
+    const user = userEvent.setup();
+    const onSendModeChange = vi.fn();
+    renderInteractiveSnapshot(snapshotForPage({ sendMode: "capture" }), { onSendModeChange });
+
+    await user.click(screen.getByRole("button", { name: "Choose send mode" }));
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(onSendModeChange).toHaveBeenCalledWith("send");
+    expect(screen.getByRole("button", { name: "Send" })).not.toBeNull();
+  });
+
+  it("split_button_menu_controls_are_disabled_while_prompt_controls_are_disabled", () => {
+    renderInteractiveSnapshot(snapshotForUnsupportedPage());
+
+    expect(screen.getByRole("button", { name: "Capture + Send" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Choose send mode" })).toHaveProperty("disabled", true);
+  });
+
+  it("prompt_options_keep_send_full_dom_without_send_mode_controls", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(snapshotForPage());
+
+    await user.click(screen.getByRole("button", { name: "Prompt options" }));
+
+    expect(screen.getByRole("checkbox", { name: "Send Full DOM" })).not.toBeNull();
+    expect(screen.queryByRole("group", { name: "Send mode" })).toBeNull();
+  });
+});
+
 describe("SidePanelView prompt options", () => {
   it("opens_a_compact_prompt_options_popover_from_the_composer_button", async () => {
     const user = userEvent.setup();
@@ -1251,6 +1389,7 @@ describe("SidePanelView prompt options", () => {
         onRespondToPermission={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
+        onSendModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
@@ -1273,6 +1412,7 @@ describe("SidePanelView prompt options", () => {
         onRespondToPermission={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
+        onSendModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
@@ -1295,6 +1435,7 @@ describe("SidePanelView prompt options", () => {
         onRespondToPermission={() => false}
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
+        onSendModeChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}

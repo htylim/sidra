@@ -227,7 +227,7 @@ After the readable smoke passes, keep the same side panel open.
 
 1. Click `Prompt options`.
 2. Enable `Send Full DOM`.
-3. Send another prompt with `Capture + Send`.
+3. Choose `Capture + Send` from the split-button menu and send another prompt.
 4. Confirm the page card shows `Full DOM attached`.
 5. Confirm the transcript shows `Full DOM attached` and does not show raw HTML.
 
@@ -244,7 +244,8 @@ await sidePanelPage.evaluate(async () => {
 });
 ```
 
-Then keep `Send Full DOM` enabled and send from a page whose HTML is over that limit. Expected marker:
+Then keep `Send Full DOM` enabled, choose `Capture + Send` from the split-button
+menu, and send from a page whose HTML is over that limit. Expected marker:
 
 ```text
 Full DOM skipped; content too large
@@ -288,11 +289,12 @@ Tell the user how to play:
 - Use the `example.com` tab or navigate it to any page.
 - Click the Sidra extension icon to open the real side panel.
 - Type a prompt and send.
-- Use `Prompt options` to enable `Send Full DOM`, then send. Expected marker:
-  `Full DOM attached`.
+- Use `Prompt options` to enable `Send Full DOM`, then choose `Capture + Send`
+  from the split-button menu and send. Expected marker: `Full DOM attached`.
 - To smoke oversized DOM, set `domContentLimitCharacters` in extension local
-  storage as shown above, then send from a page with HTML over the limit.
-  Expected marker: `Full DOM skipped; content too large`.
+  storage as shown above, then choose `Capture + Send` from the split-button
+  menu and send from a page with HTML over the limit. Expected marker:
+  `Full DOM skipped; content too large`.
 - For oversized-payload behavior, paste a prompt over about `1 MB` and send.
   Expected transcript marker: `Payload is too large.` The bridge should stay
   usable.

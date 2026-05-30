@@ -19,7 +19,7 @@ import {
   type SettingsStore
 } from "./settings-store";
 import type { TranscriptEntry } from "./transcript";
-import { UrlSessionStore, type ContextState } from "./url-session-store";
+import { UrlSessionStore, type ContextState, type SendMode } from "./url-session-store";
 
 export type SidePanelSnapshot = {
   bridge: {
@@ -34,6 +34,7 @@ export type SidePanelSnapshot = {
     pageKey: string;
     clientSessionId: string;
     captureMode: CaptureMode;
+    sendMode: SendMode;
     draftPrompt: string;
     contextState: ContextState;
     transcript: TranscriptEntry[];
@@ -60,6 +61,7 @@ export type SidePanelController = {
   cancelTurn(): boolean;
   respondToPermission(requestId: string, decision: PermissionDecision): boolean;
   updateCaptureMode(captureMode: CaptureMode): void;
+  updateSendMode(sendMode: SendMode): void;
   updateDraftPrompt(text: string): void;
   newChat(): void;
   retryBridge(): void;
@@ -204,11 +206,15 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     if (activeSessionIsBusy(snapshot.activeSession)) return false;
 
     const preCaptureMode = snapshot.activeSession.captureMode;
+    const preCaptureSendMode = snapshot.activeSession.sendMode;
     const captureResult = await captureService.captureActivePageDocument();
     if (shutdownStarted) return false;
     if (captureResult.status === "captured") {
       activePageSnapshot = captureResult.pageIdentity;
-      urlSessionStore.selectPage(captureResult.pageIdentity, { initialCaptureMode: preCaptureMode });
+      urlSessionStore.selectPage(captureResult.pageIdentity, {
+        initialCaptureMode: preCaptureMode,
+        initialSendMode: preCaptureSendMode
+      });
       const capturedSessionMode = urlSessionStore.getSnapshot().activeSession.captureMode;
       const pageContext = await captureService.buildPageContextForCapturedDocument(
         captureResult.capturedDocument,
@@ -226,7 +232,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     }
 
     activePageSnapshot = captureResult.pageIdentity;
-    urlSessionStore.selectPage(captureResult.pageIdentity);
+    urlSessionStore.selectPage(captureResult.pageIdentity, { initialSendMode: preCaptureSendMode });
     if (captureResult.pageIdentity.status === "ready") {
       urlSessionStore.updateActiveDraftPrompt(normalizedPrompt);
       urlSessionStore.recordCaptureUnavailable({ message: captureResult.message });
@@ -272,6 +278,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       return accepted;
     },
     updateCaptureMode: (captureMode) => urlSessionStore.updateActiveCaptureMode(captureMode),
+    updateSendMode: (sendMode) => urlSessionStore.updateActiveSendMode(sendMode),
     updateDraftPrompt: (text) => urlSessionStore.updateActiveDraftPrompt(text),
     newChat: () => urlSessionStore.newChat(),
     retryBridge: () => {
@@ -316,6 +323,7 @@ function createSnapshot(
       pageKey: activeSession.pageKey,
       clientSessionId: activeSession.clientSessionId,
       captureMode: activeSession.captureMode,
+      sendMode: activeSession.sendMode,
       draftPrompt: activeSession.draftPrompt,
       contextState: activeSession.contextState,
       transcript: activeSession.transcript,
