@@ -226,7 +226,8 @@ export function SidePanelView(props: {
                     aria-pressed={sendMode === "capture"}
                     onClick={() => selectSendMode("capture")}
                   >
-                    Capture + Send
+                    <SidraIcon name="check" className="send-mode-check" />
+                    <span>Capture + Send</span>
                   </button>
                   <button
                     type="button"
@@ -234,7 +235,8 @@ export function SidePanelView(props: {
                     aria-pressed={sendMode === "send"}
                     onClick={() => selectSendMode("send")}
                   >
-                    Send
+                    <SidraIcon name="check" className="send-mode-check" />
+                    <span>Send</span>
                   </button>
                 </div>
               ) : null}

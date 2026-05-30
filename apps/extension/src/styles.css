@@ -814,29 +814,55 @@ textarea:not(:disabled):focus-visible {
 .send-mode-menu {
   position: absolute;
   right: 0;
-  bottom: calc(100% + 6px);
-  width: min(180px, calc(100vw - 24px));
-  padding: 6px;
-  border: 1px solid #cfd9d5;
+  bottom: calc(100% + 8px);
+  width: min(184px, calc(100vw - 24px));
+  padding: 4px;
+  border: 1px solid #d8e2de;
   border-radius: 8px;
   background: #ffffff;
-  box-shadow: 0 10px 28px rgb(23 32 31 / 0.14);
+  box-shadow:
+    0 14px 34px rgb(23 32 31 / 0.16),
+    0 2px 8px rgb(23 32 31 / 0.08);
   z-index: 2;
 }
 
 .send-mode-menu-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
   width: 100%;
-  min-height: 32px;
+  min-height: 34px;
   justify-content: flex-start;
+  border: 0;
   border-radius: 6px;
   background: transparent;
   color: #17201f;
   font-size: 13px;
+  font-weight: 500;
+  text-align: left;
 }
 
 .send-mode-menu-item[aria-pressed="true"] {
-  background: #e6f5f2;
   color: #075f58;
+  font-weight: 650;
+}
+
+.send-mode-menu-item:not(:disabled):hover {
+  background: #eef8f5;
+}
+
+.send-mode-menu-item:not(:disabled):active {
+  box-shadow: none;
+}
+
+.send-mode-check {
+  opacity: 0;
+  color: #087c71;
+}
+
+.send-mode-menu-item[aria-pressed="true"] .send-mode-check {
+  opacity: 1;
 }
 
 .options-page {
