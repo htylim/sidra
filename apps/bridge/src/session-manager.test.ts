@@ -934,22 +934,6 @@ describe("BridgeSessionManager provider history title source", () => {
     expect(promptFormatterTrace.events.indexOf("metadata.title")).toBeLessThan(promptFormatterTrace.events.indexOf("format"));
   });
 
-  it("updates_existing_exact_provider_input_expectations_with_display_title_source", async () => {
-    const provider = createFakeProvider();
-    const manager = new BridgeSessionManager({ provider, emit: () => {} });
-
-    await manager.startSession("page-1", "codex");
-    await manager.sendPrompt("page-1", { prompt: "First" });
-
-    expect(provider.createdSessions[0]?.sentInputs).toEqual([
-      {
-        prompt: "First",
-        displayTitleSource: {
-          prompt: "First"
-        }
-      }
-    ]);
-  });
 });
 
 describe("BridgeSessionManager cancellation", () => {

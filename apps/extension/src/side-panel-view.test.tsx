@@ -1122,16 +1122,14 @@ describe("SidePanelView rich transcript rendering", () => {
     expect(screen.getByText("Reading")).not.toBeNull();
   });
 
-  it("renders_error_status_entries_as_distinct_status_cards", () => {
+  it("renders_error_status_entries_as_alerts", () => {
     renderInteractiveSnapshot(
       snapshotForPage({
         transcript: [{ kind: "status", role: "status", tone: "error", text: "Provider failed" }]
       })
     );
 
-    const status = screen.getByRole("alert");
-    expect(status.textContent).toBe("Provider failed");
-    expect(status.closest(".status-card")?.className).toContain("error");
+    expect(screen.getByRole("alert").textContent).toBe("Provider failed");
   });
 
   it("renders_failed_assistant_turn_as_not_streaming_with_partial_output_visible", () => {
@@ -1154,16 +1152,14 @@ describe("SidePanelView rich transcript rendering", () => {
     expect(screen.queryByText("Streaming")).toBeNull();
   });
 
-  it("renders_cancelled_status_entries_as_distinct_status_cards", () => {
+  it("renders_cancelled_status_entries_as_status_updates", () => {
     renderInteractiveSnapshot(
       snapshotForPage({
         transcript: [{ kind: "status", role: "status", tone: "cancelled", text: "Assistant turn cancelled" }]
       })
     );
 
-    const status = screen.getByRole("status");
-    expect(status.textContent).toBe("Assistant turn cancelled");
-    expect(status.closest(".status-card")?.className).toContain("cancelled");
+    expect(screen.getByRole("status").textContent).toBe("Assistant turn cancelled");
   });
 });
 

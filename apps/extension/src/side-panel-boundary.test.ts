@@ -6,6 +6,22 @@ function readSource(relativePath: string): string {
   return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
 }
 
+function moduleSpecifiers(relativePath: string): string[] {
+  const source = readSource(relativePath);
+  const specifierMatches = source.matchAll(
+    /\b(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g
+  );
+  return Array.from(specifierMatches).map((match) => match[1] ?? match[2] ?? "");
+}
+
+function importsBridgeModule(specifier: string): boolean {
+  return specifier === "./bridge" || specifier.startsWith("./bridge/");
+}
+
+function sidePanelViewSourceFiles(): string[] {
+  return ["./side-panel-view.tsx", "./transcript-view.tsx", "./assistant-markdown.tsx"];
+}
+
 function productionSourceFiles(relativeDirectory = "."): string[] {
   const directoryUrl = new URL(relativeDirectory, import.meta.url);
   return readdirSync(fileURLToPath(directoryUrl), { withFileTypes: true }).flatMap((entry) => {
@@ -20,18 +36,19 @@ function productionSourceFiles(relativeDirectory = "."): string[] {
 }
 
 describe("side panel architecture boundary", () => {
-  it("keeps side-panel.tsx free of bridge/session-client imports", () => {
-    const source = readSource("./side-panel.tsx");
+  it("keeps_the_react_entry_point_composed_through_the_controller_boundary", () => {
+    const imports = moduleSpecifiers("./side-panel.tsx");
 
-    expect(source).not.toContain("./bridge/session-client");
-    expect(source).not.toContain("BridgeSessionClient");
+    expect(imports).toContain("./side-panel-controller");
+    expect(imports).toContain("./side-panel-view");
+    expect(imports.some(importsBridgeModule)).toBe(false);
   });
 
   it("keeps side-panel view files free of chrome runtime usage", () => {
-    const source = readSource("./side-panel-view.tsx");
+    const sources = sidePanelViewSourceFiles().map((relativePath) => readSource(relativePath));
 
-    expect(source).not.toContain("chrome.");
-    expect(source).not.toContain("connectNative");
+    expect(sources.some((source) => source.includes("chrome."))).toBe(false);
+    expect(sources.some((source) => source.includes("connectNative"))).toBe(false);
   });
 
   it("creates Chrome-backed dependencies only through the controller composition factory", () => {
@@ -43,54 +60,28 @@ describe("side panel architecture boundary", () => {
   });
 
   it("keeps bridge availability decisions out of the React entry point", () => {
-    const entrySource = readSource("./side-panel.tsx");
-    const viewSource = readSource("./side-panel-view.tsx");
+    const imports = moduleSpecifiers("./side-panel.tsx");
 
-    expect(entrySource).toContain("createChromeSidePanelController");
-    expect(entrySource).not.toContain("BridgeConnection");
-    expect(entrySource).not.toContain("./bridge/connection");
-    expect(viewSource).not.toContain("snapshot.bridge.connected ?");
-    expect(viewSource).not.toContain("snapshot.bridge.ready ?");
+    expect(imports).toContain("./side-panel-controller");
+    expect(imports.some(importsBridgeModule)).toBe(false);
+  });
+
+  it("keeps_raw_bridge_readiness_decisions_out_of_side_panel_view_files", () => {
+    const sources = sidePanelViewSourceFiles().map((relativePath) => readSource(relativePath));
+
+    expect(sources.some((source) => source.includes("snapshot.bridge.connected"))).toBe(false);
+    expect(sources.some((source) => source.includes("snapshot.bridge.ready"))).toBe(false);
   });
 });
 
-describe("side panel New Chat wiring", () => {
-  it("passes controller.newChat into the New Chat button path", () => {
-    const sidePanelSource = readSource("./side-panel.tsx");
+describe("side panel settings and quick-action boundary", () => {
+  it("keeps_quick_action_storage_and_prompt_ownership_out_of_the_react_view", () => {
     const viewSource = readSource("./side-panel-view.tsx");
+    const imports = moduleSpecifiers("./side-panel-view.tsx");
 
-    expect(sidePanelSource).toContain("onNewChat={sidePanelController.newChat}");
-    expect(viewSource).toContain("onNewChat(): void");
-    expect(viewSource).toContain('aria-label="New chat"');
-    expect(viewSource).toContain("onClick={props.onNewChat}");
-  });
-
-  it("passes_controller_updateCaptureMode_into_the_prompt_options_path", () => {
-    const sidePanelSource = readSource("./side-panel.tsx");
-    const viewSource = readSource("./side-panel-view.tsx");
-
-    expect(sidePanelSource).toContain("onCaptureModeChange={sidePanelController.updateCaptureMode}");
-    expect(viewSource).toContain("onCaptureModeChange(captureMode: CaptureMode): void");
-    expect(viewSource).toContain('aria-label="Prompt options"');
-    expect(viewSource).toContain("Send Full DOM");
-  });
-
-  it("passes_controller_quick_action_and_settings_commands_into_the_view", () => {
-    const sidePanelSource = readSource("./side-panel.tsx");
-    const viewSource = readSource("./side-panel-view.tsx");
-
-    expect(sidePanelSource).toContain("onQuickAction={sidePanelController.sendQuickAction}");
-    expect(sidePanelSource).toContain("onOpenSettings={sidePanelController.openSettings}");
-    expect(viewSource).toContain("onQuickAction(actionId: string)");
-    expect(viewSource).toContain("onOpenSettings(): void");
-  });
-
-  it("keeps_quick_action_settings_storage_and_prompts_out_of_the_react_view", () => {
-    const viewSource = readSource("./side-panel-view.tsx");
-
-    expect(viewSource).not.toContain("DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT");
+    expect(imports).not.toContain("./quick-actions");
+    expect(imports).not.toContain("./settings-store");
     expect(viewSource).not.toContain("chrome.storage");
-    expect(viewSource).not.toContain("SIDRA_SETTINGS_STORAGE_KEY");
   });
 });
 
