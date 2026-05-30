@@ -59,47 +59,7 @@ describe("createCodexAppServerProvider", () => {
     await expect(events).resolves.toEqual([{ type: "assistant.text.delta", text: "Hello" }, { type: "assistant.done" }]);
   });
 
-  it("maps_tool_item_lifecycle_to_safe_activity_without_raw_fields", async () => {
-    const appServer = createFakeAppServer();
-    appServer.nextResponse = { thread: { id: "thread-1" } };
-    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
-    const session = await provider.createSession();
-    appServer.nextResponse = { turn: { id: "turn-1" } };
-
-    const events = collectAsync(session.send({ prompt: "Run" }, new AbortController().signal, ignoredPermissions()));
-    await vi.waitFor(() => expect(appServer.requests.some((request) => request.method === "turn/start")).toBe(true));
-
-    appServer.emitNotification({
-      method: "item/started",
-      params: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        startedAtMs: 1,
-        item: { type: "commandExecution", id: "item-1", command: "cat secret.txt", aggregatedOutput: "secret output" }
-      }
-    });
-    appServer.emitNotification({
-      method: "item/completed",
-      params: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        completedAtMs: 2,
-        item: { type: "commandExecution", id: "item-1", command: "cat secret.txt", aggregatedOutput: "secret output" }
-      }
-    });
-    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
-
-    const collected = await events;
-    expect(collected).toEqual([
-      { type: "assistant.activity", activity: { kind: "tool", phase: "started", label: "Tool started" } },
-      { type: "assistant.activity", activity: { kind: "tool", phase: "finished", label: "Tool finished" } },
-      { type: "assistant.done" }
-    ]);
-    expect(JSON.stringify(collected)).not.toContain("secret");
-    expect(JSON.stringify(collected)).not.toContain("cat secret.txt");
-  });
-
-  it("maps_reasoning_and_web_search_items_to_safe_progress_activity", async () => {
+  it("maps_reasoning_summary_delta_to_activity_summary", async () => {
     const appServer = createFakeAppServer();
     appServer.nextResponse = { thread: { id: "thread-1" } };
     const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
@@ -110,23 +70,259 @@ describe("createCodexAppServerProvider", () => {
     await vi.waitFor(() => expect(appServer.requests.some((request) => request.method === "turn/start")).toBe(true));
 
     appServer.emitNotification({
-      method: "item/started",
-      params: { threadId: "thread-1", turnId: "turn-1", startedAtMs: 1, item: { type: "reasoning", id: "item-1", content: ["private"] } }
+      method: "item/reasoning/summaryTextDelta",
+      params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", delta: "Checked the code." }
     });
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+
+    await expect(events).resolves.toEqual([
+      { type: "assistant.activity", activity: { kind: "reasoning_summary_delta", text: "Checked the code." } },
+      { type: "assistant.done" }
+    ]);
+  });
+
+  it("ignores_raw_reasoning_text_delta", async () => {
+    const { appServer, events } = await startProviderTurn("Think");
+
     appServer.emitNotification({
-      method: "item/started",
-      params: { threadId: "thread-1", turnId: "turn-1", startedAtMs: 2, item: { type: "webSearch", id: "item-2", query: "secret" } }
+      method: "item/reasoning/textDelta",
+      params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", delta: "private chain of thought" }
     });
     appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
 
     const collected = await events;
-    expect(collected).toEqual([
-      { type: "assistant.activity", activity: { kind: "progress", label: "Working" } },
-      { type: "assistant.activity", activity: { kind: "progress", label: "Searching" } },
+    expect(collected).toEqual([{ type: "assistant.done" }]);
+    expect(JSON.stringify(collected)).not.toContain("private chain of thought");
+  });
+
+  it("does_not_emit_activity_for_reasoning_started_without_summary", async () => {
+    const { appServer, events } = await startProviderTurn("Think");
+
+    appServer.emitNotification({
+      method: "item/started",
+      params: { threadId: "thread-1", turnId: "turn-1", item: { type: "reasoning", id: "item-1", content: ["private"] } }
+    });
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+
+    await expect(events).resolves.toEqual([{ type: "assistant.done" }]);
+  });
+
+  it("maps_web_search_item_to_action_activity_with_details", async () => {
+    const { appServer, events } = await startProviderTurn("Search");
+
+    appServer.emitNotification({
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { type: "webSearch", id: "item-2", query: "structured logging" }
+      }
+    });
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+
+    await expect(events).resolves.toEqual([
+      {
+        type: "assistant.activity",
+        activity: {
+          kind: "tool",
+          itemId: "item-2",
+          toolKind: "web_search",
+          phase: "started",
+          title: "Search web",
+          details: [{ label: "Query", value: "structured logging" }]
+        }
+      },
       { type: "assistant.done" }
     ]);
-    expect(JSON.stringify(collected)).not.toContain("private");
-    expect(JSON.stringify(collected)).not.toContain("secret");
+  });
+
+  it("maps_command_started_to_action_activity_with_command_details", async () => {
+    const { appServer, events } = await startProviderTurn("Run");
+
+    appServer.emitNotification({
+      method: "item/started",
+      params: { threadId: "thread-1", turnId: "turn-1", item: { type: "commandExecution", id: "item-1", command: "pnpm test" } }
+    });
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+
+    await expect(events).resolves.toEqual([
+      {
+        type: "assistant.activity",
+        activity: {
+          kind: "tool",
+          itemId: "item-1",
+          toolKind: "command",
+          phase: "started",
+          title: "Run command",
+          details: [{ label: "Command", value: "pnpm test" }]
+        }
+      },
+      { type: "assistant.done" }
+    ]);
+  });
+
+  it("attaches_command_output_delta_to_matching_command_activity", async () => {
+    const { appServer, events } = await startProviderTurn("Run");
+
+    appServer.emitNotification({
+      method: "item/started",
+      params: { threadId: "thread-1", turnId: "turn-1", item: { type: "commandExecution", id: "item-1", command: "pnpm test" } }
+    });
+    appServer.emitNotification({
+      method: "item/commandExecution/outputDelta",
+      params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", stream: "stdout", delta: "PASS test suite" }
+    });
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+
+    await expect(events).resolves.toEqual([
+      {
+        type: "assistant.activity",
+        activity: {
+          kind: "tool",
+          itemId: "item-1",
+          toolKind: "command",
+          phase: "started",
+          title: "Run command",
+          details: [{ label: "Command", value: "pnpm test" }]
+        }
+      },
+      {
+        type: "assistant.activity",
+        activity: { kind: "command_output_delta", itemId: "item-1", stream: "stdout", text: "PASS test suite" }
+      },
+      { type: "assistant.done" }
+    ]);
+  });
+
+  it("marks_tool_activity_complete_when_item_completed", async () => {
+    const { appServer, events } = await startProviderTurn("Run");
+
+    appServer.emitNotification({
+      method: "item/completed",
+      params: { threadId: "thread-1", turnId: "turn-1", item: { type: "commandExecution", id: "item-1", command: "pnpm test" } }
+    });
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+
+    await expect(events).resolves.toEqual([
+      {
+        type: "assistant.activity",
+        activity: {
+          kind: "tool",
+          itemId: "item-1",
+          toolKind: "command",
+          phase: "completed",
+          title: "Run command",
+          details: [{ label: "Command", value: "pnpm test" }]
+        }
+      },
+      { type: "assistant.done" }
+    ]);
+  });
+
+  it("maps_mcp_tool_started_and_completed_to_action_activity", async () => {
+    const { appServer, events } = await startProviderTurn("Use tool");
+
+    appServer.emitNotification({
+      method: "item/started",
+      params: { threadId: "thread-1", turnId: "turn-1", item: { type: "mcpToolCall", id: "item-1", server: "github", tool: "search_issues" } }
+    });
+    appServer.emitNotification({
+      method: "item/completed",
+      params: { threadId: "thread-1", turnId: "turn-1", item: { type: "mcpToolCall", id: "item-1", server: "github", tool: "search_issues" } }
+    });
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+
+    await expect(events).resolves.toEqual([
+      {
+        type: "assistant.activity",
+        activity: {
+          kind: "tool",
+          itemId: "item-1",
+          toolKind: "mcp_tool",
+          phase: "started",
+          title: "Use MCP tool",
+          details: [
+            { label: "Server", value: "github" },
+            { label: "Tool", value: "search_issues" }
+          ]
+        }
+      },
+      {
+        type: "assistant.activity",
+        activity: {
+          kind: "tool",
+          itemId: "item-1",
+          toolKind: "mcp_tool",
+          phase: "completed",
+          title: "Use MCP tool",
+          details: [
+            { label: "Server", value: "github" },
+            { label: "Tool", value: "search_issues" }
+          ]
+        }
+      },
+      { type: "assistant.done" }
+    ]);
+  });
+
+  it("caps_activity_detail_and_output_text", async () => {
+    const { appServer, events } = await startProviderTurn("Run");
+    const longText = "x".repeat(3_000);
+
+    appServer.emitNotification({
+      method: "item/started",
+      params: { threadId: "thread-1", turnId: "turn-1", item: { type: "commandExecution", id: "item-1", command: longText } }
+    });
+    appServer.emitNotification({
+      method: "item/commandExecution/outputDelta",
+      params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", stream: "stdout", delta: "y".repeat(9_000) }
+    });
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+
+    const collected = await events;
+    expect(collected[0]).toMatchObject({
+      type: "assistant.activity",
+      activity: { kind: "tool", details: [{ label: "Command", value: expect.stringMatching(/^x+$/) }] }
+    });
+    expect(collected[1]).toMatchObject({
+      type: "assistant.activity",
+      activity: { kind: "command_output_delta", text: expect.stringMatching(/^y+$/) }
+    });
+    if (collected[0]?.type === "assistant.activity" && collected[0].activity.kind === "tool") {
+      expect(collected[0].activity.details[0]?.value.length).toBe(2_000);
+    }
+    if (collected[1]?.type === "assistant.activity" && collected[1].activity.kind === "command_output_delta") {
+      expect(collected[1].activity.text.length).toBe(8_000);
+    }
+  });
+
+  it("does_not_emit_prompt_page_content_or_raw_private_reasoning_fields", async () => {
+    const { appServer, events } = await startProviderTurn("Run");
+
+    appServer.emitNotification({
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "dynamicToolCall",
+          id: "item-1",
+          name: "safe_tool",
+          prompt: "secret prompt",
+          pageContent: "secret page",
+          reasoning: "private reasoning",
+          chainOfThought: "private chain"
+        }
+      }
+    });
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+
+    const serialized = JSON.stringify(await events);
+    expect(serialized).not.toContain("secret prompt");
+    expect(serialized).not.toContain("secret page");
+    expect(serialized).not.toContain("private reasoning");
+    expect(serialized).not.toContain("private chain");
+    expect(serialized).toContain("safe_tool");
   });
 
   it("ignores_notifications_for_other_threads_or_turns", async () => {
@@ -581,6 +777,17 @@ function ignoredPermissions() {
       return { decision: "deny" as const };
     }
   };
+}
+
+async function startProviderTurn(prompt: string) {
+  const appServer = createFakeAppServer();
+  appServer.nextResponse = { thread: { id: "thread-1" } };
+  const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+  const session = await provider.createSession();
+  appServer.nextResponse = { turn: { id: "turn-1" } };
+  const events = collectAsync(session.send({ prompt }, new AbortController().signal, ignoredPermissions()));
+  await vi.waitFor(() => expect(appServer.requests.some((request) => request.method === "turn/start")).toBe(true));
+  return { appServer, events };
 }
 
 async function collectAsync<T>(events: AsyncIterable<T>): Promise<T[]> {

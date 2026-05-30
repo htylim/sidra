@@ -10,12 +10,24 @@ import {
   cancelAssistantTurn,
   completeAssistantTurn,
   failAssistantTurn,
+  hasVisibleActivity,
   markPendingPermissionRequestsUnavailable,
   removeTranscriptEntriesByIds,
   resolvePermissionRequest,
   type SafeActivityEntry,
   type TranscriptEntry
 } from "./transcript";
+
+function commandToolActivity(phase: "started" | "completed"): SafeActivityEntry {
+  return {
+    kind: "tool",
+    itemId: "command-1",
+    toolKind: "command",
+    phase,
+    title: "Run command",
+    details: [{ label: "Command", value: "pnpm test" }]
+  };
+}
 
 describe("transcript reducer", () => {
   describe("rich transcript reducer", () => {
@@ -40,7 +52,7 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Hi there",
           text: "Hi there",
-          activity: [],
+          activity: { reasoningSummary: "", tools: [] },
           status: "streaming"
         }
       ]);
@@ -55,7 +67,7 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Previous",
           text: "Previous",
-          activity: [],
+          activity: { reasoningSummary: "", tools: [] },
           status: "streaming"
         },
         { kind: "user_message", role: "user", text: "next" },
@@ -64,7 +76,7 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "New",
           text: "New",
-          activity: [],
+          activity: { reasoningSummary: "", tools: [] },
           status: "streaming"
         }
       ]);
@@ -77,7 +89,7 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Done",
           text: "Done",
-          activity: [],
+          activity: { reasoningSummary: "", tools: [] },
           status: "complete"
         }
       ]);
@@ -99,7 +111,7 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Partial",
           text: "Partial",
-          activity: [],
+          activity: { reasoningSummary: "", tools: [] },
           status: "cancelled"
         },
         { kind: "status", role: "status", tone: "cancelled", text: "Assistant turn cancelled" }
@@ -122,7 +134,7 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Partial",
           text: "Partial",
-          activity: [],
+          activity: { reasoningSummary: "", tools: [] },
           status: "failed"
         }
       ]);
@@ -138,7 +150,7 @@ describe("transcript reducer", () => {
     });
 
     it("starts_new_streaming_turns_when_text_or_activity_arrives_after_terminal_turns", () => {
-      const activity: SafeActivityEntry = { kind: "progress", label: "Working" };
+      const activity: SafeActivityEntry = { kind: "reasoning_summary_delta", text: "Working" };
       const completeTurn = completeAssistantTurn(addAssistantTextDelta([], "Done"));
 
       expect(addAssistantTextDelta(completeTurn, "Next")).toEqual([
@@ -147,7 +159,7 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Done",
           text: "Done",
-          activity: [],
+          activity: { reasoningSummary: "", tools: [] },
           status: "complete"
         },
         {
@@ -155,7 +167,7 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Next",
           text: "Next",
-          activity: [],
+          activity: { reasoningSummary: "", tools: [] },
           status: "streaming"
         }
       ]);
@@ -164,13 +176,13 @@ describe("transcript reducer", () => {
         role: "assistant",
         markdown: "",
         text: "",
-        activity: [activity],
+        activity: { reasoningSummary: "Working", tools: [] },
         status: "streaming"
       });
     });
 
     it("adds_safe_activity_to_the_current_assistant_turn", () => {
-      const activity: SafeActivityEntry = { kind: "progress", label: "Reading" };
+      const activity: SafeActivityEntry = { kind: "reasoning_summary_delta", text: "Reading" };
 
       expect(addAssistantActivity(addAssistantTextDelta([], "Working"), activity)).toEqual([
         {
@@ -178,10 +190,87 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Working",
           text: "Working",
-          activity: [activity],
+          activity: { reasoningSummary: "Reading", tools: [] },
           status: "streaming"
         }
       ]);
+    });
+
+    it("adds_reasoning_summary_delta_to_the_current_assistant_turn", () => {
+      const transcript = addAssistantActivity(addAssistantTextDelta([], "Working"), {
+        kind: "reasoning_summary_delta",
+        text: "Checked the nearby code."
+      });
+
+      expect(transcript.at(-1)).toMatchObject({
+        kind: "assistant_turn",
+        activity: { reasoningSummary: "Checked the nearby code.", tools: [] }
+      });
+    });
+
+    it("appends_multiple_reasoning_summary_deltas_in_order", () => {
+      const transcript = addAssistantActivity(
+        addAssistantActivity([], { kind: "reasoning_summary_delta", text: "Read tests. " }),
+        { kind: "reasoning_summary_delta", text: "Updated reducer." }
+      );
+
+      expect(transcript.at(-1)).toMatchObject({
+        activity: { reasoningSummary: "Read tests. Updated reducer.", tools: [] }
+      });
+    });
+
+    it("adds_tool_activity_to_the_current_assistant_turn", () => {
+      const transcript = addAssistantActivity([], commandToolActivity("started"));
+
+      expect(transcript.at(-1)).toMatchObject({
+        kind: "assistant_turn",
+        activity: {
+          reasoningSummary: "",
+          tools: [{ itemId: "command-1", toolKind: "command", phase: "started", title: "Run command", commandOutput: [] }]
+        }
+      });
+    });
+
+    it("updates_existing_tool_activity_by_item_id_when_completed", () => {
+      const transcript = addAssistantActivity(addAssistantActivity([], commandToolActivity("started")), commandToolActivity("completed"));
+
+      expect(transcript.at(-1)).toMatchObject({
+        activity: {
+          tools: [{ itemId: "command-1", phase: "completed", title: "Run command" }]
+        }
+      });
+    });
+
+    it("attaches_command_output_to_the_matching_tool_activity", () => {
+      const transcript = addAssistantActivity(addAssistantActivity([], commandToolActivity("started")), {
+        kind: "command_output_delta",
+        itemId: "command-1",
+        stream: "stdout",
+        text: "PASS"
+      });
+
+      expect(transcript.at(-1)).toMatchObject({
+        activity: {
+          tools: [{ itemId: "command-1", commandOutput: [{ stream: "stdout", text: "PASS" }] }]
+        }
+      });
+    });
+
+    it("does_not_create_visible_activity_for_generic_progress_only", () => {
+      const transcript = addAssistantTextDelta([], "Answer only");
+      const turn = transcript.at(-1);
+
+      expect(turn?.kind === "assistant_turn" ? hasVisibleActivity(turn.activity) : true).toBe(false);
+    });
+
+    it("starts_new_streaming_turns_when_real_activity_arrives_after_terminal_turns", () => {
+      const completeTurn = completeAssistantTurn(addAssistantTextDelta([], "Done"));
+
+      expect(addAssistantActivity(completeTurn, { kind: "reasoning_summary_delta", text: "New work" }).at(-1)).toMatchObject({
+        kind: "assistant_turn",
+        activity: { reasoningSummary: "New work", tools: [] },
+        status: "streaming"
+      });
     });
 
     it("updates_streaming_assistant_turns_when_status_entries_follow_them", () => {
@@ -193,7 +282,7 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Partial output",
           text: "Partial output",
-          activity: [],
+          activity: { reasoningSummary: "", tools: [] },
           status: "complete"
         },
         { kind: "status", role: "status", tone: "neutral", text: "Bridge is slow" }
@@ -209,7 +298,7 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Done",
           text: "Done",
-          activity: [],
+          activity: { reasoningSummary: "", tools: [] },
           status: "complete"
         },
         { kind: "status", role: "status", tone: "neutral", text: "Session started" },
@@ -218,14 +307,14 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Next",
           text: "Next",
-          activity: [],
+          activity: { reasoningSummary: "", tools: [] },
           status: "streaming"
         }
       ]);
     });
 
     it("creates_an_assistant_turn_for_activity_before_text", () => {
-      const activity: SafeActivityEntry = { kind: "tool", phase: "started", label: "Tool started" };
+      const activity = commandToolActivity("started");
 
       expect(addAssistantActivity([], activity)).toEqual([
         {
@@ -233,7 +322,7 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "",
           text: "",
-          activity: [activity],
+          activity: { reasoningSummary: "", tools: [{ ...activity, commandOutput: [] }] },
           status: "streaming"
         }
       ]);
@@ -311,7 +400,7 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Checking",
           text: "Checking",
-          activity: [],
+          activity: { reasoningSummary: "", tools: [] },
           status: "complete"
         },
         {
@@ -337,8 +426,11 @@ describe("transcript reducer", () => {
       );
       const transcript = addAssistantActivity(addAssistantTextDelta(permissionTranscript, "Allowed"), {
         kind: "tool",
+        itemId: "command-1",
+        toolKind: "command",
         phase: "started",
-        label: "Tool started"
+        title: "Run command",
+        details: [{ label: "Command", value: "pnpm test" }]
       });
 
       expect(transcript).toEqual([
@@ -348,7 +440,7 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Checking",
           text: "Checking",
-          activity: [],
+          activity: { reasoningSummary: "", tools: [] },
           status: "complete"
         },
         {
@@ -364,7 +456,20 @@ describe("transcript reducer", () => {
           role: "assistant",
           markdown: "Allowed",
           text: "Allowed",
-          activity: [{ kind: "tool", phase: "started", label: "Tool started" }],
+          activity: {
+            reasoningSummary: "",
+            tools: [
+              {
+                kind: "tool",
+                itemId: "command-1",
+                toolKind: "command",
+                phase: "started",
+                title: "Run command",
+                details: [{ label: "Command", value: "pnpm test" }],
+                commandOutput: []
+              }
+            ]
+          },
           status: "streaming"
         }
       ]);

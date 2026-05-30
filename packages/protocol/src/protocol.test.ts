@@ -727,34 +727,134 @@ describe("bridge-to-extension protocol validation", () => {
 });
 
 describe("assistant activity protocol validation", () => {
-  it("accepts tool activity with an allowlisted label", () => {
-    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "tool", phase: "started", label: "Tool started" } })).toEqual({
+  it("accepts_reasoning_summary_delta_activity", () => {
+    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "reasoning_summary_delta", text: "Checked the code." } })).toEqual({
       ok: true,
-      value: { type: "assistant.activity", activity: { kind: "tool", phase: "started", label: "Tool started" } }
+      value: { type: "assistant.activity", activity: { kind: "reasoning_summary_delta", text: "Checked the code." } }
     });
   });
 
-  it("accepts progress activity with an allowlisted label", () => {
-    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "progress", label: "Reading" } })).toEqual({
+  it("accepts_tool_activity_with_bounded_details", () => {
+    const activity = {
+      kind: "tool",
+      itemId: "item-1",
+      toolKind: "command",
+      phase: "started",
+      title: "Run command",
+      details: [{ label: "Command", value: "pnpm test" }]
+    };
+
+    expect(parseAgentEvent({ type: "assistant.activity", activity })).toEqual({
       ok: true,
-      value: { type: "assistant.activity", activity: { kind: "progress", label: "Reading" } }
+      value: { type: "assistant.activity", activity }
     });
   });
 
-  it("accepts error activity with an allowlisted label", () => {
-    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "error", label: "Activity error" } })).toEqual({
+  it("accepts_command_output_delta_activity", () => {
+    expect(
+      parseAgentEvent({
+        type: "assistant.activity",
+        activity: { kind: "command_output_delta", itemId: "item-1", stream: "stdout", text: "test output" }
+      })
+    ).toEqual({
       ok: true,
-      value: { type: "assistant.activity", activity: { kind: "error", label: "Activity error" } }
+      value: {
+        type: "assistant.activity",
+        activity: { kind: "command_output_delta", itemId: "item-1", stream: "stdout", text: "test output" }
+      }
     });
   });
 
-  it("accepts activity events through bridge message envelopes", () => {
+  it("rejects_raw_reasoning_text_activity", () => {
+    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "reasoning_text_delta", text: "private" } })).toEqual({
+      ok: false,
+      error: "event is invalid"
+    });
+  });
+
+  it("rejects_activity_details_with_private_reasoning_fields", () => {
+    expect(
+      parseAgentEvent({
+        type: "assistant.activity",
+        activity: {
+          kind: "tool",
+          itemId: "item-1",
+          toolKind: "command",
+          phase: "started",
+          title: "Run command",
+          details: [{ label: "reasoning", value: "private" }]
+        }
+      })
+    ).toEqual({ ok: false, error: "event is invalid" });
+
+    expect(
+      parseAgentEvent({
+        type: "assistant.activity",
+        activity: {
+          kind: "tool",
+          itemId: "item-1",
+          toolKind: "command",
+          phase: "started",
+          title: "Run command",
+          details: [{ label: "chainOfThought", value: "private" }]
+        }
+      })
+    ).toEqual({ ok: false, error: "event is invalid" });
+  });
+
+  it("rejects_activity_details_with_prompt_or_page_content_fields", () => {
+    expect(
+      parseAgentEvent({
+        type: "assistant.activity",
+        activity: {
+          kind: "tool",
+          itemId: "item-1",
+          toolKind: "command",
+          phase: "started",
+          title: "Run command",
+          details: [{ label: "prompt", value: "private prompt" }]
+        }
+      })
+    ).toEqual({ ok: false, error: "event is invalid" });
+
+    expect(
+      parseAgentEvent({
+        type: "assistant.activity",
+        activity: {
+          kind: "tool",
+          itemId: "item-1",
+          toolKind: "command",
+          phase: "started",
+          title: "Run command",
+          details: [{ label: "pageContent", value: "private page" }]
+        }
+      })
+    ).toEqual({ ok: false, error: "event is invalid" });
+  });
+
+  it("rejects_activity_detail_values_over_the_length_limit", () => {
+    expect(
+      parseAgentEvent({
+        type: "assistant.activity",
+        activity: {
+          kind: "tool",
+          itemId: "item-1",
+          toolKind: "command",
+          phase: "started",
+          title: "Run command",
+          details: [{ label: "Command", value: "x".repeat(2_001) }]
+        }
+      })
+    ).toEqual({ ok: false, error: "event is invalid" });
+  });
+
+  it("accepts_new_activity_shapes_through_bridge_message_envelopes", () => {
     expect(
       parseBridgeToExtension({
         type: "agent.event",
         version: 2,
         clientSessionId: "page-1",
-        event: { type: "assistant.activity", activity: { kind: "tool", phase: "started", label: "Tool started" } }
+        event: { type: "assistant.activity", activity: { kind: "reasoning_summary_delta", text: "Checked the code." } }
       })
     ).toEqual({
       ok: true,
@@ -762,7 +862,7 @@ describe("assistant activity protocol validation", () => {
         type: "agent.event",
         version: 2,
         clientSessionId: "page-1",
-        event: { type: "assistant.activity", activity: { kind: "tool", phase: "started", label: "Tool started" } }
+        event: { type: "assistant.activity", activity: { kind: "reasoning_summary_delta", text: "Checked the code." } }
       }
     });
   });
@@ -774,52 +874,13 @@ describe("assistant activity protocol validation", () => {
     });
   });
 
-  it("rejects private reasoning or chain-of-thought activity fields", () => {
-    expect(
-      parseAgentEvent({
-        type: "assistant.activity",
-        activity: { kind: "progress", label: "Working", reasoning: "private chain of thought" }
-      })
-    ).toEqual({ ok: false, error: "event is invalid" });
-
-    expect(
-      parseAgentEvent({
-        type: "assistant.activity",
-        activity: { kind: "progress", label: "Working", chainOfThought: "private" }
-      })
-    ).toEqual({ ok: false, error: "event is invalid" });
-  });
-
-  it("rejects free-form activity summary fields", () => {
-    expect(
-      parseAgentEvent({
-        type: "assistant.activity",
-        activity: { kind: "progress", label: "Working", summary: "I searched your prompt and page." }
-      })
-    ).toEqual({ ok: false, error: "event is invalid" });
-  });
-
   it("rejects activity events with extra fields", () => {
     expect(
       parseAgentEvent({
         type: "assistant.activity",
-        activity: { kind: "tool", phase: "finished", label: "Tool finished", durationMs: 12 }
+        activity: { kind: "reasoning_summary_delta", text: "Checked the code.", rawText: "private" }
       })
     ).toEqual({ ok: false, error: "event is invalid" });
-  });
-
-  it("rejects activity events with non-allowlisted labels", () => {
-    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "progress", label: "Thinking deeply" } })).toEqual({
-      ok: false,
-      error: "event is invalid"
-    });
-  });
-
-  it("rejects error activity with non-allowlisted labels", () => {
-    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "error", label: "Detailed raw error" } })).toEqual({
-      ok: false,
-      error: "event is invalid"
-    });
   });
 
   it("rejects invalid activity events through bridge message envelopes", () => {
@@ -833,8 +894,13 @@ describe("assistant activity protocol validation", () => {
     ).toEqual({ ok: false, error: "event is invalid" });
   });
 
-  it("rejects_tool_activity_with_mismatched_phase_and_label", () => {
-    expect(parseAgentEvent({ type: "assistant.activity", activity: { kind: "tool", phase: "started", label: "Tool finished" } })).toEqual({
+  it("rejects_tool_activity_with_invalid_phase", () => {
+    expect(
+      parseAgentEvent({
+        type: "assistant.activity",
+        activity: { kind: "tool", itemId: "item-1", toolKind: "command", phase: "finished", title: "Run command", details: [] }
+      })
+    ).toEqual({
       ok: false,
       error: "event is invalid"
     });

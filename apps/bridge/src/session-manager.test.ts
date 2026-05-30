@@ -257,7 +257,7 @@ describe("BridgeSessionManager", () => {
   it("emits safe adapter activity events", async () => {
     const emitted: BridgeToExtension[] = [];
     const provider = createFakeProvider(() =>
-      new FakeAgentSession(undefined, [{ type: "assistant.activity", activity: { kind: "progress", label: "Reading" } }])
+      new FakeAgentSession(undefined, [{ type: "assistant.activity", activity: { kind: "reasoning_summary_delta", text: "Checked files." } }])
     );
     const manager = new BridgeSessionManager({ provider, emit: (message) => emitted.push(message) });
 
@@ -268,7 +268,7 @@ describe("BridgeSessionManager", () => {
       type: "agent.event",
       version: 2,
       clientSessionId: "page-1",
-      event: { type: "assistant.activity", activity: { kind: "progress", label: "Reading" } }
+      event: { type: "assistant.activity", activity: { kind: "reasoning_summary_delta", text: "Checked files." } }
     });
   });
 

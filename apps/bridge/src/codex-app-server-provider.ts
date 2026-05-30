@@ -7,7 +7,7 @@ import type {
   SafeProviderTurnEvent
 } from "./session-manager.js";
 import type { AppServerNotification, AppServerRequest } from "./codex-app-server-client.js";
-import type { SafeAgentActivity } from "@sidra/protocol";
+import type { SafeActivityDetail, SafeActivityToolKind, SafeAgentActivity } from "@sidra/protocol";
 import { buildSidraCodexThreadTitle } from "./codex-thread-title.js";
 
 type AppServerClientBoundary = {
@@ -126,6 +126,7 @@ class CodexAppServerTurn {
   private unsubscribeServerRequests: (() => void) | undefined;
   private turnId: string | undefined;
   private finished = false;
+  private readonly commandItemIds = new Set<string>();
 
   constructor(
     private readonly appServer: AppServerClientBoundary,
@@ -199,6 +200,25 @@ class CodexAppServerTurn {
     if (notification.method === "item/started" || notification.method === "item/completed") {
       const activity = parseItemActivity(notification.method, notification.params);
       if (!activity || activity.threadId !== this.threadId || activity.turnId !== this.turnId) return;
+      if (activity.activity.kind === "tool" && activity.activity.toolKind === "command") {
+        this.commandItemIds.add(activity.activity.itemId);
+      }
+      this.pushEvent({ type: "assistant.activity", activity: activity.activity });
+      return;
+    }
+
+    if (notification.method === "item/reasoning/summaryTextDelta") {
+      const activity = parseReasoningSummaryActivity(notification.params);
+      if (!activity || activity.threadId !== this.threadId || activity.turnId !== this.turnId) return;
+      this.pushEvent({ type: "assistant.activity", activity: activity.activity });
+      return;
+    }
+
+    if (notification.method === "item/commandExecution/outputDelta") {
+      const activity = parseCommandOutputActivity(notification.params);
+      if (!activity || activity.threadId !== this.threadId || activity.turnId !== this.turnId) return;
+      if (activity.activity.kind !== "command_output_delta") return;
+      if (!this.commandItemIds.has(activity.activity.itemId)) return;
       this.pushEvent({ type: "assistant.activity", activity: activity.activity });
       return;
     }
@@ -351,28 +371,137 @@ function parseItemActivity(
     return null;
   }
 
-  const itemType = params.item.type;
   if (method === "item/started") {
-    if (itemType === "webSearch") {
-      return { threadId: params.threadId, turnId: params.turnId, activity: { kind: "progress", label: "Searching" } };
-    }
-    if (itemType === "reasoning") {
-      return { threadId: params.threadId, turnId: params.turnId, activity: { kind: "progress", label: "Working" } };
-    }
-    if (isToolLikeItemType(itemType)) {
-      return { threadId: params.threadId, turnId: params.turnId, activity: { kind: "tool", phase: "started", label: "Tool started" } };
-    }
+    const activity = toToolActivity(params.item, "started");
+    if (activity) return { threadId: params.threadId, turnId: params.turnId, activity };
   }
 
-  if (method === "item/completed" && isToolLikeItemType(itemType)) {
-    return { threadId: params.threadId, turnId: params.turnId, activity: { kind: "tool", phase: "finished", label: "Tool finished" } };
+  if (method === "item/completed") {
+    const activity = toToolActivity(params.item, "completed");
+    if (activity) return { threadId: params.threadId, turnId: params.turnId, activity };
   }
 
   return null;
 }
 
-function isToolLikeItemType(itemType: unknown): boolean {
-  return itemType === "commandExecution" || itemType === "fileChange" || itemType === "mcpToolCall" || itemType === "dynamicToolCall";
+function parseReasoningSummaryActivity(params: unknown): { threadId: string; turnId: string; activity: SafeAgentActivity } | null {
+  if (!isRecord(params) || typeof params.threadId !== "string" || typeof params.turnId !== "string") return null;
+  const text = boundedStringField(params, ["delta", "text"]);
+  if (!text) return null;
+  return { threadId: params.threadId, turnId: params.turnId, activity: { kind: "reasoning_summary_delta", text } };
+}
+
+function parseCommandOutputActivity(params: unknown): { threadId: string; turnId: string; activity: SafeAgentActivity } | null {
+  if (!isRecord(params) || typeof params.threadId !== "string" || typeof params.turnId !== "string" || typeof params.itemId !== "string") {
+    return null;
+  }
+  const text = boundedStringField(params, ["delta", "text"]);
+  if (!text) return null;
+  return {
+    threadId: params.threadId,
+    turnId: params.turnId,
+    activity: {
+      kind: "command_output_delta",
+      itemId: params.itemId,
+      stream: toCommandOutputStream(params.stream),
+      text
+    }
+  };
+}
+
+function toToolActivity(item: Record<string, unknown>, phase: "started" | "completed"): SafeAgentActivity | null {
+  const itemId = typeof item.id === "string" ? item.id : undefined;
+  if (!itemId) return null;
+
+  const toolKind = toToolKind(item.type);
+  if (!toolKind) return null;
+
+  return {
+    kind: "tool",
+    itemId,
+    toolKind,
+    phase,
+    title: toolTitle(toolKind),
+    details: toolDetails(toolKind, item)
+  };
+}
+
+function toToolKind(itemType: unknown): SafeActivityToolKind | null {
+  if (itemType === "commandExecution") return "command";
+  if (itemType === "fileChange") return "file_change";
+  if (itemType === "mcpToolCall") return "mcp_tool";
+  if (itemType === "dynamicToolCall") return "dynamic_tool";
+  if (itemType === "webSearch") return "web_search";
+  return null;
+}
+
+function toolTitle(toolKind: SafeActivityToolKind): string {
+  switch (toolKind) {
+    case "command":
+      return "Run command";
+    case "file_change":
+      return "Edit files";
+    case "mcp_tool":
+      return "Use MCP tool";
+    case "dynamic_tool":
+      return "Use tool";
+    case "web_search":
+      return "Search web";
+    case "unknown":
+      return "Use tool";
+  }
+}
+
+function toolDetails(toolKind: SafeActivityToolKind, item: Record<string, unknown>): SafeActivityDetail[] {
+  switch (toolKind) {
+    case "command":
+      return detailList([["Command", item.command]]);
+    case "file_change":
+      return detailList([
+        ["Path", item.path],
+        ["Operation", item.operation]
+      ]);
+    case "mcp_tool":
+      return detailList([
+        ["Server", item.server],
+        ["Tool", item.tool ?? item.name]
+      ]);
+    case "dynamic_tool":
+      return detailList([["Tool", item.name ?? item.tool]]);
+    case "web_search":
+      return detailList([["Query", item.query]]);
+    case "unknown":
+      return [];
+  }
+}
+
+function detailList(entries: Array<[string, unknown]>): SafeActivityDetail[] {
+  const details: SafeActivityDetail[] = [];
+  for (const [label, rawValue] of entries) {
+    if (typeof rawValue !== "string" || rawValue.trim().length === 0) continue;
+    details.push({ label, value: capDisplayText(rawValue, SAFE_ACTIVITY_DETAIL_VALUE_LIMIT) });
+  }
+  return details;
+}
+
+function boundedStringField(source: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim().length > 0) return capDisplayText(value, SAFE_ACTIVITY_TEXT_LIMIT);
+  }
+  return undefined;
+}
+
+function toCommandOutputStream(stream: unknown): "stdout" | "stderr" | "unknown" {
+  if (stream === "stdout" || stream === "stderr") return stream;
+  return "unknown";
+}
+
+const SAFE_ACTIVITY_DETAIL_VALUE_LIMIT = 2_000;
+const SAFE_ACTIVITY_TEXT_LIMIT = 8_000;
+
+function capDisplayText(value: string, limit: number): string {
+  return value.length > limit ? value.slice(0, limit) : value;
 }
 
 function parseTurnCompleted(params: unknown): { threadId: string; turnId: string } | null {

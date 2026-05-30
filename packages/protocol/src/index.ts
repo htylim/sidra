@@ -92,11 +92,29 @@ export type AgentEvent =
   | { type: "assistant.done" }
   | { type: "assistant.cancelled" };
 
+export type SafeActivityDetail = {
+  label: string;
+  value: string;
+};
+
 export type SafeAgentActivity =
-  | { kind: "tool"; phase: "started"; label: "Tool started" }
-  | { kind: "tool"; phase: "finished"; label: "Tool finished" }
-  | { kind: "progress"; label: "Working" | "Reading" | "Searching" }
-  | { kind: "error"; label: "Activity error" };
+  | { kind: "reasoning_summary_delta"; text: string }
+  | {
+      kind: "tool";
+      itemId: string;
+      toolKind: SafeActivityToolKind;
+      phase: "started" | "completed";
+      title: string;
+      details: SafeActivityDetail[];
+    }
+  | {
+      kind: "command_output_delta";
+      itemId: string;
+      stream: "stdout" | "stderr" | "unknown";
+      text: string;
+    };
+
+export type SafeActivityToolKind = "command" | "file_change" | "mcp_tool" | "dynamic_tool" | "web_search" | "unknown";
 
 export type SessionErrorCode =
   | "session_not_started"
@@ -458,26 +476,78 @@ function parseSafeAgentActivity(value: unknown): SafeAgentActivity | null {
   if (!isRecord(value)) return null;
 
   switch (value.kind) {
+    case "reasoning_summary_delta":
+      if (!hasOnlyKeys(value, ["kind", "text"])) return null;
+      if (!isBoundedDisplayString(value.text, SAFE_ACTIVITY_TEXT_LIMIT)) return null;
+      return { kind: "reasoning_summary_delta", text: value.text };
     case "tool":
-      if (!hasOnlyKeys(value, ["kind", "phase", "label"])) return null;
-      if (value.phase === "started" && value.label === "Tool started") {
-        return { kind: "tool", phase: "started", label: "Tool started" };
-      }
-      if (value.phase === "finished" && value.label === "Tool finished") {
-        return { kind: "tool", phase: "finished", label: "Tool finished" };
-      }
-      return null;
-    case "progress":
-      if (!hasOnlyKeys(value, ["kind", "label"])) return null;
-      if (value.label !== "Working" && value.label !== "Reading" && value.label !== "Searching") return null;
-      return { kind: "progress", label: value.label };
-    case "error":
-      if (!hasOnlyKeys(value, ["kind", "label"])) return null;
-      if (value.label !== "Activity error") return null;
-      return { kind: "error", label: "Activity error" };
+      return parseSafeToolActivity(value);
+    case "command_output_delta":
+      if (!hasOnlyKeys(value, ["kind", "itemId", "stream", "text"])) return null;
+      if (!isNonEmptyString(value.itemId)) return null;
+      if (value.stream !== "stdout" && value.stream !== "stderr" && value.stream !== "unknown") return null;
+      if (!isBoundedDisplayString(value.text, SAFE_ACTIVITY_TEXT_LIMIT)) return null;
+      return { kind: "command_output_delta", itemId: value.itemId, stream: value.stream, text: value.text };
     default:
       return null;
   }
+}
+
+const SAFE_ACTIVITY_TITLE_LIMIT = 200;
+const SAFE_ACTIVITY_DETAIL_LABEL_LIMIT = 80;
+const SAFE_ACTIVITY_DETAIL_VALUE_LIMIT = 2_000;
+const SAFE_ACTIVITY_TEXT_LIMIT = 8_000;
+const SAFE_ACTIVITY_DETAIL_COUNT_LIMIT = 12;
+const BLOCKED_ACTIVITY_FIELD_NAMES = new Set([
+  "reasoning",
+  "chainofthought",
+  "thought",
+  "prompt",
+  "pagecontent",
+  "stdout",
+  "stderr"
+]);
+
+function parseSafeToolActivity(value: Record<string, unknown>): SafeAgentActivity | null {
+  if (!hasOnlyKeys(value, ["kind", "itemId", "toolKind", "phase", "title", "details"])) return null;
+  if (!isNonEmptyString(value.itemId)) return null;
+  if (!isSafeActivityToolKind(value.toolKind)) return null;
+  if (value.phase !== "started" && value.phase !== "completed") return null;
+  if (!isBoundedDisplayString(value.title, SAFE_ACTIVITY_TITLE_LIMIT)) return null;
+  const details = parseSafeActivityDetails(value.details);
+  if (!details) return null;
+  return {
+    kind: "tool",
+    itemId: value.itemId,
+    toolKind: value.toolKind,
+    phase: value.phase,
+    title: value.title,
+    details
+  };
+}
+
+function parseSafeActivityDetails(value: unknown): SafeActivityDetail[] | null {
+  if (!Array.isArray(value) || value.length > SAFE_ACTIVITY_DETAIL_COUNT_LIMIT) return null;
+  const details: SafeActivityDetail[] = [];
+  for (const detail of value) {
+    if (!isRecord(detail) || !hasOnlyKeys(detail, ["label", "value"])) return null;
+    if (!isBoundedDisplayString(detail.label, SAFE_ACTIVITY_DETAIL_LABEL_LIMIT)) return null;
+    if (!isBoundedDisplayString(detail.value, SAFE_ACTIVITY_DETAIL_VALUE_LIMIT)) return null;
+    if (BLOCKED_ACTIVITY_FIELD_NAMES.has(detail.label.toLowerCase())) return null;
+    details.push({ label: detail.label, value: detail.value });
+  }
+  return details;
+}
+
+function isSafeActivityToolKind(value: unknown): value is SafeActivityToolKind {
+  return (
+    value === "command" ||
+    value === "file_change" ||
+    value === "mcp_tool" ||
+    value === "dynamic_tool" ||
+    value === "web_search" ||
+    value === "unknown"
+  );
 }
 
 function parsePermissionRequest(value: unknown): PermissionRequest | null {
@@ -556,6 +626,10 @@ function isNonEmptyString(value: unknown): value is string {
 
 function optionalString(value: unknown): value is string | undefined {
   return value === undefined || typeof value === "string";
+}
+
+function isBoundedDisplayString(value: unknown, limit: number): value is string {
+  return isNonEmptyString(value) && value.length <= limit;
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: readonly string[]): boolean {

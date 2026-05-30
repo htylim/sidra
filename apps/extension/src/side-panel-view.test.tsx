@@ -28,6 +28,33 @@ type SnapshotOptions = {
   canCancelTurn?: boolean;
 };
 
+function assistantTurnWithToolActivity(
+  phase: "started" | "completed",
+  commandOutput: Array<{ stream: "stdout" | "stderr" | "unknown"; text: string }> = []
+): NonNullable<SnapshotOptions["transcript"]>[number] {
+  return {
+    kind: "assistant_turn",
+    role: "assistant",
+    markdown: "",
+    text: "",
+    activity: {
+      reasoningSummary: "",
+      tools: [
+        {
+          kind: "tool",
+          itemId: "command-1",
+          toolKind: "command",
+          phase,
+          title: "Run command",
+          details: [{ label: "Command", value: "pnpm test" }],
+          commandOutput
+        }
+      ]
+    },
+    status: "streaming"
+  };
+}
+
 function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
   return {
     bridge: readyBridge,
@@ -957,7 +984,7 @@ describe("SidePanelView rich transcript rendering", () => {
             role: "assistant",
             markdown: "## Answer\n\n<strong data-secret=\"raw\">raw html</strong>\n\n- item",
             text: "Answer",
-            activity: [],
+            activity: { reasoningSummary: "", tools: [] },
             status: "complete"
           }
         ]
@@ -979,7 +1006,7 @@ describe("SidePanelView rich transcript rendering", () => {
             role: "assistant",
             markdown: "[Open example](https://example.com/path)",
             text: "Open example",
-            activity: [],
+            activity: { reasoningSummary: "", tools: [] },
             status: "complete"
           }
         ]
@@ -1001,7 +1028,7 @@ describe("SidePanelView rich transcript rendering", () => {
             role: "assistant",
             markdown: "[Email support](mailto:support@example.com)",
             text: "Email support",
-            activity: [],
+            activity: { reasoningSummary: "", tools: [] },
             status: "complete"
           }
         ]
@@ -1028,7 +1055,7 @@ describe("SidePanelView rich transcript rendering", () => {
             role: "assistant",
             markdown,
             text: linkText,
-            activity: [],
+            activity: { reasoningSummary: "", tools: [] },
             status: "complete"
           }
         ]
@@ -1048,7 +1075,7 @@ describe("SidePanelView rich transcript rendering", () => {
             role: "assistant",
             markdown: "[relative](/local/path)",
             text: "relative",
-            activity: [],
+            activity: { reasoningSummary: "", tools: [] },
             status: "complete"
           }
         ]
@@ -1068,7 +1095,7 @@ describe("SidePanelView rich transcript rendering", () => {
             role: "assistant",
             markdown: "![secret image](https://example.com/image.png)",
             text: "",
-            activity: [],
+            activity: { reasoningSummary: "", tools: [] },
             status: "complete"
           }
         ]
@@ -1088,7 +1115,7 @@ describe("SidePanelView rich transcript rendering", () => {
             role: "assistant",
             markdown: "```ts\nconst value = 1;\n```",
             text: "const value = 1;",
-            activity: [],
+            activity: { reasoningSummary: "", tools: [] },
             status: "complete"
           }
         ]
@@ -1114,7 +1141,7 @@ describe("SidePanelView rich transcript rendering", () => {
             role: "assistant",
             markdown: "```json\n{\"ok\": true}\n```",
             text: "{\"ok\": true}",
-            activity: [],
+            activity: { reasoningSummary: "", tools: [] },
             status: "complete"
           }
         ]
@@ -1141,7 +1168,7 @@ describe("SidePanelView rich transcript rendering", () => {
               role: "assistant",
               markdown: "```ts\nconst value = 1;\n```",
               text: "const value = 1;",
-              activity: [],
+              activity: { reasoningSummary: "", tools: [] },
               status: "complete"
             }
           ]
@@ -1167,7 +1194,7 @@ describe("SidePanelView rich transcript rendering", () => {
               role: "assistant",
               markdown: "```ts\nconst value = 1;\n```",
               text: "const value = 1;",
-              activity: [],
+              activity: { reasoningSummary: "", tools: [] },
               status: "complete"
             }
           ]
@@ -1193,7 +1220,7 @@ describe("SidePanelView rich transcript rendering", () => {
               role: "assistant",
               markdown: "```ts\nconst value = 1;\n```",
               text: "const value = 1;",
-              activity: [],
+              activity: { reasoningSummary: "", tools: [] },
               status: "complete"
             }
           ]
@@ -1219,7 +1246,7 @@ describe("SidePanelView rich transcript rendering", () => {
               role: "assistant",
               markdown: "```ts\nconst value = 1;\n```",
               text: "const value = 1;",
-              activity: [],
+              activity: { reasoningSummary: "", tools: [] },
               status: "complete"
             }
           ]
@@ -1266,7 +1293,7 @@ describe("SidePanelView rich transcript rendering", () => {
               role: "assistant",
               markdown: "```ts\nconst value = 1;\n```",
               text: "const value = 1;",
-              activity: [],
+              activity: { reasoningSummary: "", tools: [] },
               status: "complete"
             }
           ]
@@ -1309,7 +1336,7 @@ describe("SidePanelView rich transcript rendering", () => {
               role: "assistant",
               markdown: "```ts\nconst value = 1;\n```",
               text: "const value = 1;",
-              activity: [],
+              activity: { reasoningSummary: "", tools: [] },
               status: "complete"
             }
           ]
@@ -1326,7 +1353,7 @@ describe("SidePanelView rich transcript rendering", () => {
     });
   });
 
-  it("renders_activity_collapsed_by_default", () => {
+  it("does_not_render_activity_when_assistant_turn_has_no_visible_activity", () => {
     renderInteractiveSnapshot(
       snapshotForPage({
         transcript: [
@@ -1335,7 +1362,26 @@ describe("SidePanelView rich transcript rendering", () => {
             role: "assistant",
             markdown: "",
             text: "",
-            activity: [{ kind: "progress", label: "Reading" }],
+            activity: { reasoningSummary: "", tools: [] },
+            status: "streaming"
+          }
+        ]
+      })
+    );
+
+    expect(screen.queryByText("Activity")).toBeNull();
+  });
+
+  it("renders_activity_collapsed_when_reasoning_summary_exists", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "",
+            text: "",
+            activity: { reasoningSummary: "Checked the code.", tools: [] },
             status: "streaming"
           }
         ]
@@ -1346,7 +1392,7 @@ describe("SidePanelView rich transcript rendering", () => {
     expect(details?.open).toBe(false);
   });
 
-  it("shows_safe_activity_inside_activity_disclosure_when_opened", async () => {
+  it("renders_reasoning_summary_when_activity_is_expanded", async () => {
     const user = userEvent.setup();
     renderInteractiveSnapshot(
       snapshotForPage({
@@ -1356,7 +1402,7 @@ describe("SidePanelView rich transcript rendering", () => {
             role: "assistant",
             markdown: "",
             text: "",
-            activity: [{ kind: "progress", label: "Reading" }],
+            activity: { reasoningSummary: "Checked the code.", tools: [] },
             status: "streaming"
           }
         ]
@@ -1365,7 +1411,72 @@ describe("SidePanelView rich transcript rendering", () => {
 
     await user.click(screen.getByText("Activity"));
 
-    expect(screen.getByText("Reading")).not.toBeNull();
+    expect(screen.getByText("Reasoning")).not.toBeNull();
+    expect(screen.getByText("Checked the code.")).not.toBeNull();
+  });
+
+  it("renders_tool_action_summary_when_activity_is_expanded", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [assistantTurnWithToolActivity("started")]
+      })
+    );
+
+    await user.click(screen.getByText("Activity"));
+
+    expect(screen.getByText("Actions")).not.toBeNull();
+    expect(screen.getByText("Run command")).not.toBeNull();
+    expect(screen.getByText("pnpm test")).not.toBeNull();
+  });
+
+  it("renders_command_output_under_the_matching_command_action", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [assistantTurnWithToolActivity("started", [{ stream: "stdout", text: "PASS tests" }])]
+      })
+    );
+
+    await user.click(screen.getByText("Activity"));
+
+    expect(screen.getByText("PASS tests")).not.toBeNull();
+  });
+
+  it("shows_tool_completion_state_when_available", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [assistantTurnWithToolActivity("completed")]
+      })
+    );
+
+    await user.click(screen.getByText("Activity"));
+
+    expect(screen.getByText("Completed")).not.toBeNull();
+  });
+
+  it("does_not_render_progress_kind_pills_or_working_labels", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "",
+            text: "",
+            activity: { reasoningSummary: "Checked the code.", tools: [] },
+            status: "streaming"
+          }
+        ]
+      })
+    );
+
+    await user.click(screen.getByText("Activity"));
+
+    expect(screen.queryByText("progress")).toBeNull();
+    expect(screen.queryByText("Working")).toBeNull();
   });
 
   it("renders_error_status_entries_as_distinct_status_cards", () => {
@@ -1389,7 +1500,7 @@ describe("SidePanelView rich transcript rendering", () => {
             role: "assistant",
             markdown: "Partial output",
             text: "Partial output",
-            activity: [],
+            activity: { reasoningSummary: "", tools: [] },
             status: "failed"
           }
         ]

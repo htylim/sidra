@@ -4,11 +4,13 @@ import { AssistantMarkdown } from "./assistant-markdown";
 import type {
   AssistantTurnEntry,
   PermissionRequestEntry,
-  SafeActivityEntry,
   StatusEntry,
+  ToolActivityEntry,
+  TranscriptActivity,
   TranscriptEntry,
   UserMessageEntry
 } from "./transcript";
+import { hasVisibleActivity } from "./transcript";
 
 export function TranscriptView(props: {
   entries: TranscriptEntry[];
@@ -50,25 +52,69 @@ function AssistantTurn(props: { entry: AssistantTurnEntry }) {
     <article className={`message assistant assistant-turn ${props.entry.status}`}>
       {props.entry.markdown.trim() ? <AssistantMarkdown markdown={props.entry.markdown} /> : null}
       {props.entry.status === "streaming" ? <div className="turn-status">Streaming</div> : null}
-      {props.entry.activity.length > 0 ? <ActivityDisclosure activity={props.entry.activity} /> : null}
+      {hasVisibleActivity(props.entry.activity) ? <ActivityDisclosure activity={props.entry.activity} /> : null}
     </article>
   );
 }
 
-function ActivityDisclosure(props: { activity: SafeActivityEntry[] }) {
+function ActivityDisclosure(props: { activity: TranscriptActivity }) {
   return (
     <details className="activity-disclosure">
       <summary>Activity</summary>
-      <ul>
-        {props.activity.map((activity, index) => (
-          <li key={`${activity.kind}-${activity.label}-${index}`}>
-            <span className="activity-kind">{activity.kind}</span>
-            <span>{activity.label}</span>
-          </li>
-        ))}
-      </ul>
+      <div className="activity-content">
+        {props.activity.reasoningSummary.trim() ? (
+          <section className="activity-section">
+            <h3 className="activity-section-title">Reasoning</h3>
+            <p className="activity-reasoning">{props.activity.reasoningSummary}</p>
+          </section>
+        ) : null}
+        {props.activity.tools.length > 0 ? (
+          <section className="activity-section">
+            <h3 className="activity-section-title">Actions</h3>
+            <div className="activity-action-list">
+              {props.activity.tools.map((tool) => (
+                <ToolActivity key={tool.itemId} tool={tool} />
+              ))}
+            </div>
+          </section>
+        ) : null}
+      </div>
     </details>
   );
+}
+
+function ToolActivity(props: { tool: ToolActivityEntry }) {
+  return (
+    <div className="activity-action">
+      <div className="activity-action-header">
+        <span className="activity-action-title">{props.tool.title}</span>
+        <span className={`activity-action-phase ${props.tool.phase}`}>{activityPhaseLabel(props.tool.phase)}</span>
+      </div>
+      {props.tool.details.length > 0 ? (
+        <dl className="activity-detail-list">
+          {props.tool.details.map((detail, index) => (
+            <div className="activity-detail" key={`${props.tool.itemId}-${detail.label}-${index}`}>
+              <dt>{detail.label}</dt>
+              <dd>{detail.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {props.tool.commandOutput.length > 0 ? (
+        <div className="activity-command-output-list">
+          {props.tool.commandOutput.map((output, index) => (
+            <pre className="activity-command-output" key={`${props.tool.itemId}-${output.stream}-${index}`}>
+              <code>{output.text}</code>
+            </pre>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function activityPhaseLabel(phase: ToolActivityEntry["phase"]): string {
+  return phase === "completed" ? "Completed" : "Started";
 }
 
 function StatusCard(props: { entry: StatusEntry }) {

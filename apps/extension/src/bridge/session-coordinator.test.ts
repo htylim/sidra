@@ -64,6 +64,17 @@ function agentEvent(event: AgentEvent, clientSessionId = "client-1"): BridgeToEx
   };
 }
 
+function commandToolActivity(phase: "started" | "completed"): Extract<AgentEvent, { type: "assistant.activity" }>["activity"] {
+  return {
+    kind: "tool",
+    itemId: "command-1",
+    toolKind: "command",
+    phase,
+    title: "Run command",
+    details: [{ label: "Command", value: "pnpm test" }]
+  };
+}
+
 function permissionRequest(requestId = "permission-1", clientSessionId = "client-1"): BridgeToExtension {
   return {
     type: "permission.request",
@@ -520,9 +531,7 @@ describe("BridgeSessionCoordinator", () => {
 
     coordinator.respondToPermission("permission-1", "allow_once");
     transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Allowed" }));
-    transport.emitMessage(
-      agentEvent({ type: "assistant.activity", activity: { kind: "tool", phase: "started", label: "Tool started" } })
-    );
+    transport.emitMessage(agentEvent({ type: "assistant.activity", activity: commandToolActivity("started") }));
     transport.emitMessage(agentEvent({ type: "assistant.done" }));
 
     expect(coordinator.getSnapshot().transcript).toEqual([
@@ -539,7 +548,7 @@ describe("BridgeSessionCoordinator", () => {
         kind: "assistant_turn",
         markdown: "Allowed",
         text: "Allowed",
-        activity: [{ kind: "tool", phase: "started", label: "Tool started" }],
+        activity: { reasoningSummary: "", tools: [{ ...commandToolActivity("started"), commandOutput: [] }] },
         status: "complete"
       })
     ]);
@@ -908,11 +917,11 @@ describe("BridgeSessionCoordinator rich assistant events", () => {
   it("adds_safe_activity_to_the_current_assistant_turn", () => {
     const { coordinator, transport } = createStartedHarness();
 
-    transport.emitMessage(agentEvent({ type: "assistant.activity", activity: { kind: "progress", label: "Reading" } }));
+    transport.emitMessage(agentEvent({ type: "assistant.activity", activity: { kind: "reasoning_summary_delta", text: "Reading" } }));
 
     expect(coordinator.getSnapshot().transcript.at(-1)).toMatchObject({
       kind: "assistant_turn",
-      activity: [{ kind: "progress", label: "Reading" }]
+      activity: { reasoningSummary: "Reading", tools: [] }
     });
   });
 
@@ -967,11 +976,11 @@ describe("BridgeSessionCoordinator rich assistant events", () => {
   it("marks_activity_only_assistant_turn_failed_when_terminal_session_error_arrives", () => {
     const { coordinator, transport } = createStartedHarness();
 
-    transport.emitMessage(agentEvent({ type: "assistant.activity", activity: { kind: "progress", label: "Working" } }));
+    transport.emitMessage(agentEvent({ type: "assistant.activity", activity: { kind: "reasoning_summary_delta", text: "Working" } }));
     transport.emitMessage(sessionError("Provider failed", "provider_error"));
 
     expect(coordinator.getSnapshot().transcript).toContainEqual(
-      expect.objectContaining({ kind: "assistant_turn", activity: [{ kind: "progress", label: "Working" }], status: "failed" })
+      expect.objectContaining({ kind: "assistant_turn", activity: { reasoningSummary: "Working", tools: [] }, status: "failed" })
     );
   });
 

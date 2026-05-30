@@ -532,17 +532,15 @@ Research required:
 
 The assistant turn streams visible answer text into the chat as it arrives.
 
-Internal activity is preserved but collapsed by default under an **Activity** section with an appropriate icon.
+Meaningful agent activity is preserved but collapsed by default under an **Activity** section.
+Generic lifecycle hints such as `Working` or `Searching` do not create visible activity by themselves.
 
 Show safe activity only:
 
-- tool started/finished
-- safe tool names/descriptions
-- stdout/stderr summaries if exposed and safe
-- progress/status messages
-- errors
-- cancellation
 - user-facing reasoning summaries if explicitly exposed as such
+- tool or action started/completed
+- safe tool names and bounded details
+- bounded command output attached to the matching command action
 
 Do not show raw private chain-of-thought.
 

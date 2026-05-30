@@ -543,34 +543,113 @@ textarea:not(:disabled):focus-visible {
   color: #17201f;
 }
 
-.activity-disclosure ul {
+.activity-content {
   display: grid;
-  gap: 6px;
   margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
+  gap: 10px;
 }
 
-.activity-disclosure li {
-  display: flex;
+.activity-section {
+  display: grid;
   gap: 6px;
-  align-items: center;
   min-width: 0;
+}
+
+.activity-section-title {
+  margin: 0;
+  color: #2d3b38;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.activity-reasoning {
+  margin: 0;
+  color: #62716d;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.activity-action-list {
+  display: grid;
+  gap: 8px;
+}
+
+.activity-action {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border-left: 2px solid #d8e1dd;
+  padding-left: 8px;
   color: #2d3b38;
   font-size: 12px;
 }
 
-.activity-kind {
-  flex: 0 0 auto;
-  border: 1px solid #d8e1dd;
-  border-radius: 999px;
-  padding: 1px 6px;
-  color: #62716d;
-  background: #f6f8f7;
+.activity-action-header {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
 }
 
-.activity-disclosure li span:last-child {
+.activity-action-title {
   min-width: 0;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.activity-action-phase {
+  flex: 0 0 auto;
+  color: #62716d;
+  font-size: 11px;
+}
+
+.activity-action-phase.completed {
+  color: #075e56;
+}
+
+.activity-detail-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.activity-detail {
+  display: grid;
+  grid-template-columns: minmax(56px, max-content) minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.activity-detail dt {
+  color: #62716d;
+}
+
+.activity-detail dd {
+  min-width: 0;
+  margin: 0;
+  color: #2d3b38;
+  overflow-wrap: anywhere;
+}
+
+.activity-command-output-list {
+  display: grid;
+  gap: 4px;
+}
+
+.activity-command-output {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  border: 1px solid #d8e1dd;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #f6f8f7;
+  color: #17201f;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 

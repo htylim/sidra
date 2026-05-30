@@ -63,6 +63,13 @@ describe("extension UI interaction state CSS", () => {
     expectRule(".activity-disclosure summary:active", ["color:"]);
   });
 
+  it("defines_activity_disclosure_reasoning_and_action_styles", () => {
+    expectRule(".activity-section", ["display: grid", "gap:"]);
+    expectRule(".activity-section-title", ["font-size:", "font-weight:"]);
+    expectRule(".activity-action", ["display: grid", "gap:"]);
+    expectRule(".activity-command-output", ["white-space: pre-wrap", "overflow-wrap: anywhere"]);
+  });
+
   it("defines_invalid_field_styles_for_options_form_validation", () => {
     const formFieldSelector = ".action-row input,\n.action-row textarea";
     const invalidFieldSelector = "input[aria-invalid=\"true\"],\ntextarea[aria-invalid=\"true\"]";

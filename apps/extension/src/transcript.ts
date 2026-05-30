@@ -2,6 +2,20 @@ import type { PermissionDecision, PermissionRequest, SafeAgentActivity } from "@
 
 export type SafeActivityEntry = SafeAgentActivity;
 
+export type CommandOutputEntry = {
+  stream: "stdout" | "stderr" | "unknown";
+  text: string;
+};
+
+export type ToolActivityEntry = Extract<SafeAgentActivity, { kind: "tool" }> & {
+  commandOutput: CommandOutputEntry[];
+};
+
+export type TranscriptActivity = {
+  reasoningSummary: string;
+  tools: ToolActivityEntry[];
+};
+
 export type UserMessageEntry = {
   id?: string;
   kind: "user_message";
@@ -15,7 +29,7 @@ export type AssistantTurnEntry = {
   role: "assistant";
   markdown: string;
   text: string;
-  activity: SafeActivityEntry[];
+  activity: TranscriptActivity;
   status: "streaming" | "complete" | "cancelled" | "failed";
 };
 
@@ -74,8 +88,12 @@ export function addAssistantTextDelta(transcript: TranscriptEntry[], text: strin
 export function addAssistantActivity(transcript: TranscriptEntry[], activity: SafeActivityEntry): TranscriptEntry[] {
   return updateCurrentAssistantTurn(transcript, (currentTurn) => ({
     ...currentTurn,
-    activity: [...currentTurn.activity, activity]
+    activity: addActivityToState(currentTurn.activity, activity)
   }));
+}
+
+export function hasVisibleActivity(activity: TranscriptActivity): boolean {
+  return activity.reasoningSummary.trim().length > 0 || activity.tools.length > 0;
 }
 
 export function completeAssistantTurn(transcript: TranscriptEntry[]): TranscriptEntry[] {
@@ -230,8 +248,59 @@ function createAssistantTurn(): AssistantTurnEntry {
     role: "assistant",
     markdown: "",
     text: "",
-    activity: [],
+    activity: createEmptyActivity(),
     status: "streaming"
+  };
+}
+
+function createEmptyActivity(): TranscriptActivity {
+  return { reasoningSummary: "", tools: [] };
+}
+
+function addActivityToState(state: TranscriptActivity, activity: SafeActivityEntry): TranscriptActivity {
+  switch (activity.kind) {
+    case "reasoning_summary_delta":
+      return { ...state, reasoningSummary: state.reasoningSummary + activity.text };
+    case "tool":
+      return addToolActivity(state, activity);
+    case "command_output_delta":
+      return addCommandOutput(state, activity);
+  }
+}
+
+function addToolActivity(state: TranscriptActivity, activity: Extract<SafeAgentActivity, { kind: "tool" }>): TranscriptActivity {
+  const existingIndex = state.tools.findIndex((tool) => tool.itemId === activity.itemId);
+  const existingTool = existingIndex === -1 ? undefined : state.tools[existingIndex];
+  const nextTool: ToolActivityEntry = {
+    ...activity,
+    details: activity.details.length > 0 ? activity.details : (existingTool?.details ?? []),
+    commandOutput: existingTool?.commandOutput ?? []
+  };
+
+  if (existingIndex === -1) {
+    return { ...state, tools: [...state.tools, nextTool] };
+  }
+
+  return {
+    ...state,
+    tools: state.tools.map((tool, index) => (index === existingIndex ? nextTool : tool))
+  };
+}
+
+function addCommandOutput(
+  state: TranscriptActivity,
+  activity: Extract<SafeAgentActivity, { kind: "command_output_delta" }>
+): TranscriptActivity {
+  const existingIndex = state.tools.findIndex((tool) => tool.itemId === activity.itemId && tool.toolKind === "command");
+  if (existingIndex === -1) return state;
+
+  return {
+    ...state,
+    tools: state.tools.map((tool, index) =>
+      index === existingIndex
+        ? { ...tool, commandOutput: [...tool.commandOutput, { stream: activity.stream, text: activity.text }] }
+        : tool
+    )
   };
 }
 
