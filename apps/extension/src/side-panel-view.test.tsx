@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import type { SidePanelSnapshot } from "./side-panel-controller";
 import { SidePanelView } from "./side-panel-view";
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
 });
 
@@ -1101,6 +1102,206 @@ describe("SidePanelView rich transcript rendering", () => {
     expect(writeText).toHaveBeenCalledWith("{\"ok\": true}\n");
   });
 
+  describe("code copy feedback", () => {
+    it("shows_copied_feedback_after_copying_code", async () => {
+      const user = userEvent.setup();
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: vi.fn(() => Promise.resolve()) }
+      });
+      renderInteractiveSnapshot(
+        snapshotForPage({
+          transcript: [
+            {
+              kind: "assistant_turn",
+              role: "assistant",
+              markdown: "```ts\nconst value = 1;\n```",
+              text: "const value = 1;",
+              activity: [],
+              status: "complete"
+            }
+          ]
+        })
+      );
+
+      await user.click(screen.getByRole("button", { name: "Copy code" }));
+
+      expect(await screen.findByRole("button", { name: "Copied" })).not.toBeNull();
+    });
+
+    it("shows_copy_failed_feedback_when_clipboard_write_fails", async () => {
+      const user = userEvent.setup();
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: vi.fn(() => Promise.reject(new Error("denied"))) }
+      });
+      renderInteractiveSnapshot(
+        snapshotForPage({
+          transcript: [
+            {
+              kind: "assistant_turn",
+              role: "assistant",
+              markdown: "```ts\nconst value = 1;\n```",
+              text: "const value = 1;",
+              activity: [],
+              status: "complete"
+            }
+          ]
+        })
+      );
+
+      await user.click(screen.getByRole("button", { name: "Copy code" }));
+
+      expect(await screen.findByRole("button", { name: "Copy failed" })).not.toBeNull();
+    });
+
+    it("shows_copy_failed_feedback_when_clipboard_api_is_unavailable", async () => {
+      const user = userEvent.setup();
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: undefined
+      });
+      renderInteractiveSnapshot(
+        snapshotForPage({
+          transcript: [
+            {
+              kind: "assistant_turn",
+              role: "assistant",
+              markdown: "```ts\nconst value = 1;\n```",
+              text: "const value = 1;",
+              activity: [],
+              status: "complete"
+            }
+          ]
+        })
+      );
+
+      await user.click(screen.getByRole("button", { name: "Copy code" }));
+
+      expect(await screen.findByRole("button", { name: "Copy failed" })).not.toBeNull();
+    });
+
+    it("resets_code_copy_feedback_after_a_short_timeout", async () => {
+      vi.useFakeTimers();
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: vi.fn(() => Promise.resolve()) }
+      });
+      renderInteractiveSnapshot(
+        snapshotForPage({
+          transcript: [
+            {
+              kind: "assistant_turn",
+              role: "assistant",
+              markdown: "```ts\nconst value = 1;\n```",
+              text: "const value = 1;",
+              activity: [],
+              status: "complete"
+            }
+          ]
+        })
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+      });
+      expect(screen.getByRole("button", { name: "Copied" })).not.toBeNull();
+
+      act(() => vi.advanceTimersByTime(1800));
+
+      expect(screen.getByRole("button", { name: "Copy code" })).not.toBeNull();
+    });
+
+    it("keeps_latest_code_copy_feedback_when_copy_attempts_overlap", async () => {
+      const user = userEvent.setup();
+      let rejectFirstCopy: ((error: Error) => void) | undefined;
+      let resolveSecondCopy: (() => void) | undefined;
+      const writeText = vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((_resolve, reject) => {
+              rejectFirstCopy = reject;
+            })
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              resolveSecondCopy = resolve;
+            })
+        );
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText }
+      });
+      renderInteractiveSnapshot(
+        snapshotForPage({
+          transcript: [
+            {
+              kind: "assistant_turn",
+              role: "assistant",
+              markdown: "```ts\nconst value = 1;\n```",
+              text: "const value = 1;",
+              activity: [],
+              status: "complete"
+            }
+          ]
+        })
+      );
+
+      await user.click(screen.getByRole("button", { name: "Copy code" }));
+      await user.click(screen.getByRole("button", { name: "Copy code" }));
+      await act(async () => {
+        resolveSecondCopy?.();
+      });
+      expect(await screen.findByRole("button", { name: "Copied" })).not.toBeNull();
+
+      await act(async () => {
+        rejectFirstCopy?.(new Error("late failure"));
+      });
+
+      expect(screen.getByRole("button", { name: "Copied" })).not.toBeNull();
+    });
+
+    it("does_not_update_code_copy_feedback_after_unmount", async () => {
+      vi.useFakeTimers();
+      let resolveCopy: (() => void) | undefined;
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: vi.fn(
+            () =>
+              new Promise<void>((resolve) => {
+                resolveCopy = resolve;
+              })
+          )
+        }
+      });
+      const renderedView = renderInteractiveSnapshot(
+        snapshotForPage({
+          transcript: [
+            {
+              kind: "assistant_turn",
+              role: "assistant",
+              markdown: "```ts\nconst value = 1;\n```",
+              text: "const value = 1;",
+              activity: [],
+              status: "complete"
+            }
+          ]
+        })
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+      renderedView.unmount();
+      await act(async () => {
+        resolveCopy?.();
+      });
+
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
+
   it("renders_activity_collapsed_by_default", () => {
     renderInteractiveSnapshot(
       snapshotForPage({
@@ -1189,6 +1390,40 @@ describe("SidePanelView rich transcript rendering", () => {
 });
 
 describe("SidePanelView prompt options", () => {
+  describe("interaction affordances", () => {
+    it("adds_title_affordances_to_icon_only_header_buttons", () => {
+      renderInteractiveSnapshot(snapshotForPage());
+
+      expect(screen.getByRole("button", { name: "Settings" }).getAttribute("title")).toBe("Settings");
+      expect(screen.getByRole("button", { name: "New chat" }).getAttribute("title")).toBe("New chat");
+    });
+
+    it("adds_title_affordance_to_prompt_options_button", () => {
+      renderInteractiveSnapshot(snapshotForPage());
+
+      expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("title")).toBe("Prompt options");
+    });
+
+    it("marks_prompt_options_button_open_for_visual_state_when_expanded", async () => {
+      const user = userEvent.setup();
+      renderInteractiveSnapshot(snapshotForPage());
+
+      await user.click(screen.getByRole("button", { name: "Prompt options" }));
+
+      expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("data-state")).toBe("open");
+    });
+
+    it("does_not_mark_prompt_options_button_open_after_closing", async () => {
+      const user = userEvent.setup();
+      renderInteractiveSnapshot(snapshotForPage());
+
+      await user.click(screen.getByRole("button", { name: "Prompt options" }));
+      await user.click(screen.getByRole("button", { name: "Prompt options" }));
+
+      expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("data-state")).toBe("closed");
+    });
+  });
+
   it("opens_a_compact_prompt_options_popover_from_the_composer_button", async () => {
     const user = userEvent.setup();
     renderInteractiveSnapshot(snapshotForPage());
@@ -1303,6 +1538,54 @@ describe("SidePanelView prompt options", () => {
 
     expect(screen.queryByRole("checkbox", { name: "Send Full DOM" })).toBeNull();
     expect(screen.getByRole("button", { name: "Prompt options" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("data-state")).toBe("closed");
+  });
+
+  it("renders_prompt_options_button_closed_immediately_when_disabled_while_open", () => {
+    const initialSnapshot = snapshotForPage();
+    const renderedView = render(
+      <SidePanelView
+        snapshot={initialSnapshot}
+        onSendPrompt={() => false}
+        onCaptureAndSend={() => false}
+        onQuickAction={() => false}
+        onCancelTurn={() => false}
+        onRespondToPermission={() => false}
+        onDraftPromptChange={() => undefined}
+        onCaptureModeChange={() => undefined}
+        onNewChat={() => undefined}
+        onRetryBridge={() => undefined}
+        onOpenSettings={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Prompt options" }));
+    expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("data-state")).toBe("open");
+
+    renderedView.rerender(
+      <SidePanelView
+        snapshot={{
+          ...initialSnapshot,
+          bridge: { ...initialSnapshot.bridge, canUseChat: false, availability: { status: "checking", message: "Checking" } }
+        }}
+        onSendPrompt={() => false}
+        onCaptureAndSend={() => false}
+        onQuickAction={() => false}
+        onCancelTurn={() => false}
+        onRespondToPermission={() => false}
+        onDraftPromptChange={() => undefined}
+        onCaptureModeChange={() => undefined}
+        onNewChat={() => undefined}
+        onRetryBridge={() => undefined}
+        onOpenSettings={() => undefined}
+      />
+    );
+
+    const promptOptionsButton = screen.getByRole("button", { name: "Prompt options" });
+    expect(promptOptionsButton).toHaveProperty("disabled", true);
+    expect(promptOptionsButton.getAttribute("aria-expanded")).toBe("false");
+    expect(promptOptionsButton.getAttribute("data-state")).toBe("closed");
   });
 
   it("does_not_send_prompt_when_only_toggling_full_dom", async () => {

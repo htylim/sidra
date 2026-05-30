@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { QuickAction, QuickActionsSettings, SettingsStore } from "./settings-store";
 
 type OptionsSettingsStore = Pick<SettingsStore, "getSnapshot" | "whenReady" | "subscribe" | "saveQuickActions">;
+type QuickActionFieldName = "label" | "prompt";
+type TouchedQuickActionFields = Record<string, Partial<Record<QuickActionFieldName, boolean>>>;
 
 export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) {
   const [ready, setReady] = useState(false);
@@ -9,6 +11,7 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
   const dirtyRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
+  const [touchedFields, setTouchedFields] = useState<TouchedQuickActionFields>({});
   const [quickActions, setQuickActions] = useState<QuickActionsSettings>(() => ({
     enabled: true,
     actions: []
@@ -25,12 +28,18 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
     let cancelled = false;
     props.settingsStore.whenReady().then(() => {
       if (cancelled) return;
-      setQuickActions(props.settingsStore.getSnapshot().quickActions);
+      const initialQuickActions = props.settingsStore.getSnapshot().quickActions;
+      setQuickActions(initialQuickActions);
+      setTouchedFields(touchedFieldsForInvalidActions(initialQuickActions.actions));
       setReady(true);
     });
 
     const unsubscribe = props.settingsStore.subscribe(() => {
-      if (!cancelled && !dirtyRef.current) setQuickActions(props.settingsStore.getSnapshot().quickActions);
+      if (!cancelled && !dirtyRef.current) {
+        const nextQuickActions = props.settingsStore.getSnapshot().quickActions;
+        setQuickActions(nextQuickActions);
+        setTouchedFields(touchedFieldsForInvalidActions(nextQuickActions.actions));
+      }
     });
 
     return () => {
@@ -39,12 +48,16 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
     };
   }, [props.settingsStore]);
 
-  function updateAction(actionId: string, changes: Partial<Pick<QuickAction, "label" | "prompt">>) {
+  function updateAction(actionId: string, fieldName: QuickActionFieldName, value: string) {
     markDirty();
     setSaveError(undefined);
+    setTouchedFields((current) => ({
+      ...current,
+      [actionId]: { ...current[actionId], [fieldName]: true }
+    }));
     setQuickActions((current) => ({
       ...current,
-      actions: current.actions.map((action) => (action.id === actionId ? { ...action, ...changes } : action))
+      actions: current.actions.map((action) => (action.id === actionId ? { ...action, [fieldName]: value } : action))
     }));
   }
 
@@ -67,6 +80,10 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
   function removeAction(actionId: string) {
     markDirty();
     setSaveError(undefined);
+    setTouchedFields((current) => {
+      const { [actionId]: _removed, ...remaining } = current;
+      return remaining;
+    });
     setQuickActions((current) => ({
       ...current,
       actions: current.actions.filter((action) => action.id !== actionId)
@@ -112,37 +129,58 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
         </label>
 
         <div className="action-list">
-          {quickActions.actions.map((action, index) => (
-            <div className="action-row" key={action.id}>
-              <label>
-                <span>Action label</span>
-                <input
-                  aria-label={`Action ${index + 1} label`}
-                  value={action.label}
+          {quickActions.actions.map((action, index) => {
+            const labelError = getVisibleFieldError(action, "label", touchedFields[action.id]?.label);
+            const promptError = getVisibleFieldError(action, "prompt", touchedFields[action.id]?.prompt);
+            const labelErrorId = quickActionFieldErrorId(action.id, "label");
+            const promptErrorId = quickActionFieldErrorId(action.id, "prompt");
+
+            return (
+              <div className="action-row" key={action.id}>
+                <label>
+                  <span>Action label</span>
+                  <input
+                    aria-label={`Action ${index + 1} label`}
+                    aria-invalid={labelError ? "true" : undefined}
+                    aria-describedby={labelError ? labelErrorId : undefined}
+                    value={action.label}
+                    disabled={controlsDisabled}
+                    onChange={(event) => updateAction(action.id, "label", event.currentTarget.value)}
+                  />
+                  {labelError ? (
+                    <span className="validation-error" id={labelErrorId}>
+                      {labelError}
+                    </span>
+                  ) : null}
+                </label>
+                <label>
+                  <span>Action prompt</span>
+                  <textarea
+                    aria-label={`Action ${index + 1} prompt`}
+                    aria-invalid={promptError ? "true" : undefined}
+                    aria-describedby={promptError ? promptErrorId : undefined}
+                    value={action.prompt}
+                    disabled={controlsDisabled}
+                    onChange={(event) => updateAction(action.id, "prompt", event.currentTarget.value)}
+                  />
+                  {promptError ? (
+                    <span className="validation-error" id={promptErrorId}>
+                      {promptError}
+                    </span>
+                  ) : null}
+                </label>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  aria-label={`Remove action ${index + 1}`}
                   disabled={controlsDisabled}
-                  onChange={(event) => updateAction(action.id, { label: event.currentTarget.value })}
-                />
-              </label>
-              <label>
-                <span>Action prompt</span>
-                <textarea
-                  aria-label={`Action ${index + 1} prompt`}
-                  value={action.prompt}
-                  disabled={controlsDisabled}
-                  onChange={(event) => updateAction(action.id, { prompt: event.currentTarget.value })}
-                />
-              </label>
-              <button
-                type="button"
-                className="secondary-button"
-                aria-label={`Remove action ${index + 1}`}
-                disabled={controlsDisabled}
-                onClick={() => removeAction(action.id)}
-              >
-                Remove action
-              </button>
-            </div>
-          ))}
+                  onClick={() => removeAction(action.id)}
+                >
+                  Remove action
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         {saveError ? (
@@ -155,8 +193,14 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
           <button type="button" className="secondary-button" disabled={controlsDisabled} onClick={addAction}>
             Add action
           </button>
-          <button type="button" className="send-button" disabled={!canSave} onClick={() => void save()}>
-            Save
+          <button
+            type="button"
+            className="send-button"
+            disabled={!canSave}
+            aria-busy={saving ? "true" : undefined}
+            onClick={() => void save()}
+          >
+            {saving ? "Saving..." : "Save"}
           </button>
         </div>
       </section>
@@ -166,6 +210,33 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
 
 function isValidActionDraft(action: QuickAction): boolean {
   return action.label.trim().length > 0 && action.prompt.trim().length > 0;
+}
+
+function getVisibleFieldError(action: QuickAction, fieldName: QuickActionFieldName, touched: boolean | undefined): string | undefined {
+  if (!touched) return undefined;
+  if (action[fieldName].trim().length > 0) return undefined;
+  return fieldName === "label" ? "Action label is required." : "Action prompt is required.";
+}
+
+function quickActionFieldErrorId(actionId: string, fieldName: QuickActionFieldName): string {
+  return `quick-action-${domSafeIdSegment(actionId)}-${fieldName}-error`;
+}
+
+function domSafeIdSegment(value: string): string {
+  return Array.from(value, (character) => character.codePointAt(0)?.toString(36) ?? "0").join("-");
+}
+
+function touchedFieldsForInvalidActions(actions: QuickAction[]): TouchedQuickActionFields {
+  const touchedFields: TouchedQuickActionFields = {};
+
+  for (const action of actions) {
+    const fieldState: Partial<Record<QuickActionFieldName, boolean>> = {};
+    if (action.label.trim().length === 0) fieldState.label = true;
+    if (action.prompt.trim().length === 0) fieldState.prompt = true;
+    if (fieldState.label || fieldState.prompt) touchedFields[action.id] = fieldState;
+  }
+
+  return touchedFields;
 }
 
 function nextDraftActionId(actions: QuickAction[]): string {

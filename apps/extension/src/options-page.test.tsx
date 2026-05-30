@@ -202,6 +202,174 @@ describe("OptionsPage quick actions", () => {
 
     expect(await screen.findByDisplayValue("Trimmed")).not.toBeNull();
   });
+
+  describe("settings save feedback", () => {
+    it("shows_saving_feedback_and_busy_state_while_quick_action_save_is_in_flight", async () => {
+      const user = userEvent.setup();
+      const store = new FakeSettingsStore();
+      store.holdSave();
+      render(<OptionsPageView settingsStore={store} />);
+
+      await screen.findByLabelText("Action 1 label");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      const saveButton = screen.getByRole("button", { name: "Saving..." });
+      expect(saveButton).toHaveProperty("disabled", true);
+      expect(saveButton.getAttribute("aria-busy")).toBe("true");
+    });
+
+    it("restores_save_button_label_after_successful_quick_action_save", async () => {
+      const user = userEvent.setup();
+      const store = new FakeSettingsStore();
+      store.holdSave();
+      render(<OptionsPageView settingsStore={store} />);
+
+      await screen.findByLabelText("Action 1 label");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      store.resolveSave();
+
+      expect((await screen.findByRole("button", { name: "Save" })).getAttribute("aria-busy")).toBeNull();
+    });
+
+    it("restores_save_button_label_after_failed_quick_action_save", async () => {
+      const user = userEvent.setup();
+      const store = new FakeSettingsStore();
+      store.nextSaveError = new Error("quota exceeded");
+      render(<OptionsPageView settingsStore={store} />);
+
+      await screen.findByLabelText("Action 1 label");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect((await screen.findByRole("button", { name: "Save" })).getAttribute("aria-busy")).toBeNull();
+      expect(screen.getByRole("alert").textContent).toBe("Could not save quick actions.");
+    });
+  });
+
+  describe("quick action validation feedback", () => {
+    it("marks_blank_quick_action_label_as_invalid_with_visible_error", async () => {
+      const user = userEvent.setup();
+      render(<OptionsPageView settingsStore={new FakeSettingsStore()} />);
+
+      const label = await screen.findByLabelText("Action 1 label");
+      await user.clear(label);
+
+      expect(label.getAttribute("aria-invalid")).toBe("true");
+      expect(screen.getByText("Action label is required.")).not.toBeNull();
+      expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true);
+    });
+
+    it("marks_blank_quick_action_prompt_as_invalid_with_visible_error", async () => {
+      const user = userEvent.setup();
+      render(<OptionsPageView settingsStore={new FakeSettingsStore()} />);
+
+      const prompt = await screen.findByLabelText("Action 1 prompt");
+      await user.clear(prompt);
+
+      expect(prompt.getAttribute("aria-invalid")).toBe("true");
+      expect(screen.getByText("Action prompt is required.")).not.toBeNull();
+      expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true);
+    });
+
+    it("clears_quick_action_field_error_after_valid_text_is_entered", async () => {
+      const user = userEvent.setup();
+      render(<OptionsPageView settingsStore={new FakeSettingsStore()} />);
+
+      const label = await screen.findByLabelText("Action 1 label");
+      await user.clear(label);
+      expect(screen.getByText("Action label is required.")).not.toBeNull();
+
+      await user.type(label, "Explain");
+
+      expect(label.getAttribute("aria-invalid")).toBeNull();
+      expect(screen.queryByText("Action label is required.")).toBeNull();
+    });
+
+    it("does_not_show_quick_action_field_errors_before_user_edits", async () => {
+      render(<OptionsPageView settingsStore={new FakeSettingsStore()} />);
+
+      const label = await screen.findByLabelText("Action 1 label");
+      const prompt = screen.getByLabelText("Action 1 prompt");
+
+      expect(label.getAttribute("aria-invalid")).toBeNull();
+      expect(prompt.getAttribute("aria-invalid")).toBeNull();
+      expect(screen.queryByText("Action label is required.")).toBeNull();
+      expect(screen.queryByText("Action prompt is required.")).toBeNull();
+    });
+
+    it("connects_quick_action_field_errors_with_dom_safe_describedby_ids", async () => {
+      const user = userEvent.setup();
+      render(
+        <OptionsPageView
+          settingsStore={
+            new FakeSettingsStore({
+              quickActions: {
+                enabled: true,
+                actions: [{ id: "custom action 1", label: "Custom action", prompt: "Custom prompt" }]
+              }
+            })
+          }
+        />
+      );
+
+      const label = await screen.findByLabelText("Action 1 label");
+      await user.clear(label);
+      const describedBy = label.getAttribute("aria-describedby");
+
+      expect(describedBy).not.toBeNull();
+      expect(describedBy?.startsWith("quick-action-")).toBe(true);
+      expect(describedBy).not.toContain(" ");
+      expect(document.getElementById(describedBy ?? "")?.textContent).toBe("Action label is required.");
+    });
+
+    it("keeps_quick_action_error_ids_distinct_for_similar_action_ids", async () => {
+      const user = userEvent.setup();
+      render(
+        <OptionsPageView
+          settingsStore={
+            new FakeSettingsStore({
+              quickActions: {
+                enabled: true,
+                actions: [
+                  { id: "a b", label: "First", prompt: "First prompt" },
+                  { id: "a-b", label: "Second", prompt: "Second prompt" }
+                ]
+              }
+            })
+          }
+        />
+      );
+
+      const firstLabel = await screen.findByLabelText("Action 1 label");
+      const secondLabel = screen.getByLabelText("Action 2 label");
+      await user.clear(firstLabel);
+      await user.clear(secondLabel);
+
+      expect(firstLabel.getAttribute("aria-describedby")).not.toBe(secondLabel.getAttribute("aria-describedby"));
+    });
+
+    it("shows_quick_action_field_errors_for_initially_invalid_saved_actions", async () => {
+      render(
+        <OptionsPageView
+          settingsStore={
+            new FakeSettingsStore({
+              quickActions: {
+                enabled: true,
+                actions: [{ id: "invalid", label: "", prompt: "" }]
+              }
+            })
+          }
+        />
+      );
+
+      const label = await screen.findByLabelText("Action 1 label");
+      const prompt = screen.getByLabelText("Action 1 prompt");
+
+      expect(label.getAttribute("aria-invalid")).toBe("true");
+      expect(prompt.getAttribute("aria-invalid")).toBe("true");
+      expect(screen.getByText("Action label is required.")).not.toBeNull();
+      expect(screen.getByText("Action prompt is required.")).not.toBeNull();
+    });
+  });
 });
 
 class FakeSettingsStore implements Pick<SettingsStore, "getSnapshot" | "whenReady" | "subscribe" | "saveQuickActions"> {

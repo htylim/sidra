@@ -29,6 +29,7 @@ export function SidePanelView(props: {
   const cancelDisabled = !props.snapshot.activeSession.canCancelTurn;
   const draftPrompt = props.snapshot.activeSession.draftPrompt;
   const sendFullDom = props.snapshot.activeSession.captureMode === "full_dom";
+  const promptOptionsVisible = promptOptionsOpen && !promptEntryDisabled;
 
   useEffect(() => {
     if (promptEntryDisabled) setPromptOptionsOpen(false);
@@ -61,10 +62,16 @@ export function SidePanelView(props: {
       <header className="header">
         <div className="brand-mark">S</div>
         <h1>Sidra</h1>
-        <button type="button" className="toolbar-button" aria-label="Settings" onClick={props.onOpenSettings}>
+        <button
+          type="button"
+          className="toolbar-button"
+          aria-label="Settings"
+          title="Settings"
+          onClick={props.onOpenSettings}
+        >
           <SidraIcon name="settings" />
         </button>
-        <button type="button" className="toolbar-button" aria-label="New chat" onClick={props.onNewChat}>
+        <button type="button" className="toolbar-button" aria-label="New chat" title="New chat" onClick={props.onNewChat}>
           <SidraIcon name="plus" />
         </button>
       </header>
@@ -132,14 +139,16 @@ export function SidePanelView(props: {
             type="button"
             className="options-button"
             aria-label="Prompt options"
-            aria-expanded={promptOptionsOpen}
+            title="Prompt options"
+            aria-expanded={promptOptionsVisible}
             aria-controls="prompt-options-popover"
+            data-state={promptOptionsVisible ? "open" : "closed"}
             disabled={promptEntryDisabled}
             onClick={() => setPromptOptionsOpen((open) => !open)}
           >
             <SidraIcon name="settings" />
           </button>
-          {promptOptionsOpen && !promptEntryDisabled ? (
+          {promptOptionsVisible ? (
             <div className="prompt-options-popover" id="prompt-options-popover" role="group" aria-label="Prompt options">
               <label className="prompt-option-toggle">
                 <input

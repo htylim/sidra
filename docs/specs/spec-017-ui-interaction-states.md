@@ -106,16 +106,16 @@ Cover:
 
 #### Automated Verification
 
-- [ ] Phase 1 CSS tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/styles.test.ts`
-- [ ] Phase 1 CSS tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/styles.test.ts`
-- [ ] Extension type checking passes: `pnpm --filter @sidra/extension check`
-- [ ] No related extension tests regress: `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx src/options-page.test.tsx`
+- [x] Phase 1 CSS tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/styles.test.ts`
+- [x] Phase 1 CSS tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/styles.test.ts`
+- [x] Extension type checking passes: `pnpm --filter @sidra/extension check`
+- [x] No related extension tests regress: `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx src/options-page.test.tsx`
 
 #### Manual Verification
 
 - [ ] In the side panel, enabled buttons visibly change on hover.
 - [ ] Keyboard tabbing shows a clear focus ring on buttons, textarea, and prompt options.
-- [ ] Keyboard tabbing shows a clear focus ring on transcript activity disclosures when they are present.
+- [x] Keyboard tabbing shows a clear focus ring on transcript activity disclosures when they are present.
 - [ ] Mouse press shows a clear active state without moving layout.
 - [ ] Disabled controls remain muted and do not show enabled hover/active styling.
 
@@ -170,16 +170,16 @@ it("does_not_mark_prompt_options_button_open_after_closing", async () => {});
 
 #### Automated Verification
 
-- [ ] Phase 2 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx -t "interaction affordances"`
-- [ ] Phase 2 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx -t "interaction affordances"`
-- [ ] Phase 1 CSS contract still passes: `pnpm --filter @sidra/extension test -- src/styles.test.ts`
-- [ ] Extension type checking passes: `pnpm --filter @sidra/extension check`
+- [x] Phase 2 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx -t "interaction affordances"`
+- [x] Phase 2 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx -t "interaction affordances"`
+- [x] Phase 1 CSS contract still passes: `pnpm --filter @sidra/extension test -- src/styles.test.ts`
+- [x] Extension type checking passes: `pnpm --filter @sidra/extension check`
 
 #### Manual Verification
 
-- [ ] Hovering icon-only buttons exposes native title text or an equivalent browser affordance.
-- [ ] Opening Prompt options visibly marks the button as open.
-- [ ] Closing Prompt options removes the open visual state.
+- [x] Hovering icon-only buttons exposes native title text or an equivalent browser affordance.
+- [x] Opening Prompt options visibly marks the button as open.
+- [x] Closing Prompt options removes the open visual state.
 - [ ] Keyboard focus remains clear when Prompt options is open.
 
 **Implementation Note**: After completing this phase and all automated verification passes, pause for manual confirmation before proceeding.
@@ -253,20 +253,20 @@ it("resets_code_copy_feedback_after_a_short_timeout", async () => {});
 
 #### Automated Verification
 
-- [ ] Options feedback tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/options-page.test.tsx -t "settings save feedback"`
-- [ ] Code-copy feedback tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx -t "code copy feedback"`
-- [ ] Options feedback tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/options-page.test.tsx -t "settings save feedback"`
-- [ ] Code-copy feedback tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx -t "code copy feedback"`
-- [ ] Existing clipboard-write behavior still passes: `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx -t "clicking_code_copy_writes_code_to_clipboard"`
-- [ ] Extension type checking passes: `pnpm --filter @sidra/extension check`
-- [ ] Related view tests pass: `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx src/options-page.test.tsx`
+- [x] Options feedback tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/options-page.test.tsx -t "settings save feedback"`
+- [x] Code-copy feedback tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx -t "code copy feedback"`
+- [x] Options feedback tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/options-page.test.tsx -t "settings save feedback"`
+- [x] Code-copy feedback tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx -t "code copy feedback"`
+- [x] Existing clipboard-write behavior still passes: `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx -t "clicking_code_copy_writes_code_to_clipboard"`
+- [x] Extension type checking passes: `pnpm --filter @sidra/extension check`
+- [x] Related view tests pass: `pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx src/options-page.test.tsx`
 
 #### Manual Verification
 
-- [ ] Saving settings visibly changes Save to Saving while the save is in flight.
-- [ ] Save returns to its normal label after success.
-- [ ] Copy code changes to Copied after a successful copy.
-- [ ] Copy code shows Copy failed when clipboard write fails or is unavailable.
+- [x] Saving settings visibly changes Save to Saving while the save is in flight.
+- [x] Save returns to its normal label after success.
+- [x] Copy code changes to Copied after a successful copy.
+- [x] Copy code shows Copy failed when clipboard write fails or is unavailable.
 
 **Implementation Note**: After completing this phase and all automated verification passes, pause for manual confirmation before proceeding.
 
@@ -323,17 +323,17 @@ it("does_not_show_quick_action_field_errors_before_user_edits", async () => {});
 
 #### Automated Verification
 
-- [ ] Phase 4 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/options-page.test.tsx -t "quick action validation feedback"`
-- [ ] Phase 4 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/options-page.test.tsx -t "quick action validation feedback"`
-- [ ] Phase 1 CSS contract still passes: `pnpm --filter @sidra/extension test -- src/styles.test.ts`
-- [ ] Extension type checking passes: `pnpm --filter @sidra/extension check`
+- [x] Phase 4 tests fail BEFORE implementation lands (red): `pnpm --filter @sidra/extension test -- src/options-page.test.tsx -t "quick action validation feedback"`
+- [x] Phase 4 tests pass AFTER implementation lands (green): `pnpm --filter @sidra/extension test -- src/options-page.test.tsx -t "quick action validation feedback"`
+- [x] Phase 1 CSS contract still passes: `pnpm --filter @sidra/extension test -- src/styles.test.ts`
+- [x] Extension type checking passes: `pnpm --filter @sidra/extension check`
 
 #### Manual Verification
 
-- [ ] Blank quick-action labels and prompts show clear inline errors.
-- [ ] Save remains disabled while errors are present.
+- [x] Blank quick-action labels and prompts show clear inline errors.
+- [x] Save remains disabled while errors are present.
 - [ ] Errors clear after valid text is entered.
-- [ ] Keyboard users can identify invalid fields and associated error text.
+- [x] Keyboard users can identify invalid fields and associated error text.
 
 **Implementation Note**: After completing this phase and all automated verification passes, pause for manual confirmation before final validation.
 
@@ -351,9 +351,9 @@ This section covers final validation only. It does not replace the phase-specifi
 
 ### Final Automated Checks
 
-- [ ] Full extension test suite passes: `pnpm --filter @sidra/extension test`
-- [ ] Extension type checking passes: `pnpm --filter @sidra/extension check`
-- [ ] Repo check passes: `pnpm check`
+- [x] Full extension test suite passes: `pnpm --filter @sidra/extension test`
+- [x] Extension type checking passes: `pnpm --filter @sidra/extension check`
+- [x] Repo check passes: `pnpm check`
 
 ### Manual Testing Steps
 
