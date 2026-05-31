@@ -59,6 +59,44 @@ describe("createCodexAppServerProvider", () => {
     await expect(events).resolves.toEqual([{ type: "assistant.text.delta", text: "Hello" }, { type: "assistant.done" }]);
   });
 
+  it("inserts_markdown_paragraph_boundary_between_agent_message_items", async () => {
+    const { appServer, events } = await startProviderTurn("Summarize");
+
+    appServer.emitNotification({
+      method: "item/agentMessage/delta",
+      params: { threadId: "thread-1", turnId: "turn-1", itemId: "message-1", delta: "First paragraph." }
+    });
+    appServer.emitNotification({
+      method: "item/started",
+      params: { threadId: "thread-1", turnId: "turn-1", item: { type: "webSearch", id: "search-1", query: "example" } }
+    });
+    appServer.emitNotification({
+      method: "item/agentMessage/delta",
+      params: { threadId: "thread-1", turnId: "turn-1", itemId: "message-2", delta: "Second paragraph." }
+    });
+    appServer.emitNotification({
+      method: "turn/completed",
+      params: { threadId: "thread-1", turn: { id: "turn-1" } }
+    });
+
+    await expect(events).resolves.toEqual([
+      { type: "assistant.text.delta", text: "First paragraph." },
+      {
+        type: "assistant.activity",
+        activity: {
+          kind: "tool",
+          itemId: "search-1",
+          toolKind: "web_search",
+          phase: "started",
+          title: "Search web",
+          details: [{ label: "Query", value: "example" }]
+        }
+      },
+      { type: "assistant.text.delta", text: "\n\nSecond paragraph." },
+      { type: "assistant.done" }
+    ]);
+  });
+
   it("maps_reasoning_summary_delta_to_activity_summary", async () => {
     const appServer = createFakeAppServer();
     appServer.nextResponse = { thread: { id: "thread-1" } };

@@ -55,6 +55,39 @@ function assistantTurnWithToolActivity(
   };
 }
 
+function assistantTurnWithWebSearchActivity(): NonNullable<SnapshotOptions["transcript"]>[number] {
+  return {
+    kind: "assistant_turn",
+    role: "assistant",
+    markdown: "",
+    text: "",
+    activity: {
+      reasoningSummary: "",
+      tools: [
+        {
+          kind: "tool",
+          itemId: "search-1",
+          toolKind: "web_search",
+          phase: "completed",
+          title: "Search web",
+          details: [{ label: "Query", value: "infobae lorena maciel tato young" }],
+          commandOutput: []
+        },
+        {
+          kind: "tool",
+          itemId: "search-2",
+          toolKind: "web_search",
+          phase: "completed",
+          title: "Search web",
+          details: [{ label: "Query", value: "site:infobae.com/teleshow lorena maciel" }],
+          commandOutput: []
+        }
+      ]
+    },
+    status: "streaming"
+  };
+}
+
 function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
   return {
     bridge: readyBridge,
@@ -859,7 +892,6 @@ describe("SidePanelView rich transcript rendering", () => {
     expect(screen.getByText("Run command")).not.toBeNull();
     expect(screen.getByText("Allow listing files.")).not.toBeNull();
     expect(screen.getByText("Scope: shell:ls")).not.toBeNull();
-    expect(screen.getByText("shell")).not.toBeNull();
     expect(screen.getByText("ls")).not.toBeNull();
   });
 
@@ -915,32 +947,30 @@ describe("SidePanelView rich transcript rendering", () => {
     expect(onRespondToPermission).toHaveBeenCalledWith("permission-1", decision);
   });
 
-  it.each([
-    ["allowed_once", "Allowed once"],
-    ["allowed_for_session", "Allowed for this session"],
-    ["denied", "Denied"],
-    ["unavailable", "Unavailable"]
-  ] as const)("resolved_permission_card_%s_disables_actions", (status, label) => {
-    renderInteractiveSnapshot(
-      snapshotForPage({
-        transcript: [
-          {
-            kind: "permission_request",
-            role: "permission",
-            requestId: "permission-1",
-            permissionKey: "shell:ls",
-            title: "Run command",
-            status
-          }
-        ]
-      })
-    );
+  it.each(["allowed_once", "allowed_for_session", "denied", "unavailable"] as const)(
+    "resolved_permission_card_%s_disables_actions",
+    (status) => {
+      renderInteractiveSnapshot(
+        snapshotForPage({
+          transcript: [
+            {
+              kind: "permission_request",
+              role: "permission",
+              requestId: "permission-1",
+              permissionKey: "shell:ls",
+              title: "Run command",
+              status
+            }
+          ]
+        })
+      );
 
-    expect(screen.getByText(label)).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "Allow once for shell:ls" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Allow for this session for shell:ls" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Deny shell:ls" })).toBeNull();
-  });
+      expect(screen.getByText("Run command")).not.toBeNull();
+      expect(screen.queryByRole("button", { name: "Allow once for shell:ls" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Allow for this session for shell:ls" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Deny shell:ls" })).toBeNull();
+    }
+  );
 
   it("pending_permission_card_keeps_prompt_controls_disabled_while_turn_is_in_flight", () => {
     renderInteractiveSnapshot(
@@ -995,6 +1025,26 @@ describe("SidePanelView rich transcript rendering", () => {
     expect(markup).toContain("<li>item</li>");
     expect(markup).not.toContain("data-secret");
     expect(markup).not.toContain("<strong");
+  });
+
+  it("renders_assistant_markdown_paragraph_breaks", () => {
+    const markup = renderPageSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "First paragraph.\n\nSecond paragraph.",
+            text: "First paragraph.\n\nSecond paragraph.",
+            activity: { reasoningSummary: "", tools: [] },
+            status: "complete"
+          }
+        ]
+      })
+    );
+
+    expect(markup).toContain("<p>First paragraph.</p>");
+    expect(markup).toContain("<p>Second paragraph.</p>");
   });
 
   it("renders_assistant_links_with_blank_target_and_safe_rel", () => {
@@ -1415,19 +1465,22 @@ describe("SidePanelView rich transcript rendering", () => {
     expect(screen.getByText("Checked the code.")).not.toBeNull();
   });
 
-  it("renders_tool_action_summary_when_activity_is_expanded", async () => {
+  it("renders_tool_activity_grouped_without_actions_title_labels_or_completion_state", async () => {
     const user = userEvent.setup();
     renderInteractiveSnapshot(
       snapshotForPage({
-        transcript: [assistantTurnWithToolActivity("started")]
+        transcript: [assistantTurnWithWebSearchActivity()]
       })
     );
 
     await user.click(screen.getByText("Activity"));
 
-    expect(screen.getByText("Actions")).not.toBeNull();
-    expect(screen.getByText("Run command")).not.toBeNull();
-    expect(screen.getByText("pnpm test")).not.toBeNull();
+    expect(screen.getByText("Searched web 2 times")).not.toBeNull();
+    expect(screen.getByText("infobae lorena maciel tato young")).not.toBeNull();
+    expect(screen.getByText("site:infobae.com/teleshow lorena maciel")).not.toBeNull();
+    expect(screen.queryByText("Actions")).toBeNull();
+    expect(screen.queryByText("Query")).toBeNull();
+    expect(screen.queryByText("Completed")).toBeNull();
   });
 
   it("renders_command_output_under_the_matching_command_action", async () => {
@@ -1443,7 +1496,7 @@ describe("SidePanelView rich transcript rendering", () => {
     expect(screen.getByText("PASS tests")).not.toBeNull();
   });
 
-  it("shows_tool_completion_state_when_available", async () => {
+  it("does_not_show_tool_completion_state_when_available", async () => {
     const user = userEvent.setup();
     renderInteractiveSnapshot(
       snapshotForPage({
@@ -1453,7 +1506,7 @@ describe("SidePanelView rich transcript rendering", () => {
 
     await user.click(screen.getByText("Activity"));
 
-    expect(screen.getByText("Completed")).not.toBeNull();
+    expect(screen.queryByText("Completed")).toBeNull();
   });
 
   it("does_not_render_progress_kind_pills_or_working_labels", async () => {

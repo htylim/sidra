@@ -524,9 +524,9 @@ textarea:not(:disabled):focus-visible {
 
 .activity-disclosure summary {
   cursor: pointer;
-  color: #50605c;
+  color: #7a8783;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 550;
   overflow-wrap: anywhere;
 }
 
@@ -572,25 +572,17 @@ textarea:not(:disabled):focus-visible {
 
 .activity-action-list {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .activity-action {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   border-left: 2px solid #d8e1dd;
   padding-left: 8px;
   color: #2d3b38;
   font-size: 12px;
-}
-
-.activity-action-header {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  justify-content: space-between;
-  min-width: 0;
 }
 
 .activity-action-title {
@@ -599,37 +591,16 @@ textarea:not(:disabled):focus-visible {
   overflow-wrap: anywhere;
 }
 
-.activity-action-phase {
-  flex: 0 0 auto;
-  color: #62716d;
-  font-size: 11px;
-}
-
-.activity-action-phase.completed {
-  color: #075e56;
-}
-
 .activity-detail-list {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   margin: 0;
 }
 
-.activity-detail {
-  display: grid;
-  grid-template-columns: minmax(56px, max-content) minmax(0, 1fr);
-  gap: 8px;
+.activity-detail-value {
   min-width: 0;
-}
-
-.activity-detail dt {
   color: #62716d;
-}
-
-.activity-detail dd {
-  min-width: 0;
-  margin: 0;
-  color: #2d3b38;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
@@ -695,25 +666,12 @@ textarea:not(:disabled):focus-visible {
   line-height: 1.35;
 }
 
-.permission-card-header,
 .permission-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
-}
-
-.permission-card-label,
-.permission-tool {
-  border: 1px solid #d8e1dd;
-  border-radius: 999px;
-  padding: 2px 7px;
-  color: #50605c;
-  background: #f6f8f7;
-  font-size: 12px;
-  font-weight: 650;
-  overflow-wrap: anywhere;
 }
 
 .permission-card h3,

@@ -127,6 +127,9 @@ class CodexAppServerTurn {
   private turnId: string | undefined;
   private finished = false;
   private readonly commandItemIds = new Set<string>();
+  private assistantMessageItemId: string | undefined;
+  private assistantTextTail = "";
+  private hasEmittedAssistantText = false;
 
   constructor(
     private readonly appServer: AppServerClientBoundary,
@@ -193,7 +196,7 @@ class CodexAppServerTurn {
     if (notification.method === "item/agentMessage/delta") {
       const delta = parseAgentMessageDelta(notification.params);
       if (!delta || delta.threadId !== this.threadId || delta.turnId !== this.turnId) return;
-      this.pushEvent({ type: "assistant.text.delta", text: delta.delta });
+      this.pushEvent({ type: "assistant.text.delta", text: this.textDeltaWithItemBoundary(delta) });
       return;
     }
 
@@ -337,6 +340,18 @@ class CodexAppServerTurn {
     }
     this.queuedEvents.push({ kind: "error", error });
   }
+
+  private textDeltaWithItemBoundary(delta: AgentMessageDelta): string {
+    let text = delta.delta;
+    if (this.hasEmittedAssistantText && delta.itemId !== this.assistantMessageItemId) {
+      text = assistantMessageItemBoundary(this.assistantTextTail, text) + text;
+    }
+
+    this.assistantMessageItemId = delta.itemId;
+    this.hasEmittedAssistantText = true;
+    this.assistantTextTail = text.slice(-2);
+    return text;
+  }
 }
 
 function toTextUserInput(text: string): TextUserInput {
@@ -357,10 +372,30 @@ function extractTurnId(response: unknown): string {
   return response.turn.id;
 }
 
-function parseAgentMessageDelta(params: unknown): { threadId: string; turnId: string; delta: string } | null {
+type AgentMessageDelta = {
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  delta: string;
+};
+
+function parseAgentMessageDelta(params: unknown): AgentMessageDelta | null {
   if (!isRecord(params)) return null;
-  if (typeof params.threadId !== "string" || typeof params.turnId !== "string" || typeof params.delta !== "string") return null;
-  return { threadId: params.threadId, turnId: params.turnId, delta: params.delta };
+  if (
+    typeof params.threadId !== "string" ||
+    typeof params.turnId !== "string" ||
+    typeof params.itemId !== "string" ||
+    typeof params.delta !== "string"
+  ) {
+    return null;
+  }
+  return { threadId: params.threadId, turnId: params.turnId, itemId: params.itemId, delta: params.delta };
+}
+
+function assistantMessageItemBoundary(previousTail: string, nextDelta: string): string {
+  if (previousTail.endsWith("\n\n") || nextDelta.startsWith("\n\n")) return "";
+  if (previousTail.endsWith("\n") || nextDelta.startsWith("\n")) return "\n";
+  return "\n\n";
 }
 
 function parseItemActivity(

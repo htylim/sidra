@@ -70,10 +70,9 @@ function ActivityDisclosure(props: { activity: TranscriptActivity }) {
         ) : null}
         {props.activity.tools.length > 0 ? (
           <section className="activity-section">
-            <h3 className="activity-section-title">Actions</h3>
             <div className="activity-action-list">
-              {props.activity.tools.map((tool) => (
-                <ToolActivity key={tool.itemId} tool={tool} />
+              {groupToolActivities(props.activity.tools).map((group) => (
+                <ToolActivityGroup key={group.key} group={group} />
               ))}
             </div>
           </section>
@@ -83,27 +82,32 @@ function ActivityDisclosure(props: { activity: TranscriptActivity }) {
   );
 }
 
-function ToolActivity(props: { tool: ToolActivityEntry }) {
+type ToolActivityGroupEntry = {
+  key: string;
+  title: string;
+  tools: ToolActivityEntry[];
+};
+
+function ToolActivityGroup(props: { group: ToolActivityGroupEntry }) {
+  const detailValues = props.group.tools.flatMap((tool) => tool.details.map((detail) => detail.value));
+  const commandOutput = props.group.tools.flatMap((tool) => tool.commandOutput);
+
   return (
     <div className="activity-action">
-      <div className="activity-action-header">
-        <span className="activity-action-title">{props.tool.title}</span>
-        <span className={`activity-action-phase ${props.tool.phase}`}>{activityPhaseLabel(props.tool.phase)}</span>
-      </div>
-      {props.tool.details.length > 0 ? (
-        <dl className="activity-detail-list">
-          {props.tool.details.map((detail, index) => (
-            <div className="activity-detail" key={`${props.tool.itemId}-${detail.label}-${index}`}>
-              <dt>{detail.label}</dt>
-              <dd>{detail.value}</dd>
+      <div className="activity-action-title">{props.group.title}</div>
+      {detailValues.length > 0 ? (
+        <div className="activity-detail-list">
+          {detailValues.map((value, index) => (
+            <div className="activity-detail-value" key={`${props.group.key}-detail-${index}`}>
+              {value}
             </div>
           ))}
-        </dl>
+        </div>
       ) : null}
-      {props.tool.commandOutput.length > 0 ? (
+      {commandOutput.length > 0 ? (
         <div className="activity-command-output-list">
-          {props.tool.commandOutput.map((output, index) => (
-            <pre className="activity-command-output" key={`${props.tool.itemId}-${output.stream}-${index}`}>
+          {commandOutput.map((output, index) => (
+            <pre className="activity-command-output" key={`${props.group.key}-${output.stream}-${index}`}>
               <code>{output.text}</code>
             </pre>
           ))}
@@ -113,8 +117,27 @@ function ToolActivity(props: { tool: ToolActivityEntry }) {
   );
 }
 
-function activityPhaseLabel(phase: ToolActivityEntry["phase"]): string {
-  return phase === "completed" ? "Completed" : "Started";
+function groupToolActivities(tools: ToolActivityEntry[]): ToolActivityGroupEntry[] {
+  const groups: ToolActivityGroupEntry[] = [];
+
+  for (const tool of tools) {
+    const key = `${tool.toolKind}:${tool.title}`;
+    const existingGroup = groups.find((group) => group.key === key);
+    if (existingGroup) {
+      existingGroup.tools.push(tool);
+      existingGroup.title = toolGroupTitle(tool, existingGroup.tools.length);
+      continue;
+    }
+
+    groups.push({ key, title: toolGroupTitle(tool, 1), tools: [tool] });
+  }
+
+  return groups;
+}
+
+function toolGroupTitle(tool: ToolActivityEntry, count: number): string {
+  const title = tool.toolKind === "web_search" ? "Searched web" : tool.title;
+  return count === 1 ? title : `${title} ${count} times`;
 }
 
 function StatusCard(props: { entry: StatusEntry }) {
@@ -140,10 +163,6 @@ function PermissionRequestCard(props: {
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
     >
-      <div className="permission-card-header">
-        <span className="permission-card-label">{permissionStatusLabel(props.entry.status)}</span>
-        {props.entry.metadata?.toolName ? <span className="permission-tool">{props.entry.metadata.toolName}</span> : null}
-      </div>
       <h3 id={titleId}>{props.entry.title}</h3>
       <div className="permission-copy" id={descriptionId}>
         <div className="permission-scope">Scope: {props.entry.permissionKey}</div>
@@ -181,19 +200,4 @@ function PermissionRequestCard(props: {
       ) : null}
     </section>
   );
-}
-
-function permissionStatusLabel(status: PermissionRequestEntry["status"]): string {
-  switch (status) {
-    case "pending":
-      return "Permission requested";
-    case "allowed_once":
-      return "Allowed once";
-    case "allowed_for_session":
-      return "Allowed for this session";
-    case "denied":
-      return "Denied";
-    case "unavailable":
-      return "Unavailable";
-  }
 }

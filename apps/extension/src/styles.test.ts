@@ -67,6 +67,7 @@ describe("extension UI interaction state CSS", () => {
     expectRule(".activity-section", ["display: grid", "gap:"]);
     expectRule(".activity-section-title", ["font-size:", "font-weight:"]);
     expectRule(".activity-action", ["display: grid", "gap:"]);
+    expectRule(".activity-detail-value", ["overflow-wrap: anywhere"]);
     expectRule(".activity-command-output", ["white-space: pre-wrap", "overflow-wrap: anywhere"]);
   });
 
