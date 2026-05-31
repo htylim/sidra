@@ -738,7 +738,6 @@ textarea:not(:disabled):focus-visible {
   background: #075e56;
 }
 
-.permission-card.denied,
 .permission-card.unavailable {
   border-left-color: #8f2d16;
 }

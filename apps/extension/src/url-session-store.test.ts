@@ -331,8 +331,8 @@ describe("UrlSessionStore", () => {
       requestId: "permission-1",
       decision: "allow_for_session"
     });
-    expect(store.getSnapshot().activeSession.transcript).toContainEqual(
-      expect.objectContaining({ kind: "permission_request", status: "allowed_for_session" })
+    expect(store.getSnapshot().activeSession.transcript).not.toContainEqual(
+      expect.objectContaining({ kind: "permission_request", requestId: "permission-1" })
     );
   });
 

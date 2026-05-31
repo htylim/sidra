@@ -378,27 +378,26 @@ describe("BridgeSessionCoordinator", () => {
       requestId: "permission-1",
       decision: "allow_once"
     });
-    expect(coordinator.getSnapshot().transcript).toContainEqual(
-      expect.objectContaining({ kind: "permission_request", requestId: "permission-1", status: "allowed_once" })
+    expect(coordinator.getSnapshot().transcript).not.toContainEqual(
+      expect.objectContaining({ kind: "permission_request", requestId: "permission-1" })
     );
     expect(coordinator.getSnapshot().turnInFlight).toBe(true);
   });
 
-  it.each([
-    ["allow_once", "allowed_once"],
-    ["allow_for_session", "allowed_for_session"],
-    ["deny", "denied"]
-  ] as const)("permission_%s_marks_card_resolved_without_changing_turn_in_flight", (decision, status) => {
-    const { coordinator, transport } = createStartedHarness();
-    transport.emitMessage(permissionRequest());
+  it.each(["allow_once", "allow_for_session", "deny"] as const)(
+    "permission_%s_removes_card_without_changing_turn_in_flight",
+    (decision) => {
+      const { coordinator, transport } = createStartedHarness();
+      transport.emitMessage(permissionRequest());
 
-    expect(coordinator.respondToPermission("permission-1", decision)).toBe(true);
+      expect(coordinator.respondToPermission("permission-1", decision)).toBe(true);
 
-    expect(coordinator.getSnapshot().transcript).toContainEqual(
-      expect.objectContaining({ kind: "permission_request", requestId: "permission-1", status })
-    );
-    expect(coordinator.getSnapshot().turnInFlight).toBe(true);
-  });
+      expect(coordinator.getSnapshot().transcript).not.toContainEqual(
+        expect.objectContaining({ kind: "permission_request", requestId: "permission-1" })
+      );
+      expect(coordinator.getSnapshot().turnInFlight).toBe(true);
+    }
+  );
 
   it("respondToPermission_returns_false_for_unknown_request", () => {
     const { coordinator, transport } = createStartedHarness();
@@ -519,12 +518,12 @@ describe("BridgeSessionCoordinator", () => {
     transport.emitMessage(agentEvent({ type: "assistant.done" }));
 
     expect(coordinator.getSnapshot().turnInFlight).toBe(false);
-    expect(coordinator.getSnapshot().transcript).toContainEqual(
-      expect.objectContaining({ kind: "permission_request", requestId: "permission-1", status: "allowed_once" })
+    expect(coordinator.getSnapshot().transcript).not.toContainEqual(
+      expect.objectContaining({ kind: "permission_request", requestId: "permission-1" })
     );
   });
 
-  it("keeps_resumed_assistant_output_after_resolved_permission_card", () => {
+  it("keeps_resumed_assistant_output_after_removing_permission_card", () => {
     const { coordinator, transport } = createStartedHarness();
     transport.emitMessage(agentEvent({ type: "assistant.text.delta", text: "Checking" }));
     transport.emitMessage(permissionRequest());
@@ -543,7 +542,6 @@ describe("BridgeSessionCoordinator", () => {
         text: "Checking",
         status: "complete"
       }),
-      expect.objectContaining({ kind: "permission_request", requestId: "permission-1", status: "allowed_once" }),
       expect.objectContaining({
         kind: "assistant_turn",
         markdown: "Allowed",
@@ -562,8 +560,8 @@ describe("BridgeSessionCoordinator", () => {
     transport.emitMessage(sessionError("Permission denied", "provider_error"));
 
     expect(coordinator.getSnapshot()).toMatchObject({ turnInFlight: false, lastError: "Permission denied" });
-    expect(coordinator.getSnapshot().transcript).toContainEqual(
-      expect.objectContaining({ kind: "permission_request", requestId: "permission-1", status: "denied" })
+    expect(coordinator.getSnapshot().transcript).not.toContainEqual(
+      expect.objectContaining({ kind: "permission_request", requestId: "permission-1" })
     );
     expect(coordinator.getSnapshot().transcript).toContainEqual(
       expect.objectContaining({ kind: "status", tone: "error", text: "Permission denied" })

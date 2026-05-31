@@ -41,7 +41,7 @@ export type StatusEntry = {
   text: string;
 };
 
-export type PermissionRequestStatus = "pending" | "allowed_once" | "allowed_for_session" | "denied" | "unavailable";
+export type PermissionRequestStatus = "pending" | "unavailable";
 
 export type PermissionRequestEntry = {
   id?: string;
@@ -148,9 +148,9 @@ export function addPermissionRequest(
 export function resolvePermissionRequest(
   transcript: TranscriptEntry[],
   requestId: string,
-  decision: PermissionDecision
+  _decision: PermissionDecision
 ): TranscriptEntry[] {
-  return updatePermissionRequest(transcript, requestId, statusForPermissionDecision(decision));
+  return removePendingPermissionRequest(transcript, requestId);
 }
 
 export function markPendingPermissionRequestsUnavailable(transcript: TranscriptEntry[]): TranscriptEntry[] {
@@ -179,26 +179,14 @@ export function removeTranscriptEntriesByIds(
   return transcript.filter((entry) => !entry.id || !entryIds.has(entry.id));
 }
 
-function updatePermissionRequest(
+function removePendingPermissionRequest(
   transcript: TranscriptEntry[],
-  requestId: string,
-  status: PermissionRequestStatus
+  requestId: string
 ): TranscriptEntry[] {
   const index = transcript.findIndex((entry) => entry.kind === "permission_request" && entry.requestId === requestId);
   const entry = transcript[index];
   if (index === -1 || entry?.kind !== "permission_request" || entry.status !== "pending") return transcript;
-  return replaceTranscriptEntry(transcript, index, { ...entry, status });
-}
-
-function statusForPermissionDecision(decision: PermissionDecision): PermissionRequestStatus {
-  switch (decision) {
-    case "allow_once":
-      return "allowed_once";
-    case "allow_for_session":
-      return "allowed_for_session";
-    case "deny":
-      return "denied";
-  }
+  return [...transcript.slice(0, index), ...transcript.slice(index + 1)];
 }
 
 function transcriptEntry(

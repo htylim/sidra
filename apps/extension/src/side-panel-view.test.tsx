@@ -947,31 +947,6 @@ describe("SidePanelView rich transcript rendering", () => {
     expect(onRespondToPermission).toHaveBeenCalledWith("permission-1", decision);
   });
 
-  it.each(["allowed_once", "allowed_for_session", "denied", "unavailable"] as const)(
-    "resolved_permission_card_%s_disables_actions",
-    (status) => {
-      renderInteractiveSnapshot(
-        snapshotForPage({
-          transcript: [
-            {
-              kind: "permission_request",
-              role: "permission",
-              requestId: "permission-1",
-              permissionKey: "shell:ls",
-              title: "Run command",
-              status
-            }
-          ]
-        })
-      );
-
-      expect(screen.getByText("Run command")).not.toBeNull();
-      expect(screen.queryByRole("button", { name: "Allow once for shell:ls" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Allow for this session for shell:ls" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Deny shell:ls" })).toBeNull();
-    }
-  );
-
   it("pending_permission_card_keeps_prompt_controls_disabled_while_turn_is_in_flight", () => {
     renderInteractiveSnapshot(
       snapshotForPage({

@@ -414,7 +414,7 @@ describe("transcript reducer", () => {
       ]);
     });
 
-    it("keeps_post_permission_output_after_permission_card", () => {
+    it("keeps_post_permission_output_after_removing_permission_card", () => {
       const permissionTranscript = resolvePermissionRequest(
         addPermissionRequest(addAssistantTextDelta(addUserPrompt([], "run it"), "Checking"), {
           requestId: "permission-1",
@@ -444,14 +444,6 @@ describe("transcript reducer", () => {
           status: "complete"
         },
         {
-          kind: "permission_request",
-          role: "permission",
-          requestId: "permission-1",
-          permissionKey: "shell:ls",
-          title: "Run command",
-          status: "allowed_once"
-        },
-        {
           kind: "assistant_turn",
           role: "assistant",
           markdown: "Allowed",
@@ -475,39 +467,39 @@ describe("transcript reducer", () => {
       ]);
     });
 
-    it("marks_permission_request_allowed_once", () => {
+    it("removes_permission_request_after_allow_once", () => {
       const transcript = addPermissionRequest([], {
         requestId: "permission-1",
         permissionKey: "shell:ls",
         title: "Run command"
       });
 
-      expect(resolvePermissionRequest(transcript, "permission-1", "allow_once")).toContainEqual(
-        expect.objectContaining({ kind: "permission_request", status: "allowed_once" })
+      expect(resolvePermissionRequest(transcript, "permission-1", "allow_once")).not.toContainEqual(
+        expect.objectContaining({ kind: "permission_request", requestId: "permission-1" })
       );
     });
 
-    it("marks_permission_request_allowed_for_session", () => {
+    it("removes_permission_request_after_allow_for_session", () => {
       const transcript = addPermissionRequest([], {
         requestId: "permission-1",
         permissionKey: "shell:ls",
         title: "Run command"
       });
 
-      expect(resolvePermissionRequest(transcript, "permission-1", "allow_for_session")).toContainEqual(
-        expect.objectContaining({ kind: "permission_request", status: "allowed_for_session" })
+      expect(resolvePermissionRequest(transcript, "permission-1", "allow_for_session")).not.toContainEqual(
+        expect.objectContaining({ kind: "permission_request", requestId: "permission-1" })
       );
     });
 
-    it("marks_permission_request_denied", () => {
+    it("removes_permission_request_after_deny", () => {
       const transcript = addPermissionRequest([], {
         requestId: "permission-1",
         permissionKey: "shell:ls",
         title: "Run command"
       });
 
-      expect(resolvePermissionRequest(transcript, "permission-1", "deny")).toContainEqual(
-        expect.objectContaining({ kind: "permission_request", status: "denied" })
+      expect(resolvePermissionRequest(transcript, "permission-1", "deny")).not.toContainEqual(
+        expect.objectContaining({ kind: "permission_request", requestId: "permission-1" })
       );
     });
 
