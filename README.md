@@ -33,6 +33,19 @@ Native host installer tests can be run directly:
 pnpm test:native-hosts
 ```
 
+Build a macOS zip distributable:
+
+```sh
+pnpm package:macos
+```
+
+This creates `release/sidra-macos.zip`. The unzipped folder is self-contained:
+it contains the unpacked extension, the bridge runtime, and an interactive
+`install-macos.mjs` script. The script lists installed and missing supported
+browsers, then lets the user install or uninstall the Native Messaging bridge
+manifest for Chrome, Brave, and Helium. The user still loads the extension from
+the unzipped folder's `extension` directory.
+
 `pnpm test:e2e` currently runs the extension Playwright smoke test. It builds
 `apps/extension/dist`, launches a temporary Chromium profile with that unpacked
 extension loaded, verifies the Manifest V3 service worker starts, and opens the

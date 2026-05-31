@@ -3,6 +3,7 @@ node_modules/
 dist/
 build/
 coverage/
+release/
 .local/
 .playwright-mcp/
 playwright-report/

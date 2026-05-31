@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm -r test && pnpm test:native-hosts",
+    "package:macos": "pnpm build && node tools/distributable/create-macos-zip.mjs",
+    "test": "pnpm -r test && pnpm test:native-hosts && pnpm test:distributable",
     "test:native-hosts": "node --test tools/native-hosts/*.test.mjs",
+    "test:distributable": "node --test tools/distributable/*.test.mjs",
     "test:e2e": "pnpm --filter @sidra/extension test:e2e",
     "check": "pnpm -r check"
   },
