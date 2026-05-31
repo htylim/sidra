@@ -1417,6 +1417,31 @@ describe("SidePanelView rich transcript rendering", () => {
     expect(details?.open).toBe(false);
   });
 
+  it("renders_activity_above_and_outside_the_assistant_response_card", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "Assistant response",
+            text: "Assistant response",
+            activity: { reasoningSummary: "Checked the code.", tools: [] },
+            status: "complete"
+          }
+        ]
+      })
+    );
+
+    const activityDisclosure = screen.getByText("Activity").closest("details");
+    const assistantResponse = screen.getByText("Assistant response").closest("article");
+
+    expect(activityDisclosure?.classList.contains("activity-disclosure")).toBe(true);
+    expect(assistantResponse?.classList.contains("assistant-response")).toBe(true);
+    expect(activityDisclosure?.parentElement).toBe(assistantResponse?.parentElement);
+    expect(activityDisclosure?.nextElementSibling).toBe(assistantResponse);
+  });
+
   it("renders_reasoning_summary_when_activity_is_expanded", async () => {
     const user = userEvent.setup();
     renderInteractiveSnapshot(

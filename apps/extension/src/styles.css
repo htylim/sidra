@@ -351,7 +351,6 @@ textarea:not(:disabled):focus-visible {
   width: fit-content;
   min-width: 0;
   max-width: min(88%, 100%);
-  margin-bottom: 10px;
   padding: 9px 10px;
   border-radius: 8px;
   font-size: 13px;
@@ -385,14 +384,22 @@ textarea:not(:disabled):focus-visible {
 }
 
 .assistant-turn {
+  display: grid;
+  gap: 8px;
   width: min(100%, 88%);
+  min-width: 0;
 }
 
-.assistant-turn.failed {
+.assistant-response {
+  width: 100%;
+  max-width: 100%;
+}
+
+.assistant-turn.failed .assistant-response {
   border-color: #efc8bd;
 }
 
-.assistant-turn.cancelled {
+.assistant-turn.cancelled .assistant-response {
   border-color: #d7d0c5;
 }
 
@@ -517,17 +524,42 @@ textarea:not(:disabled):focus-visible {
 
 .activity-disclosure {
   min-width: 0;
-  margin-top: 8px;
-  border-top: 1px solid #e1e8e5;
-  padding-top: 7px;
+  border-bottom: 1px solid #e1e8e5;
+  padding-bottom: 7px;
 }
 
 .activity-disclosure summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
   cursor: pointer;
   color: #7a8783;
   font-size: 12px;
   font-weight: 550;
+  list-style: none;
   overflow-wrap: anywhere;
+}
+
+.activity-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.activity-disclosure summary::marker {
+  content: "";
+}
+
+.activity-disclosure summary::after {
+  flex: 0 0 auto;
+  color: #7a8783;
+  content: "›";
+  font-size: 16px;
+  line-height: 1;
+  transform-origin: center;
+}
+
+.activity-disclosure[open] summary::after {
+  transform: rotate(90deg);
 }
 
 .activity-disclosure summary:hover {

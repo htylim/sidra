@@ -48,12 +48,19 @@ function UserMessage(props: { entry: UserMessageEntry }) {
 }
 
 function AssistantTurn(props: { entry: AssistantTurnEntry }) {
+  const hasActivity = hasVisibleActivity(props.entry.activity);
+  const hasResponseBody = props.entry.markdown.trim() || props.entry.status === "streaming";
+
   return (
-    <article className={`message assistant assistant-turn ${props.entry.status}`}>
-      {props.entry.markdown.trim() ? <AssistantMarkdown markdown={props.entry.markdown} /> : null}
-      {props.entry.status === "streaming" ? <div className="turn-status">Streaming</div> : null}
-      {hasVisibleActivity(props.entry.activity) ? <ActivityDisclosure activity={props.entry.activity} /> : null}
-    </article>
+    <div className={`assistant-turn ${props.entry.status}`}>
+      {hasActivity ? <ActivityDisclosure activity={props.entry.activity} /> : null}
+      {hasResponseBody ? (
+        <article className="message assistant assistant-response">
+          {props.entry.markdown.trim() ? <AssistantMarkdown markdown={props.entry.markdown} /> : null}
+          {props.entry.status === "streaming" ? <div className="turn-status">Streaming</div> : null}
+        </article>
+      ) : null}
+    </div>
   );
 }
 
