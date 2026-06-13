@@ -1472,4 +1472,61 @@ describe("BridgeSessionCoordinator page context", () => {
       expect.objectContaining({ role: "status", text: "Session started" })
     ]);
   });
+
+  it("adds_quick_action_display_metadata_to_queued_submission_transcript", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt({
+      prompt: "Full quick action prompt",
+      pageContext: readablePageContext(),
+      userPromptDisplay: { kind: "quick_action", label: "Summarize" }
+    });
+    transport.emitMessage(sessionStarted());
+
+    expect(coordinator.getSnapshot().transcript).toEqual([
+      expect.objectContaining({ role: "status", text: "Page context attached" }),
+      expect.objectContaining({
+        role: "user",
+        text: "Full quick action prompt",
+        display: { kind: "quick_action", label: "Summarize" }
+      }),
+      expect.objectContaining({ role: "status", text: "Session started" })
+    ]);
+  });
+
+  it("adds_quick_action_display_metadata_to_started_session_submission_transcript", () => {
+    const { coordinator, transport } = createStartedHarness();
+    transport.emitMessage(agentEvent({ type: "assistant.done" }));
+
+    coordinator.sendPrompt({
+      prompt: "Full quick action prompt",
+      userPromptDisplay: { kind: "quick_action", label: "Summarize" }
+    });
+
+    expect(coordinator.getSnapshot().transcript).toContainEqual(
+      expect.objectContaining({
+        role: "user",
+        text: "Full quick action prompt",
+        display: { kind: "quick_action", label: "Summarize" }
+      })
+    );
+  });
+
+  it("still_posts_full_quick_action_prompt_to_the_bridge", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt({
+      prompt: "Full quick action prompt",
+      pageContext: readablePageContext(),
+      userPromptDisplay: { kind: "quick_action", label: "Summarize" }
+    });
+    transport.emitMessage(sessionStarted());
+
+    expect(transport.postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        prompt: "Full quick action prompt"
+      })
+    );
+  });
 });

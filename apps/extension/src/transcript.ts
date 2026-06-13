@@ -21,7 +21,12 @@ export type UserMessageEntry = {
   kind: "user_message";
   role: "user";
   text: string;
+  display?: UserPromptDisplay;
 };
+
+export type UserPromptDisplay =
+  | { kind: "plain" }
+  | { kind: "quick_action"; label: string };
 
 export type AssistantTurnEntry = {
   id?: string;
@@ -73,9 +78,21 @@ export type ContextAttachmentMarker =
 export function addUserPrompt(
   transcript: TranscriptEntry[],
   prompt: string,
-  id?: string
+  id?: string,
+  display?: UserPromptDisplay
 ): TranscriptEntry[] {
-  return [...transcript, transcriptEntry({ kind: "user_message", role: "user", text: prompt.trim() }, id)];
+  return [
+    ...transcript,
+    transcriptEntry(
+      {
+        kind: "user_message",
+        role: "user",
+        text: prompt.trim(),
+        ...(normalizeUserPromptDisplay(display) ? { display: normalizeUserPromptDisplay(display) } : {})
+      },
+      id
+    )
+  ];
 }
 
 export function addAssistantTextDelta(transcript: TranscriptEntry[], text: string): TranscriptEntry[] {
@@ -199,6 +216,12 @@ function transcriptEntry(
     value: id,
     enumerable: false
   }) as TranscriptEntry;
+}
+
+function normalizeUserPromptDisplay(display: UserPromptDisplay | undefined): UserPromptDisplay | undefined {
+  if (!display || display.kind === "plain") return undefined;
+  const label = display.label.trim();
+  return label ? { kind: "quick_action", label } : undefined;
 }
 
 function updateCurrentAssistantTurn(

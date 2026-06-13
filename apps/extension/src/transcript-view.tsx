@@ -1,6 +1,7 @@
-import { memo } from "react";
+import { memo, useId, useState, type CSSProperties } from "react";
 import type { PermissionDecision } from "@sidra/protocol";
 import { AssistantMarkdown } from "./assistant-markdown";
+import { SidraIcon } from "./sidra-icon";
 import type {
   AssistantTurnEntry,
   PermissionRequestEntry,
@@ -14,10 +15,17 @@ import { hasVisibleActivity } from "./transcript";
 
 export function TranscriptView(props: {
   entries: TranscriptEntry[];
+  promptFontSizePx: number;
+  responseFontSizePx: number;
   onRespondToPermission(requestId: string, decision: PermissionDecision): void;
 }) {
+  const transcriptStyle = {
+    "--sidra-prompt-font-size": `${props.promptFontSizePx}px`,
+    "--sidra-response-font-size": `${props.responseFontSizePx}px`
+  } as CSSProperties;
+
   return (
-    <div className="transcript">
+    <div className="transcript" style={transcriptStyle}>
       {props.entries.map((entry, index) => (
         <MemoizedTranscriptEntryView
           entry={entry}
@@ -44,7 +52,39 @@ function TranscriptEntryView(props: {
 const MemoizedTranscriptEntryView = memo(TranscriptEntryView);
 
 function UserMessage(props: { entry: UserMessageEntry }) {
+  if (props.entry.display?.kind === "quick_action") {
+    return <QuickActionUserMessage entry={props.entry} />;
+  }
   return <div className="message user">{props.entry.text}</div>;
+}
+
+function QuickActionUserMessage(props: { entry: UserMessageEntry }) {
+  const [expanded, setExpanded] = useState(false);
+  const promptTextId = useId();
+
+  return (
+    <div className="message user quick-action-user-message">
+      <button
+        type="button"
+        className="quick-action-user-label"
+        aria-expanded={expanded}
+        aria-controls={promptTextId}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <SidraIcon name="sparkle" className="quick-action-user-icon" />
+        <span>{props.entry.display?.kind === "quick_action" ? props.entry.display.label : props.entry.text}</span>
+        <SidraIcon
+          name="chevron-down"
+          className={`quick-action-disclosure-icon${expanded ? " expanded" : ""}`}
+        />
+      </button>
+      {expanded ? (
+        <div className="quick-action-prompt-text" id={promptTextId}>
+          {props.entry.text}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function AssistantTurn(props: { entry: AssistantTurnEntry }) {

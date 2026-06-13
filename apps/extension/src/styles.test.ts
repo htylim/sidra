@@ -23,7 +23,6 @@ describe("extension UI interaction state CSS", () => {
   it("defines_enabled_button_cursor_hover_focus_visible_and_active_states", () => {
     expectRule("button:not(:disabled)", ["cursor: pointer"]);
     expectRule(".toolbar-button:not(:disabled):hover", ["border-color:", "background:"]);
-    expectRule(".options-button:not(:disabled):hover", ["border-color:", "background:"]);
     expectRule(".quick-action-button:not(:disabled):hover", ["border-color: #075e56", "background: #075e56"]);
     expectRule(".send-button:not(:disabled):hover", ["border-color: #075e56", "background: #075e56"]);
     expectRule(".retry-button:not(:disabled):hover", ["border-color: #075e56", "background: #075e56"]);
@@ -34,7 +33,6 @@ describe("extension UI interaction state CSS", () => {
       "border-color: #075e56",
       "background: #075e56"
     ]);
-    expectRule(".options-button[data-state=\"open\"]:not(:disabled):hover", ["background: #dff3ee"]);
     expectRule(".code-copy-button[data-status=\"copied\"]:not(:disabled):hover", ["border-color: #7dd3c7"]);
     expectRule(".code-copy-button[data-status=\"failed\"]:not(:disabled):hover", ["border-color: #f8b4a0"]);
     expectRule("button:not(:disabled):focus-visible", ["outline:", "outline-offset:"]);
@@ -80,5 +78,50 @@ describe("extension UI interaction state CSS", () => {
       "border-color: #c2410c"
     ]);
     expect(stylesheet.indexOf(invalidFieldSelector)).toBeGreaterThan(stylesheet.indexOf(formFieldSelector));
+  });
+
+  it("styles_inline_send_dom_checkbox_as_secondary_composer_option", () => {
+    expectRule(".composer-dom-toggle", [
+      "display: inline-flex",
+      "gap: 6px",
+      "color: #62716d",
+      "font-size: 12px"
+    ]);
+    expectRule(".composer-dom-toggle input", ["width: 14px", "height: 14px", "accent-color: #087c71"]);
+  });
+
+  it("does_not_keep_prompt_options_button_styles_after_inline_send_dom_replaces_it", () => {
+    expect(stylesheet).not.toContain(".options-button");
+    expect(stylesheet).not.toContain(".prompt-options-popover");
+    expect(stylesheet).not.toContain(".prompt-option-toggle");
+  });
+
+  it("uses_prompt_and_response_font_size_variables_for_transcript_text", () => {
+    expectRule(".message.user", ["font-size: var(--sidra-prompt-font-size"]);
+    expectRule(".message.assistant", ["font-size: var(--sidra-response-font-size"]);
+    expectRule(".transcript", ["gap: calc(max(var(--sidra-prompt-font-size", "var(--sidra-response-font-size"]);
+    expectRule(".assistant-markdown", ["font-size: var(--sidra-response-font-size"]);
+    expectRule(".assistant-markdown h1,\n.assistant-markdown h2,\n.assistant-markdown h3", [
+      "font-size: var(--sidra-response-font-size"
+    ]);
+  });
+
+  it("uses_response_font_size_variable_for_assistant_markdown_code_text", () => {
+    expectRule(".assistant-markdown code", ["font-size: var(--sidra-response-font-size"]);
+    expectRule(".code-block code", ["font-size: var(--sidra-response-font-size"]);
+  });
+
+  it("keeps_non_prompt_transcript_ui_at_fixed_supporting_font_size", () => {
+    expectRule(".status-card", ["font-size: 13px"]);
+    expectRule(".permission-card", ["font-size: 13px"]);
+    expectRule(".turn-status", ["font-size: 13px"]);
+    expectRule(".activity-disclosure summary", ["font-size: 13px"]);
+    expectRule(".activity-section-title", ["font-size: 13px"]);
+    expectRule(".activity-reasoning", ["font-size: 13px"]);
+    expectRule(".activity-action", ["font-size: 13px"]);
+    expectRule(".activity-command-output code", ["font-size: 13px"]);
+    expectRule(".permission-card h3", ["font-size: 13px"]);
+    expectRule(".permission-scope", ["font-size: 13px"]);
+    expectRule(".permission-command", ["font-size: 13px"]);
   });
 });

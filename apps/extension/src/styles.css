@@ -97,8 +97,7 @@ textarea:not(:disabled):focus-visible {
   white-space: nowrap;
 }
 
-.toolbar-button,
-.options-button {
+.toolbar-button {
   flex: 0 0 auto;
   display: grid;
   width: 36px;
@@ -114,22 +113,6 @@ textarea:not(:disabled):focus-visible {
 .toolbar-button:not(:disabled):hover {
   border-color: #83b8ae;
   background: #eef8f5;
-}
-
-.options-button:not(:disabled):hover {
-  border-color: #83b8ae;
-  background: #eef8f5;
-}
-
-.options-button[data-state="open"] {
-  border-color: #087c71;
-  background: #dff3ee;
-  color: #075e56;
-}
-
-.options-button[data-state="open"]:not(:disabled):hover {
-  border-color: #087c71;
-  background: #dff3ee;
 }
 
 .sidra-icon {
@@ -353,14 +336,13 @@ textarea:not(:disabled):focus-visible {
   max-width: min(88%, 100%);
   padding: 9px 10px;
   border-radius: 8px;
-  font-size: 13px;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
 .transcript {
   display: grid;
-  gap: 10px;
+  gap: calc(max(var(--sidra-prompt-font-size, 15px), var(--sidra-response-font-size, 17px)) * 0.75);
   min-width: 0;
 }
 
@@ -368,12 +350,62 @@ textarea:not(:disabled):focus-visible {
   margin-left: auto;
   background: #087c71;
   color: #ffffff;
+  font-size: var(--sidra-prompt-font-size, 15px);
   white-space: pre-wrap;
+}
+
+.quick-action-user-message {
+  display: grid;
+  gap: 6px;
+}
+
+.quick-action-user-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+}
+
+.quick-action-user-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.quick-action-user-label:not(:disabled):hover {
+  color: rgb(255 255 255 / 0.86);
+}
+
+.quick-action-disclosure-icon {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  transform: rotate(-90deg);
+}
+
+.quick-action-disclosure-icon.expanded {
+  transform: rotate(0deg);
+}
+
+.quick-action-prompt-text {
+  max-width: 100%;
+  border-top: 1px solid rgba(255, 255, 255, 0.28);
+  padding-top: 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .message.assistant {
   border: 1px solid #d8e1dd;
   background: #ffffff;
+  font-size: var(--sidra-response-font-size, 17px);
 }
 
 .message.status {
@@ -405,6 +437,7 @@ textarea:not(:disabled):focus-visible {
 
 .assistant-markdown {
   min-width: 0;
+  font-size: var(--sidra-response-font-size, 17px);
   overflow-wrap: anywhere;
 }
 
@@ -428,7 +461,7 @@ textarea:not(:disabled):focus-visible {
 .assistant-markdown h2,
 .assistant-markdown h3 {
   margin: 10px 0 6px;
-  font-size: 14px;
+  font-size: var(--sidra-response-font-size, 17px);
   line-height: 1.25;
 }
 
@@ -453,7 +486,7 @@ textarea:not(:disabled):focus-visible {
   background: #eef3f1;
   padding: 1px 4px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  font-size: var(--sidra-response-font-size, 17px);
 }
 
 .code-block {
@@ -478,6 +511,7 @@ textarea:not(:disabled):focus-visible {
   padding: 0;
   color: #e9f0ed;
   background: transparent;
+  font-size: var(--sidra-response-font-size, 17px);
 }
 
 .code-copy-button {
@@ -519,7 +553,7 @@ textarea:not(:disabled):focus-visible {
 .turn-status {
   margin-top: 7px;
   color: #62716d;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .activity-disclosure {
@@ -535,7 +569,7 @@ textarea:not(:disabled):focus-visible {
   gap: 6px;
   cursor: pointer;
   color: #7a8783;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 550;
   list-style: none;
   overflow-wrap: anywhere;
@@ -590,14 +624,14 @@ textarea:not(:disabled):focus-visible {
 .activity-section-title {
   margin: 0;
   color: #2d3b38;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
 }
 
 .activity-reasoning {
   margin: 0;
   color: #62716d;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -614,7 +648,7 @@ textarea:not(:disabled):focus-visible {
   border-left: 2px solid #d8e1dd;
   padding-left: 8px;
   color: #2d3b38;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .activity-action-title {
@@ -650,10 +684,14 @@ textarea:not(:disabled):focus-visible {
   padding: 6px 8px;
   background: #f6f8f7;
   color: #17201f;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.activity-command-output code {
+  font-size: 13px;
 }
 
 .status-card {
@@ -707,26 +745,28 @@ textarea:not(:disabled):focus-visible {
 }
 
 .permission-card h3,
-.permission-card p,
-.permission-scope {
+.permission-card p {
   margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
+.permission-scope {
+  margin: 0;
+  min-width: 0;
+  color: #50605c;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 .permission-card h3 {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .permission-copy {
   display: grid;
   gap: 4px;
   min-width: 0;
-}
-
-.permission-scope {
-  color: #50605c;
-  font-size: 12px;
 }
 
 .permission-command {
@@ -738,7 +778,7 @@ textarea:not(:disabled):focus-visible {
   background: #f6f8f7;
   color: #17201f;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .permission-actions button {
@@ -807,38 +847,27 @@ textarea:not(:disabled):focus-visible {
   min-width: 0;
 }
 
-.prompt-options-popover {
-  position: absolute;
-  bottom: calc(100% - 2px);
-  left: 12px;
-  width: min(220px, calc(100vw - 24px));
-  max-width: calc(100% - 24px);
-  padding: 8px;
-  border: 1px solid #cfd9d5;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 10px 28px rgb(23 32 31 / 0.14);
-}
-
-.prompt-option-toggle {
-  display: flex;
+.composer-dom-toggle {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  align-self: center;
+  gap: 6px;
   min-width: 0;
-  min-height: 30px;
-  color: #17201f;
-  font-size: 13px;
+  min-height: 28px;
+  color: #62716d;
+  font-size: 12px;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
-.prompt-option-toggle span {
+.composer-dom-toggle span {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.prompt-option-toggle input {
-  width: 16px;
-  height: 16px;
+.composer-dom-toggle input {
+  width: 14px;
+  height: 14px;
   accent-color: #087c71;
 }
 
@@ -971,6 +1000,23 @@ textarea:not(:disabled):focus-visible {
   width: 16px;
   height: 16px;
   accent-color: #087c71;
+}
+
+.font-size-setting {
+  display: grid;
+  gap: 6px;
+  width: min(220px, 100%);
+  color: #62716d;
+  font-size: 12px;
+}
+
+.font-size-setting input {
+  width: 100%;
+  border: 1px solid #cfd9d5;
+  border-radius: 6px;
+  padding: 8px;
+  color: #17201f;
+  font-size: 13px;
 }
 
 .action-list {

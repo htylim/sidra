@@ -28,7 +28,8 @@ import {
   removeTranscriptEntriesByIds,
   resolvePermissionRequest,
   type ContextAttachmentMarker,
-  type TranscriptEntry
+  type TranscriptEntry,
+  type UserPromptDisplay
 } from "../transcript";
 
 export type ProtocolTransportPostResult = { ok: true } | { ok: false; error: string };
@@ -62,6 +63,7 @@ export type PromptSubmission = {
   prompt: string;
   pageContext?: PageContext;
   contextMarker?: ContextAttachmentMarker;
+  userPromptDisplay?: UserPromptDisplay;
   transcriptEntryIds?: {
     markerId?: string;
     promptId: string;
@@ -694,6 +696,7 @@ export class BridgeSessionCoordinator {
       prompt: normalizedPrompt,
       pageContext,
       contextMarker,
+      userPromptDisplay: typeof input === "string" ? undefined : input.userPromptDisplay,
       transcriptEntriesVisible: false,
       transcriptEntryIds: {
         markerId: contextMarker ? this.createTranscriptEntryId() : undefined,
@@ -710,7 +713,12 @@ export class BridgeSessionCoordinator {
       submission.contextMarker && submission.transcriptEntryIds.markerId
         ? addContextMarker(transcript, submission.contextMarker, submission.transcriptEntryIds.markerId)
         : transcript;
-    return addUserPrompt(withMarker, submission.prompt, submission.transcriptEntryIds.promptId);
+    return addUserPrompt(
+      withMarker,
+      submission.prompt,
+      submission.transcriptEntryIds.promptId,
+      submission.userPromptDisplay
+    );
   }
 
   private handlePermissionRequest(request: PermissionRequest): void {

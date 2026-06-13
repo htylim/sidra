@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import type { QuickAction, QuickActionsSettings, SettingsStore } from "./settings-store";
+import {
+  MAX_TRANSCRIPT_FONT_SIZE_PX,
+  MIN_TRANSCRIPT_FONT_SIZE_PX,
+  type QuickAction,
+  type QuickActionsSettings,
+  type SettingsStore
+} from "./settings-store";
 
-type OptionsSettingsStore = Pick<SettingsStore, "getSnapshot" | "whenReady" | "subscribe" | "saveQuickActions">;
+type OptionsSettingsStore = Pick<
+  SettingsStore,
+  "getSnapshot" | "whenReady" | "subscribe" | "saveQuickActions" | "saveTranscriptFontSizesPx"
+>;
 type QuickActionFieldName = "label" | "prompt";
 type TouchedQuickActionFields = Record<string, Partial<Record<QuickActionFieldName, boolean>>>;
 
@@ -9,18 +18,50 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
   const [ready, setReady] = useState(false);
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
+  const quickActionsDirtyRef = useRef(false);
+  const transcriptFontSizesDirtyRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
   const [touchedFields, setTouchedFields] = useState<TouchedQuickActionFields>({});
+  const [promptFontSizeDraft, setPromptFontSizeDraft] = useState("");
+  const [responseFontSizeDraft, setResponseFontSizeDraft] = useState("");
+  const [promptFontSizeTouched, setPromptFontSizeTouched] = useState(false);
+  const [responseFontSizeTouched, setResponseFontSizeTouched] = useState(false);
   const [quickActions, setQuickActions] = useState<QuickActionsSettings>(() => ({
     enabled: true,
     actions: []
   }));
-  const canSave = ready && !saving && quickActions.actions.every(isValidActionDraft);
+  const promptFontSizeValue = Number(promptFontSizeDraft);
+  const responseFontSizeValue = Number(responseFontSizeDraft);
+  const promptFontSizeIsValid = isValidTranscriptFontSizeDraft(promptFontSizeDraft);
+  const responseFontSizeIsValid = isValidTranscriptFontSizeDraft(responseFontSizeDraft);
+  const promptFontSizeErrorId = "prompt-font-size-error";
+  const responseFontSizeErrorId = "response-font-size-error";
+  const promptFontSizeError =
+    promptFontSizeTouched && !promptFontSizeIsValid
+      ? `Enter a whole number from ${MIN_TRANSCRIPT_FONT_SIZE_PX} to ${MAX_TRANSCRIPT_FONT_SIZE_PX}.`
+      : undefined;
+  const responseFontSizeError =
+    responseFontSizeTouched && !responseFontSizeIsValid
+      ? `Enter a whole number from ${MIN_TRANSCRIPT_FONT_SIZE_PX} to ${MAX_TRANSCRIPT_FONT_SIZE_PX}.`
+      : undefined;
+  const canSave =
+    ready &&
+    !saving &&
+    quickActions.actions.every(isValidActionDraft) &&
+    promptFontSizeIsValid &&
+    responseFontSizeIsValid;
   const controlsDisabled = !ready || saving;
 
-  function markDirty() {
+  function markQuickActionsDirty() {
     dirtyRef.current = true;
+    quickActionsDirtyRef.current = true;
+    setDirty(true);
+  }
+
+  function markTranscriptFontSizesDirty() {
+    dirtyRef.current = true;
+    transcriptFontSizesDirtyRef.current = true;
     setDirty(true);
   }
 
@@ -28,17 +69,27 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
     let cancelled = false;
     props.settingsStore.whenReady().then(() => {
       if (cancelled) return;
-      const initialQuickActions = props.settingsStore.getSnapshot().quickActions;
-      setQuickActions(initialQuickActions);
-      setTouchedFields(touchedFieldsForInvalidActions(initialQuickActions.actions));
+      const initialSettings = props.settingsStore.getSnapshot();
+      setQuickActions(initialSettings.quickActions);
+      setPromptFontSizeDraft(String(initialSettings.promptFontSizePx));
+      setResponseFontSizeDraft(String(initialSettings.responseFontSizePx));
+      setTouchedFields(touchedFieldsForInvalidActions(initialSettings.quickActions.actions));
       setReady(true);
     });
 
     const unsubscribe = props.settingsStore.subscribe(() => {
-      if (!cancelled && !dirtyRef.current) {
-        const nextQuickActions = props.settingsStore.getSnapshot().quickActions;
-        setQuickActions(nextQuickActions);
-        setTouchedFields(touchedFieldsForInvalidActions(nextQuickActions.actions));
+      if (!cancelled) {
+        const nextSettings = props.settingsStore.getSnapshot();
+        if (!quickActionsDirtyRef.current) {
+          setQuickActions(nextSettings.quickActions);
+          setTouchedFields(touchedFieldsForInvalidActions(nextSettings.quickActions.actions));
+        }
+        if (!transcriptFontSizesDirtyRef.current) {
+          setPromptFontSizeDraft(String(nextSettings.promptFontSizePx));
+          setResponseFontSizeDraft(String(nextSettings.responseFontSizePx));
+          setPromptFontSizeTouched(false);
+          setResponseFontSizeTouched(false);
+        }
       }
     });
 
@@ -48,8 +99,22 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
     };
   }, [props.settingsStore]);
 
+  function syncDraftsFromStore() {
+    const nextSettings = props.settingsStore.getSnapshot();
+    if (!quickActionsDirtyRef.current) {
+      setQuickActions(nextSettings.quickActions);
+      setTouchedFields(touchedFieldsForInvalidActions(nextSettings.quickActions.actions));
+    }
+    if (!transcriptFontSizesDirtyRef.current) {
+      setPromptFontSizeDraft(String(nextSettings.promptFontSizePx));
+      setResponseFontSizeDraft(String(nextSettings.responseFontSizePx));
+      setPromptFontSizeTouched(false);
+      setResponseFontSizeTouched(false);
+    }
+  }
+
   function updateAction(actionId: string, fieldName: QuickActionFieldName, value: string) {
-    markDirty();
+    markQuickActionsDirty();
     setSaveError(undefined);
     setTouchedFields((current) => ({
       ...current,
@@ -62,7 +127,7 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
   }
 
   function addAction() {
-    markDirty();
+    markQuickActionsDirty();
     setSaveError(undefined);
     setQuickActions((current) => ({
       ...current,
@@ -78,7 +143,7 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
   }
 
   function removeAction(actionId: string) {
-    markDirty();
+    markQuickActionsDirty();
     setSaveError(undefined);
     setTouchedFields((current) => {
       const { [actionId]: _removed, ...remaining } = current;
@@ -95,12 +160,24 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
     setSaving(true);
     setSaveError(undefined);
     try {
-      await props.settingsStore.saveQuickActions(quickActions);
+      if (quickActionsDirtyRef.current || !dirtyRef.current) {
+        await props.settingsStore.saveQuickActions(quickActions);
+      }
+      if (transcriptFontSizesDirtyRef.current) {
+        await props.settingsStore.saveTranscriptFontSizesPx({
+          promptFontSizePx: promptFontSizeValue,
+          responseFontSizePx: responseFontSizeValue
+        });
+      }
       dirtyRef.current = false;
+      quickActionsDirtyRef.current = false;
+      transcriptFontSizesDirtyRef.current = false;
       setDirty(false);
-      setQuickActions(props.settingsStore.getSnapshot().quickActions);
+      setPromptFontSizeTouched(false);
+      setResponseFontSizeTouched(false);
+      syncDraftsFromStore();
     } catch {
-      setSaveError("Could not save quick actions.");
+      setSaveError("Could not save settings.");
     } finally {
       setSaving(false);
     }
@@ -112,6 +189,57 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
         <h1>Sidra Settings</h1>
       </header>
 
+      <section className="options-section" aria-label="Display">
+        <label className="font-size-setting">
+          <span>Prompt text size</span>
+          <input
+            type="number"
+            min={MIN_TRANSCRIPT_FONT_SIZE_PX}
+            max={MAX_TRANSCRIPT_FONT_SIZE_PX}
+            step={1}
+            value={promptFontSizeDraft}
+            disabled={controlsDisabled}
+            aria-invalid={promptFontSizeError ? "true" : undefined}
+            aria-describedby={promptFontSizeError ? promptFontSizeErrorId : undefined}
+            onChange={(event) => {
+              markTranscriptFontSizesDirty();
+              setSaveError(undefined);
+              setPromptFontSizeTouched(true);
+              setPromptFontSizeDraft(event.currentTarget.value);
+            }}
+          />
+          {promptFontSizeError ? (
+            <span className="validation-error" id={promptFontSizeErrorId}>
+              {promptFontSizeError}
+            </span>
+          ) : null}
+        </label>
+        <label className="font-size-setting">
+          <span>Response text size</span>
+          <input
+            type="number"
+            min={MIN_TRANSCRIPT_FONT_SIZE_PX}
+            max={MAX_TRANSCRIPT_FONT_SIZE_PX}
+            step={1}
+            value={responseFontSizeDraft}
+            disabled={controlsDisabled}
+            aria-invalid={responseFontSizeError ? "true" : undefined}
+            aria-describedby={responseFontSizeError ? responseFontSizeErrorId : undefined}
+            onChange={(event) => {
+              markTranscriptFontSizesDirty();
+              setSaveError(undefined);
+              setResponseFontSizeTouched(true);
+              setResponseFontSizeDraft(event.currentTarget.value);
+            }}
+          />
+          {responseFontSizeError ? (
+            <span className="validation-error" id={responseFontSizeErrorId}>
+              {responseFontSizeError}
+            </span>
+          ) : null}
+        </label>
+      </section>
+
       <section className="options-section" aria-label="Quick actions">
         <label className="settings-toggle">
           <input
@@ -120,7 +248,7 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
             disabled={controlsDisabled}
             onChange={(event) => {
               const enabled = event.currentTarget.checked;
-              markDirty();
+              markQuickActionsDirty();
               setSaveError(undefined);
               setQuickActions((current) => ({ ...current, enabled }));
             }}
@@ -210,6 +338,12 @@ export function OptionsPageView(props: { settingsStore: OptionsSettingsStore }) 
 
 function isValidActionDraft(action: QuickAction): boolean {
   return action.label.trim().length > 0 && action.prompt.trim().length > 0;
+}
+
+function isValidTranscriptFontSizeDraft(value: string): boolean {
+  if (!/^\d+$/.test(value)) return false;
+  const parsed = Number(value);
+  return parsed >= MIN_TRANSCRIPT_FONT_SIZE_PX && parsed <= MAX_TRANSCRIPT_FONT_SIZE_PX;
 }
 
 function getVisibleFieldError(action: QuickAction, fieldName: QuickActionFieldName, touched: boolean | undefined): string | undefined {

@@ -1,6 +1,8 @@
 export type SidraSettings = {
   readableContentLimitCharacters: number;
   domContentLimitCharacters: number;
+  promptFontSizePx: number;
+  responseFontSizePx: number;
   quickActions: QuickActionsSettings;
 };
 
@@ -36,6 +38,10 @@ export const MAX_READABLE_CONTENT_LIMIT_CHARACTERS = 500_000;
 export const DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS = 300_000;
 export const MIN_DOM_CONTENT_LIMIT_CHARACTERS = 1_000;
 export const MAX_DOM_CONTENT_LIMIT_CHARACTERS = 750_000;
+export const DEFAULT_PROMPT_FONT_SIZE_PX = 15;
+export const DEFAULT_RESPONSE_FONT_SIZE_PX = 17;
+export const MIN_TRANSCRIPT_FONT_SIZE_PX = 12;
+export const MAX_TRANSCRIPT_FONT_SIZE_PX = 22;
 export const SIDRA_SETTINGS_STORAGE_KEY = "sidra.settings.v1";
 export const DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT = `Summarize this article following the instructions below.
 
@@ -111,6 +117,24 @@ export class SettingsStore {
     this.setSnapshot(nextSnapshot);
   }
 
+  async saveTranscriptFontSizesPx(nextFontSizesPx: {
+    promptFontSizePx: number;
+    responseFontSizePx: number;
+  }): Promise<void> {
+    const currentSnapshot = this.getSnapshot();
+    const nextSnapshot = {
+      ...currentSnapshot,
+      promptFontSizePx: isValidTranscriptFontSize(nextFontSizesPx.promptFontSizePx)
+        ? nextFontSizesPx.promptFontSizePx
+        : currentSnapshot.promptFontSizePx,
+      responseFontSizePx: isValidTranscriptFontSize(nextFontSizesPx.responseFontSizePx)
+        ? nextFontSizesPx.responseFontSizePx
+        : currentSnapshot.responseFontSizePx
+    };
+    await this.storage.set({ [SIDRA_SETTINGS_STORAGE_KEY]: cloneSettings(nextSnapshot) });
+    this.setSnapshot(nextSnapshot);
+  }
+
   private async loadInitialSettings(loadGeneration: number): Promise<void> {
     const generationAtLoadStart = this.liveChangeGeneration;
     let stored: unknown;
@@ -136,6 +160,8 @@ export class SettingsStore {
     if (
       nextSnapshot.readableContentLimitCharacters === this.snapshot.readableContentLimitCharacters &&
       nextSnapshot.domContentLimitCharacters === this.snapshot.domContentLimitCharacters &&
+      nextSnapshot.promptFontSizePx === this.snapshot.promptFontSizePx &&
+      nextSnapshot.responseFontSizePx === this.snapshot.responseFontSizePx &&
       quickActionsMatch(nextSnapshot.quickActions, this.snapshot.quickActions)
     ) {
       return;
@@ -170,7 +196,13 @@ function parseStoredSettings(value: unknown): SidraSettings {
 
   const readableContentLimitCharacters = value.readableContentLimitCharacters;
   const domContentLimitCharacters = value.domContentLimitCharacters;
+  const promptFontSizePx = value.promptFontSizePx;
+  const responseFontSizePx = value.responseFontSizePx;
+  const legacyTranscriptFontSizePx = value.transcriptFontSizePx;
   const defaults = defaultSidraSettings();
+  const legacyTranscriptFontSize = isValidTranscriptFontSize(legacyTranscriptFontSizePx)
+    ? legacyTranscriptFontSizePx
+    : undefined;
 
   return {
     readableContentLimitCharacters: isValidReadableContentLimit(readableContentLimitCharacters)
@@ -179,6 +211,12 @@ function parseStoredSettings(value: unknown): SidraSettings {
     domContentLimitCharacters: isValidDomContentLimit(domContentLimitCharacters)
       ? domContentLimitCharacters
       : defaults.domContentLimitCharacters,
+    promptFontSizePx: isValidTranscriptFontSize(promptFontSizePx)
+      ? promptFontSizePx
+      : legacyTranscriptFontSize ?? defaults.promptFontSizePx,
+    responseFontSizePx: isValidTranscriptFontSize(responseFontSizePx)
+      ? responseFontSizePx
+      : legacyTranscriptFontSize ?? defaults.responseFontSizePx,
     quickActions: parseQuickActionsSettings(value.quickActions)
   };
 }
@@ -187,6 +225,8 @@ function defaultSidraSettings(): SidraSettings {
   return {
     readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
     domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+    promptFontSizePx: DEFAULT_PROMPT_FONT_SIZE_PX,
+    responseFontSizePx: DEFAULT_RESPONSE_FONT_SIZE_PX,
     quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS
   };
 }
@@ -195,6 +235,8 @@ function cloneSettings(settings: SidraSettings): SidraSettings {
   return {
     readableContentLimitCharacters: settings.readableContentLimitCharacters,
     domContentLimitCharacters: settings.domContentLimitCharacters,
+    promptFontSizePx: settings.promptFontSizePx,
+    responseFontSizePx: settings.responseFontSizePx,
     quickActions: cloneQuickActionsSettings(settings.quickActions)
   };
 }
@@ -287,6 +329,15 @@ function isValidDomContentLimit(value: unknown): value is number {
     Number.isInteger(value) &&
     value >= MIN_DOM_CONTENT_LIMIT_CHARACTERS &&
     value <= MAX_DOM_CONTENT_LIMIT_CHARACTERS
+  );
+}
+
+function isValidTranscriptFontSize(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= MIN_TRANSCRIPT_FONT_SIZE_PX &&
+    value <= MAX_TRANSCRIPT_FONT_SIZE_PX
   );
 }
 

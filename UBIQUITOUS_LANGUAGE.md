@@ -9,7 +9,7 @@
 | **Settings Page** | The dedicated extension options page where persistent Sidra configuration is edited. | Settings modal, preferences panel |
 | **Current Page Card** | The persistent side-panel card showing the active page identity and context state for the visible URL session. | Context card, page card, page context card |
 | **Prompt Composer** | The bottom input area where the user writes a prompt and chooses the send mode. | Input box, message box, chat input |
-| **Prompt Options Popover** | The compact composer popover for per-prompt options such as **Send Full DOM**. | Context menu, options menu, settings popover |
+| **Send DOM Toggle** | The inline composer checkbox that switches capture mode from readable content to full DOM. | Prompt options, context menu, settings popover |
 | **Quick Action** | A configured shortcut prompt shown in an empty URL session. | Suggested prompt, canned prompt, shortcut |
 
 ## Sessions and chat lifecycle
@@ -37,7 +37,7 @@
 | **Send** | The send mode that sends only the user prompt unless context is already part of the provider session. | Plain send, chat only |
 | **Page Context** | The structured page data attached to a prompt for provider use. | Context, attachment, page payload |
 | **Readable Content** | Article-like page text extracted by Readability or a text fallback. | Article text, extracted text, readable text |
-| **Full DOM** | The complete DOM capture mode used instead of readable content when **Send Full DOM** is enabled. | DOM context, raw DOM, page HTML |
+| **Full DOM** | The complete DOM capture mode used instead of readable content when **Send DOM** is enabled. | DOM context, raw DOM, page HTML |
 | **Metadata** | Non-content page facts such as URL, canonical URL, title, site name, excerpt, byline, language, text length, and capture timestamp. | Page info, page details |
 | **Metadata-only Context** | Page context containing metadata without readable content or full DOM. | Metadata attached, partial context |
 | **Capture Mode** | The mutually exclusive choice between readable content and full DOM for a capture request. | Context mode, extraction mode |
@@ -106,7 +106,7 @@
 > **Dev:** "When the user clicks **Capture + Send**, do we update every open conversation for that article?"
 > **Domain expert:** "No. The extension recomputes the **Page Key**, finds that **URL Session**, creates **Page Context**, and adds a **Context Marker** only to that session's **Transcript**."
 >
-> **Dev:** "If **Send Full DOM** is enabled, should we include **Readable Content** too?"
+> **Dev:** "If **Send DOM** is enabled, should we include **Readable Content** too?"
 > **Domain expert:** "No. **Full DOM** and **Readable Content** are mutually exclusive **Capture Modes**. The **Page Context** still includes **Metadata**."
 >
 > **Dev:** "What happens when the readable text exceeds the **Content Size Limit**?"

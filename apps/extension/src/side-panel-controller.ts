@@ -18,7 +18,7 @@ import {
   type SidraSettings,
   type SettingsStore
 } from "./settings-store";
-import type { TranscriptEntry } from "./transcript";
+import type { TranscriptEntry, UserPromptDisplay } from "./transcript";
 import { UrlSessionStore, type ContextState, type SendMode } from "./url-session-store";
 
 export type SidePanelSnapshot = {
@@ -28,6 +28,10 @@ export type SidePanelSnapshot = {
     ready: boolean;
     setupError?: string;
     canUseChat: boolean;
+  };
+  display: {
+    promptFontSizePx: number;
+    responseFontSizePx: number;
   };
   activePage: PageIdentity;
   activeSession: {
@@ -197,7 +201,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
   bridgeConnected = connection.getSnapshot().connected;
   refreshSnapshot();
 
-  const captureAndSendCommand = async (prompt: string) => {
+  const captureAndSendCommand = async (prompt: string, userPromptDisplay?: UserPromptDisplay) => {
     const normalizedPrompt = prompt.trim();
     if (!normalizedPrompt) return false;
 
@@ -225,7 +229,8 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       urlSessionStore.selectPage(captureResult.pageIdentity);
       const accepted = urlSessionStore.sendPromptWithContext({
         prompt: normalizedPrompt,
-        pageContext
+        pageContext,
+        userPromptDisplay
       });
       emit();
       return accepted;
@@ -265,7 +270,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       const action = settingsSnapshot.quickActions.actions.find((candidate) => candidate.id === actionId);
       const visible = snapshot.activeSession.quickActions.some((candidate) => candidate.id === actionId);
       if (!action || !visible) return false;
-      return await captureAndSendCommand(action.prompt);
+      return await captureAndSendCommand(action.prompt, { kind: "quick_action", label: action.label });
     },
     cancelTurn: () => {
       const cancelled = urlSessionStore.cancelActiveTurn();
@@ -317,6 +322,10 @@ function createSnapshot(
       ready: bridge.ready,
       setupError: bridge.setupError,
       canUseChat
+    },
+    display: {
+      promptFontSizePx: settings.promptFontSizePx,
+      responseFontSizePx: settings.responseFontSizePx
     },
     activePage,
     activeSession: {

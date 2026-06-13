@@ -43,6 +43,34 @@ describe("transcript reducer", () => {
       ]);
     });
 
+    it("adds_quick_action_user_prompt_entries_with_label_display_metadata", () => {
+      expect(addUserPrompt([], " Full prompt ", undefined, { kind: "quick_action", label: " Summarize " })).toEqual([
+        {
+          kind: "user_message",
+          role: "user",
+          text: "Full prompt",
+          display: { kind: "quick_action", label: "Summarize" }
+        }
+      ]);
+    });
+
+    it("keeps_plain_user_prompt_entries_without_quick_action_metadata", () => {
+      expect(addUserPrompt([], "Plain prompt")).toEqual([
+        { kind: "user_message", role: "user", text: "Plain prompt" }
+      ]);
+    });
+
+    it("trims_quick_action_label_and_prompt_before_storage_in_transcript", () => {
+      expect(addUserPrompt([], " Prompt body ", undefined, { kind: "quick_action", label: " Label " })).toEqual([
+        {
+          kind: "user_message",
+          role: "user",
+          text: "Prompt body",
+          display: { kind: "quick_action", label: "Label" }
+        }
+      ]);
+    });
+
     it("appends_assistant_text_deltas_to_a_streaming_turn", () => {
       const transcript = addAssistantTextDelta(addAssistantTextDelta([], "Hi"), " there");
 

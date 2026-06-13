@@ -2,7 +2,7 @@ import type { PageContext, PermissionDecision } from "@sidra/protocol";
 import type { BridgeSessionCoordinatorSnapshot } from "./bridge/session-coordinator";
 import type { CaptureMode } from "./capture-mode";
 import type { PageIdentity, PageKey } from "./page-key";
-import type { TranscriptEntry } from "./transcript";
+import type { TranscriptEntry, UserPromptDisplay } from "./transcript";
 
 export type ContextState =
   | { status: "none"; label: "No context sent yet" }
@@ -74,7 +74,7 @@ type UrlSessionRecord = {
 export type UrlSessionCoordinator = {
   getSnapshot(): BridgeSessionCoordinatorSnapshot;
   subscribe(listener: () => void): () => void;
-  sendPrompt(input: string | { prompt: string; pageContext?: PageContext }): boolean;
+  sendPrompt(input: string | { prompt: string; pageContext?: PageContext; userPromptDisplay?: UserPromptDisplay }): boolean;
   cancelTurn?(): boolean;
   recordCaptureUnavailable?(message: string): void;
   respondToPermission?(requestId: string, decision: PermissionDecision): boolean;
@@ -199,7 +199,7 @@ export class UrlSessionStore {
     return true;
   }
 
-  sendPromptWithContext(input: { prompt: string; pageContext: PageContext }): boolean {
+  sendPromptWithContext(input: { prompt: string; pageContext: PageContext; userPromptDisplay?: UserPromptDisplay }): boolean {
     const activeRecord = this.getActiveRecord();
     if (!activeRecord) return false;
 

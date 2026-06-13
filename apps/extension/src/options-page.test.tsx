@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+  DEFAULT_PROMPT_FONT_SIZE_PX,
   DEFAULT_QUICK_ACTIONS_SETTINGS,
   DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
+  DEFAULT_RESPONSE_FONT_SIZE_PX,
+  MAX_TRANSCRIPT_FONT_SIZE_PX,
+  MIN_TRANSCRIPT_FONT_SIZE_PX,
   type QuickActionsSettings,
   type SidraSettings,
   type SettingsStore
@@ -156,7 +160,7 @@ describe("OptionsPage quick actions", () => {
     await user.type(label, "Edited");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect((await screen.findByRole("alert")).textContent).toBe("Could not save quick actions.");
+    expect((await screen.findByRole("alert")).textContent).toBe("Could not save settings.");
     expect(screen.getByDisplayValue("Edited")).not.toBeNull();
   });
 
@@ -203,6 +207,102 @@ describe("OptionsPage quick actions", () => {
     expect(await screen.findByDisplayValue("Trimmed")).not.toBeNull();
   });
 
+  it("renders_prompt_and_response_font_size_controls_after_settings_are_ready", async () => {
+    render(<OptionsPageView settingsStore={new FakeSettingsStore({ promptFontSizePx: 14, responseFontSizePx: 18 })} />);
+
+    const promptInput = await screen.findByRole("spinbutton", { name: "Prompt text size" });
+    const responseInput = await screen.findByRole("spinbutton", { name: "Response text size" });
+
+    expect(promptInput).toHaveProperty("value", "14");
+    expect(responseInput).toHaveProperty("value", "18");
+    expect(promptInput).toHaveProperty("min", `${MIN_TRANSCRIPT_FONT_SIZE_PX}`);
+    expect(responseInput).toHaveProperty("max", `${MAX_TRANSCRIPT_FONT_SIZE_PX}`);
+  });
+
+  it("edits_prompt_and_response_font_sizes_from_options_page", async () => {
+    const user = userEvent.setup();
+    const store = new FakeSettingsStore();
+    render(<OptionsPageView settingsStore={store} />);
+
+    fireEvent.change(await screen.findByRole("spinbutton", { name: "Prompt text size" }), { target: { value: "14" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Response text size" }), { target: { value: "18" } });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(store.transcriptFontSizeSaveCalls).toEqual([{ promptFontSizePx: 14, responseFontSizePx: 18 }]);
+    expect(store.saveCalls).toEqual([]);
+  });
+
+  it("does_not_save_invalid_prompt_font_size", async () => {
+    const user = userEvent.setup();
+    const store = new FakeSettingsStore();
+    render(<OptionsPageView settingsStore={store} />);
+
+    const input = await screen.findByRole("spinbutton", { name: "Prompt text size" });
+    fireEvent.change(input, { target: { value: `${MAX_TRANSCRIPT_FONT_SIZE_PX + 1}` } });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(store.transcriptFontSizeSaveCalls).toEqual([]);
+    expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true);
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText(`Enter a whole number from ${MIN_TRANSCRIPT_FONT_SIZE_PX} to ${MAX_TRANSCRIPT_FONT_SIZE_PX}.`)).not.toBeNull();
+  });
+
+  it("does_not_overwrite_unsaved_font_size_when_live_settings_change", async () => {
+    const store = new FakeSettingsStore({ promptFontSizePx: 15, responseFontSizePx: 17 });
+    render(<OptionsPageView settingsStore={store} />);
+
+    const input = await screen.findByRole("spinbutton", { name: "Prompt text size" });
+    fireEvent.change(input, { target: { value: "18" } });
+    store.replaceTranscriptFontSizes({ promptFontSizePx: 20, responseFontSizePx: 21 });
+
+    expect(input).toHaveProperty("value", "18");
+  });
+
+  it("syncs_live_quick_action_changes_when_font_size_has_unsaved_edits", async () => {
+    const store = new FakeSettingsStore({ promptFontSizePx: 15, responseFontSizePx: 17 });
+    render(<OptionsPageView settingsStore={store} />);
+
+    const input = await screen.findByRole("spinbutton", { name: "Prompt text size" });
+    fireEvent.change(input, { target: { value: "18" } });
+    store.replaceQuickActions({
+      enabled: true,
+      actions: [{ id: "external", label: "External", prompt: "External prompt" }]
+    });
+
+    expect(await screen.findByDisplayValue("External")).not.toBeNull();
+    expect(input).toHaveProperty("value", "18");
+  });
+
+  it("disables_font_size_control_while_save_is_in_flight", async () => {
+    const user = userEvent.setup();
+    const store = new FakeSettingsStore();
+    store.holdSave();
+    render(<OptionsPageView settingsStore={store} />);
+
+    const input = await screen.findByRole("spinbutton", { name: "Prompt text size" });
+    fireEvent.change(input, { target: { value: "18" } });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByRole("spinbutton", { name: "Prompt text size" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("spinbutton", { name: "Response text size" })).toHaveProperty("disabled", true);
+    store.resolveSave();
+    await waitFor(() =>
+      expect(store.transcriptFontSizeSaveCalls).toEqual([{ promptFontSizePx: 18, responseFontSizePx: 17 }])
+    );
+  });
+
+  it("resyncs_font_size_from_store_after_successful_save", async () => {
+    const user = userEvent.setup();
+    const store = new FakeSettingsStore();
+    render(<OptionsPageView settingsStore={store} />);
+
+    const input = await screen.findByRole("spinbutton", { name: "Prompt text size" });
+    fireEvent.change(input, { target: { value: "18" } });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByDisplayValue("18")).not.toBeNull();
+  });
+
   describe("settings save feedback", () => {
     it("shows_saving_feedback_and_busy_state_while_quick_action_save_is_in_flight", async () => {
       const user = userEvent.setup();
@@ -241,7 +341,7 @@ describe("OptionsPage quick actions", () => {
       await user.click(screen.getByRole("button", { name: "Save" }));
 
       expect((await screen.findByRole("button", { name: "Save" })).getAttribute("aria-busy")).toBeNull();
-      expect(screen.getByRole("alert").textContent).toBe("Could not save quick actions.");
+      expect(screen.getByRole("alert").textContent).toBe("Could not save settings.");
     });
   });
 
@@ -372,8 +472,11 @@ describe("OptionsPage quick actions", () => {
   });
 });
 
-class FakeSettingsStore implements Pick<SettingsStore, "getSnapshot" | "whenReady" | "subscribe" | "saveQuickActions"> {
+class FakeSettingsStore
+  implements Pick<SettingsStore, "getSnapshot" | "whenReady" | "subscribe" | "saveQuickActions" | "saveTranscriptFontSizesPx">
+{
   readonly saveCalls: QuickActionsSettings[] = [];
+  readonly transcriptFontSizeSaveCalls: Array<{ promptFontSizePx: number; responseFontSizePx: number }> = [];
   nextSaveError: Error | undefined;
   private readonly listeners = new Set<() => void>();
   private snapshot: SidraSettings;
@@ -386,6 +489,8 @@ class FakeSettingsStore implements Pick<SettingsStore, "getSnapshot" | "whenRead
     this.snapshot = {
       readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
       domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+      promptFontSizePx: DEFAULT_PROMPT_FONT_SIZE_PX,
+      responseFontSizePx: DEFAULT_RESPONSE_FONT_SIZE_PX,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       ...overrides
     };
@@ -428,8 +533,27 @@ class FakeSettingsStore implements Pick<SettingsStore, "getSnapshot" | "whenRead
     for (const listener of this.listeners) listener();
   }
 
+  async saveTranscriptFontSizesPx(nextFontSizesPx: {
+    promptFontSizePx: number;
+    responseFontSizePx: number;
+  }): Promise<void> {
+    if (this.nextSaveError) throw this.nextSaveError;
+    if (this.savePromise) await this.savePromise;
+    this.transcriptFontSizeSaveCalls.push(nextFontSizesPx);
+    this.snapshot = {
+      ...this.snapshot,
+      ...nextFontSizesPx
+    };
+    for (const listener of this.listeners) listener();
+  }
+
   replaceQuickActions(nextQuickActions: QuickActionsSettings): void {
     this.snapshot = { ...this.snapshot, quickActions: nextQuickActions };
+    for (const listener of this.listeners) listener();
+  }
+
+  replaceTranscriptFontSizes(nextFontSizesPx: { promptFontSizePx: number; responseFontSizePx: number }): void {
+    this.snapshot = { ...this.snapshot, ...nextFontSizesPx };
     for (const listener of this.listeners) listener();
   }
 

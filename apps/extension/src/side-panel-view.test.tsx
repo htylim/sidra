@@ -26,6 +26,8 @@ type SnapshotOptions = {
   pendingPromptCount?: number;
   turnInFlight?: boolean;
   canCancelTurn?: boolean;
+  promptFontSizePx?: number;
+  responseFontSizePx?: number;
 };
 
 function assistantTurnWithToolActivity(
@@ -91,6 +93,10 @@ function assistantTurnWithWebSearchActivity(): NonNullable<SnapshotOptions["tran
 function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
   return {
     bridge: readyBridge,
+    display: {
+      promptFontSizePx: options.promptFontSizePx ?? 15,
+      responseFontSizePx: options.responseFontSizePx ?? 17
+    },
     activePage: {
       status: "ready",
       pageKey: "https://example.com/article" as PageKey,
@@ -361,6 +367,116 @@ describe("SidePanelView bridge setup", () => {
     expect(markup).toContain("Retry");
     expect(markup).not.toContain("Summarize this page");
     expect(markup).toContain("disabled=\"\"");
+  });
+});
+
+describe("SidePanelView transcript display settings", () => {
+  it("passes_prompt_and_response_font_sizes_to_transcript_view", () => {
+    const markup = renderPageSnapshot(
+      snapshotForPage({
+        promptFontSizePx: 14,
+        responseFontSizePx: 19,
+        transcript: [{ kind: "user_message", role: "user", text: "Hello" }]
+      })
+    );
+
+    expect(markup).toContain("--sidra-prompt-font-size:14px");
+    expect(markup).toContain("--sidra-response-font-size:19px");
+  });
+
+  it("renders_transcript_with_configured_prompt_and_response_font_sizes", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        promptFontSizePx: 14,
+        responseFontSizePx: 18,
+        transcript: [{ kind: "user_message", role: "user", text: "Hello" }]
+      })
+    );
+
+    expect(screen.getByText("Hello").closest(".transcript")?.getAttribute("style")).toContain(
+      "--sidra-prompt-font-size: 14px; --sidra-response-font-size: 18px;"
+    );
+  });
+});
+
+describe("SidePanelView quick-action transcript entries", () => {
+  it("renders_quick_action_user_message_collapsed_by_default", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "user_message",
+            role: "user",
+            text: "Full quick action prompt",
+            display: { kind: "quick_action", label: "Summarize this page" }
+          }
+        ]
+      })
+    );
+
+    const toggle = screen.getByRole("button", { name: "Summarize this page" });
+    expect(toggle).not.toBeNull();
+    expect(toggle.querySelector(".quick-action-user-icon")).not.toBeNull();
+    expect(toggle.querySelector(".quick-action-disclosure-icon")).not.toBeNull();
+    expect(screen.queryByText("Full quick action prompt")).toBeNull();
+  });
+
+  it("expands_quick_action_user_message_to_show_prompt_text", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "user_message",
+            role: "user",
+            text: "Full quick action prompt",
+            display: { kind: "quick_action", label: "Summarize this page" }
+          }
+        ]
+      })
+    );
+
+    const toggle = screen.getByRole("button", { name: "Summarize this page" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    await user.click(toggle);
+
+    const promptText = screen.getByText("Full quick action prompt");
+    expect(promptText).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Summarize this page" }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: "Summarize this page" }).getAttribute("aria-controls")).toBe(promptText.id);
+  });
+
+  it("renders_manual_user_message_without_quick_action_disclosure", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ kind: "user_message", role: "user", text: "Manual prompt" }]
+      })
+    );
+
+    expect(screen.getByText("Manual prompt")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Manual prompt" })).toBeNull();
+  });
+
+  it("escapes_quick_action_prompt_text_when_expanded", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "user_message",
+            role: "user",
+            text: "<img src=x onerror=alert(1)>",
+            display: { kind: "quick_action", label: "Unsafe" }
+          }
+        ]
+      })
+    );
+
+    await user.click(screen.getByRole("button", { name: "Unsafe" }));
+
+    expect(screen.getByText("<img src=x onerror=alert(1)>")).not.toBeNull();
+    expect(document.querySelector("img")).toBeNull();
   });
 });
 
@@ -733,7 +849,7 @@ describe("SidePanelView Capture + Send", () => {
     renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: true }));
 
     expect(screen.getByRole("textbox")).toHaveProperty("disabled", true);
-    expect(screen.getByRole("button", { name: "Prompt options" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("checkbox", { name: "Send DOM" })).toHaveProperty("disabled", true);
   });
 
   it("keeps_cancel_enabled_when_prompt_controls_are_disabled_by_running_turn", () => {
@@ -1680,18 +1796,16 @@ describe("SidePanelView send mode UI", () => {
     expect(screen.getByRole("button", { name: "Choose send mode" })).toHaveProperty("disabled", true);
   });
 
-  it("prompt_options_keep_send_full_dom_without_send_mode_controls", async () => {
-    const user = userEvent.setup();
+  it("renders_inline_send_dom_checkbox_without_prompt_options_button", () => {
     renderInteractiveSnapshot(snapshotForPage());
 
-    await user.click(screen.getByRole("button", { name: "Prompt options" }));
-
-    expect(screen.getByRole("checkbox", { name: "Send Full DOM" })).not.toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Send DOM" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Prompt options" })).toBeNull();
     expect(screen.queryByRole("group", { name: "Send mode" })).toBeNull();
   });
 });
 
-describe("SidePanelView prompt options", () => {
+describe("SidePanelView inline Send DOM option", () => {
   describe("interaction affordances", () => {
     it("adds_title_affordances_to_icon_only_header_buttons", () => {
       renderInteractiveSnapshot(snapshotForPage());
@@ -1699,85 +1813,41 @@ describe("SidePanelView prompt options", () => {
       expect(screen.getByRole("button", { name: "Settings" }).getAttribute("title")).toBe("Settings");
       expect(screen.getByRole("button", { name: "New chat" }).getAttribute("title")).toBe("New chat");
     });
-
-    it("adds_title_affordance_to_prompt_options_button", () => {
-      renderInteractiveSnapshot(snapshotForPage());
-
-      expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("title")).toBe("Prompt options");
-    });
-
-    it("marks_prompt_options_button_open_for_visual_state_when_expanded", async () => {
-      const user = userEvent.setup();
-      renderInteractiveSnapshot(snapshotForPage());
-
-      await user.click(screen.getByRole("button", { name: "Prompt options" }));
-
-      expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("data-state")).toBe("open");
-    });
-
-    it("does_not_mark_prompt_options_button_open_after_closing", async () => {
-      const user = userEvent.setup();
-      renderInteractiveSnapshot(snapshotForPage());
-
-      await user.click(screen.getByRole("button", { name: "Prompt options" }));
-      await user.click(screen.getByRole("button", { name: "Prompt options" }));
-
-      expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("data-state")).toBe("closed");
-    });
   });
 
-  it("opens_a_compact_prompt_options_popover_from_the_composer_button", async () => {
-    const user = userEvent.setup();
-    renderInteractiveSnapshot(snapshotForPage());
-
-    await user.click(screen.getByRole("button", { name: "Prompt options" }));
-
-    expect(screen.getByRole("group", { name: "Prompt options" })).not.toBeNull();
-    expect(screen.getByRole("checkbox", { name: "Send Full DOM" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("aria-expanded")).toBe("true");
-  });
-
-  it("renders_send_full_dom_toggle_off_for_readable_capture_mode", async () => {
-    const user = userEvent.setup();
+  it("renders_inline_send_dom_checkbox_off_for_readable_capture_mode", () => {
     renderInteractiveSnapshot(snapshotForPage({ captureMode: "readable" }));
 
-    await user.click(screen.getByRole("button", { name: "Prompt options" }));
-
-    expect(screen.getByRole("checkbox", { name: "Send Full DOM" })).toHaveProperty("checked", false);
+    expect(screen.getByRole("checkbox", { name: "Send DOM" })).toHaveProperty("checked", false);
   });
 
-  it("renders_send_full_dom_toggle_on_for_full_dom_capture_mode", async () => {
-    const user = userEvent.setup();
+  it("renders_inline_send_dom_checkbox_on_for_full_dom_capture_mode", () => {
     renderInteractiveSnapshot(snapshotForPage({ captureMode: "full_dom" }));
 
-    await user.click(screen.getByRole("button", { name: "Prompt options" }));
-
-    expect(screen.getByRole("checkbox", { name: "Send Full DOM" })).toHaveProperty("checked", true);
+    expect(screen.getByRole("checkbox", { name: "Send DOM" })).toHaveProperty("checked", true);
   });
 
-  it("calls_onCaptureModeChange_with_full_dom_when_toggle_is_enabled", async () => {
+  it("inline_send_dom_checkbox_updates_capture_mode_to_full_dom_when_checked", async () => {
     const user = userEvent.setup();
     const onCaptureModeChange = vi.fn();
     renderInteractiveSnapshot(snapshotForPage(), { onCaptureModeChange });
 
-    await user.click(screen.getByRole("button", { name: "Prompt options" }));
-    await user.click(screen.getByRole("checkbox", { name: "Send Full DOM" }));
+    await user.click(screen.getByRole("checkbox", { name: "Send DOM" }));
 
     expect(onCaptureModeChange).toHaveBeenCalledWith("full_dom");
   });
 
-  it("calls_onCaptureModeChange_with_readable_when_toggle_is_disabled", async () => {
+  it("inline_send_dom_checkbox_updates_capture_mode_to_readable_when_unchecked", async () => {
     const user = userEvent.setup();
     const onCaptureModeChange = vi.fn();
     renderInteractiveSnapshot(snapshotForPage({ captureMode: "full_dom" }), { onCaptureModeChange });
 
-    await user.click(screen.getByRole("button", { name: "Prompt options" }));
-    await user.click(screen.getByRole("checkbox", { name: "Send Full DOM" }));
+    await user.click(screen.getByRole("checkbox", { name: "Send DOM" }));
 
     expect(onCaptureModeChange).toHaveBeenCalledWith("readable");
   });
 
-  it("disables_prompt_options_when_chat_controls_are_disabled", () => {
+  it("disables_inline_send_dom_checkbox_when_chat_controls_are_disabled", () => {
     render(
       <SidePanelView
         snapshot={snapshotForUnsupportedPage()}
@@ -1795,11 +1865,10 @@ describe("SidePanelView prompt options", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Prompt options" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("checkbox", { name: "Send DOM" })).toHaveProperty("disabled", true);
   });
 
-  it("closes_prompt_options_when_chat_controls_become_disabled", async () => {
-    const user = userEvent.setup();
+  it("keeps_inline_send_dom_checkbox_disabled_when_chat_controls_become_disabled", async () => {
     const initialSnapshot = snapshotForPage();
     const renderedView = render(
       <SidePanelView
@@ -1817,9 +1886,6 @@ describe("SidePanelView prompt options", () => {
         onOpenSettings={() => undefined}
       />
     );
-
-    await user.click(screen.getByRole("button", { name: "Prompt options" }));
-    expect(screen.getByRole("checkbox", { name: "Send Full DOM" })).not.toBeNull();
 
     renderedView.rerender(
       <SidePanelView
@@ -1841,67 +1907,15 @@ describe("SidePanelView prompt options", () => {
       />
     );
 
-    expect(screen.queryByRole("checkbox", { name: "Send Full DOM" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Prompt options" })).toHaveProperty("disabled", true);
-    expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("aria-expanded")).toBe("false");
-    expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("data-state")).toBe("closed");
+    expect(screen.getByRole("checkbox", { name: "Send DOM" })).toHaveProperty("disabled", true);
   });
 
-  it("renders_prompt_options_button_closed_immediately_when_disabled_while_open", () => {
-    const initialSnapshot = snapshotForPage();
-    const renderedView = render(
-      <SidePanelView
-        snapshot={initialSnapshot}
-        onSendPrompt={() => false}
-        onCaptureAndSend={() => false}
-        onQuickAction={() => false}
-        onCancelTurn={() => false}
-        onRespondToPermission={() => false}
-        onDraftPromptChange={() => undefined}
-        onCaptureModeChange={() => undefined}
-        onSendModeChange={() => undefined}
-        onNewChat={() => undefined}
-        onRetryBridge={() => undefined}
-        onOpenSettings={() => undefined}
-      />
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Prompt options" }));
-    expect(screen.getByRole("button", { name: "Prompt options" }).getAttribute("data-state")).toBe("open");
-
-    renderedView.rerender(
-      <SidePanelView
-        snapshot={{
-          ...initialSnapshot,
-          bridge: { ...initialSnapshot.bridge, canUseChat: false, availability: { status: "checking", message: "Checking" } }
-        }}
-        onSendPrompt={() => false}
-        onCaptureAndSend={() => false}
-        onQuickAction={() => false}
-        onCancelTurn={() => false}
-        onRespondToPermission={() => false}
-        onDraftPromptChange={() => undefined}
-        onCaptureModeChange={() => undefined}
-        onSendModeChange={() => undefined}
-        onNewChat={() => undefined}
-        onRetryBridge={() => undefined}
-        onOpenSettings={() => undefined}
-      />
-    );
-
-    const promptOptionsButton = screen.getByRole("button", { name: "Prompt options" });
-    expect(promptOptionsButton).toHaveProperty("disabled", true);
-    expect(promptOptionsButton.getAttribute("aria-expanded")).toBe("false");
-    expect(promptOptionsButton.getAttribute("data-state")).toBe("closed");
-  });
-
-  it("does_not_send_prompt_when_only_toggling_full_dom", async () => {
+  it("does_not_send_prompt_when_only_toggling_inline_send_dom", async () => {
     const user = userEvent.setup();
     const onCaptureAndSend = vi.fn(() => true);
     renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "summarize" }), { onCaptureAndSend });
 
-    await user.click(screen.getByRole("button", { name: "Prompt options" }));
-    await user.click(screen.getByRole("checkbox", { name: "Send Full DOM" }));
+    await user.click(screen.getByRole("checkbox", { name: "Send DOM" }));
 
     expect(onCaptureAndSend).not.toHaveBeenCalled();
   });

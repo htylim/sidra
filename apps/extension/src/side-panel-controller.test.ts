@@ -16,6 +16,8 @@ import {
   DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT,
   DEFAULT_QUICK_ACTIONS_SETTINGS,
   DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+  DEFAULT_PROMPT_FONT_SIZE_PX,
+  DEFAULT_RESPONSE_FONT_SIZE_PX,
   type QuickActionsSettings,
   type SidraSettings,
   type SettingsStore
@@ -309,6 +311,8 @@ class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" |
   private resolveReady: (() => void) | undefined;
   private readableContentLimitCharacters: number;
   private domContentLimitCharacters: number;
+  private promptFontSizePx = DEFAULT_PROMPT_FONT_SIZE_PX;
+  private responseFontSizePx = DEFAULT_RESPONSE_FONT_SIZE_PX;
   private quickActions: QuickActionsSettings;
 
   constructor(
@@ -340,6 +344,8 @@ class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" |
     return {
       readableContentLimitCharacters: this.readableContentLimitCharacters,
       domContentLimitCharacters: this.domContentLimitCharacters,
+      promptFontSizePx: this.promptFontSizePx,
+      responseFontSizePx: this.responseFontSizePx,
       quickActions: this.quickActions
     };
   }
@@ -356,6 +362,12 @@ class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" |
 
   setQuickActions(quickActions: QuickActionsSettings): void {
     this.quickActions = quickActions;
+    this.emit();
+  }
+
+  setTranscriptFontSizesPx(fontSizes: { promptFontSizePx: number; responseFontSizePx: number }): void {
+    this.promptFontSizePx = fontSizes.promptFontSizePx;
+    this.responseFontSizePx = fontSizes.responseFontSizePx;
     this.emit();
   }
 
@@ -2370,6 +2382,27 @@ describe("SidePanelController quick actions", () => {
     ]);
   });
 
+  it("snapshot_exposes_default_transcript_font_sizes", async () => {
+    const { controller, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    expect(controller.getSnapshot().display.promptFontSizePx).toBe(DEFAULT_PROMPT_FONT_SIZE_PX);
+    expect(controller.getSnapshot().display.responseFontSizePx).toBe(DEFAULT_RESPONSE_FONT_SIZE_PX);
+  });
+
+  it("updates_transcript_font_sizes_when_settings_change_live", async () => {
+    const settingsStore = new FakeSettingsStore(1_000);
+    const { controller, ports } = createHarnessWithOptions({ settingsStore });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    settingsStore.setTranscriptFontSizesPx({ promptFontSizePx: 14, responseFontSizePx: 19 });
+
+    expect(controller.getSnapshot().display.promptFontSizePx).toBe(14);
+    expect(controller.getSnapshot().display.responseFontSizePx).toBe(19);
+  });
+
   it("does_not_expose_quick_actions_before_initial_settings_load", async () => {
     const settingsStore = new FakeSettingsStore(1_000);
     settingsStore.holdReadiness();
@@ -2413,6 +2446,40 @@ describe("SidePanelController quick actions", () => {
       })
     );
     expect(captureService.captureCalls).toBe(1);
+  });
+
+  it("sendQuickAction_sends_full_prompt_but_marks_transcript_as_quick_action", async () => {
+    const captureService = new FakeCaptureService();
+    const { controller, ports } = createHarnessWithOptions({ captureService });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    await expect(controller.sendQuickAction("summarize-page")).resolves.toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        prompt: DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT
+      })
+    );
+    expect(controller.getSnapshot().activeSession.transcript).toContainEqual(
+      expect.objectContaining({
+        role: "user",
+        text: DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT,
+        display: { kind: "quick_action", label: "Summarize this page" }
+      })
+    );
+  });
+
+  it("visible_quick_actions_still_do_not_expose_prompt_text_or_display_metadata", async () => {
+    const { controller, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    expect(controller.getSnapshot().activeSession.quickActions).toEqual([
+      { id: "summarize-page", label: "Summarize this page" }
+    ]);
   });
 
   it("sendQuickAction_returns_false_for_unknown_or_hidden_action", async () => {

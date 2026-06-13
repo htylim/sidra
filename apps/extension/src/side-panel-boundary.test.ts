@@ -79,14 +79,14 @@ describe("side panel New Chat wiring", () => {
     expect(viewSource).toContain("onClick={props.onNewChat}");
   });
 
-  it("passes_controller_updateCaptureMode_into_the_prompt_options_path", () => {
+  it("passes_controller_updateCaptureMode_into_the_inline_send_dom_path", () => {
     const sidePanelSource = readSource("./side-panel.tsx");
     const viewSource = readSource("./side-panel-view.tsx");
 
     expect(sidePanelSource).toContain("onCaptureModeChange={sidePanelController.updateCaptureMode}");
     expect(viewSource).toContain("onCaptureModeChange(captureMode: CaptureMode): void");
-    expect(viewSource).toContain('aria-label="Prompt options"');
-    expect(viewSource).toContain("Send Full DOM");
+    expect(viewSource).toContain("composer-dom-toggle");
+    expect(viewSource).toContain("Send DOM");
   });
 
   it("passes_controller_quick_action_and_settings_commands_into_the_view", () => {

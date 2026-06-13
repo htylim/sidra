@@ -21,7 +21,6 @@ export function SidePanelView(props: {
   onRetryBridge(): void;
   onOpenSettings(): void;
 }) {
-  const [promptOptionsOpen, setPromptOptionsOpen] = useState(false);
   const [sendModeMenuOpen, setSendModeMenuOpen] = useState(false);
   const bridgeBlocked = props.snapshot.bridge.availability.status !== "ready";
   const pageUnsupported = props.snapshot.activePage.status === "unsupported";
@@ -32,13 +31,11 @@ export function SidePanelView(props: {
   const cancelDisabled = !props.snapshot.activeSession.canCancelTurn;
   const draftPrompt = props.snapshot.activeSession.draftPrompt;
   const sendFullDom = props.snapshot.activeSession.captureMode === "full_dom";
-  const promptOptionsVisible = promptOptionsOpen && !promptEntryDisabled;
   const sendMode = props.snapshot.activeSession.sendMode;
   const sendActionLabel = sendMode === "capture" ? "Capture + Send" : "Send";
 
   useEffect(() => {
     if (promptEntryDisabled) {
-      setPromptOptionsOpen(false);
       setSendModeMenuOpen(false);
     }
   }, [promptEntryDisabled]);
@@ -134,6 +131,8 @@ export function SidePanelView(props: {
         ) : (
           <TranscriptView
             entries={props.snapshot.activeSession.transcript}
+            promptFontSizePx={props.snapshot.display.promptFontSizePx}
+            responseFontSizePx={props.snapshot.display.responseFontSizePx}
             onRespondToPermission={props.onRespondToPermission}
           />
         )}
@@ -153,38 +152,18 @@ export function SidePanelView(props: {
           }}
         />
         <div className="composer-actions">
-          <button
-            type="button"
-            className="options-button"
-            aria-label="Prompt options"
-            title="Prompt options"
-            aria-expanded={promptOptionsVisible}
-            aria-controls="prompt-options-popover"
-            data-state={promptOptionsVisible ? "open" : "closed"}
-            disabled={promptEntryDisabled}
-            onClick={() => {
-              setSendModeMenuOpen(false);
-              setPromptOptionsOpen((open) => !open);
-            }}
-          >
-            <SidraIcon name="settings" />
-          </button>
-          {promptOptionsVisible ? (
-            <div className="prompt-options-popover" id="prompt-options-popover" role="group" aria-label="Prompt options">
-              <label className="prompt-option-toggle">
-                <input
-                  type="checkbox"
-                  checked={sendFullDom}
-                  disabled={promptEntryDisabled}
-                  onChange={(event) => {
-                    if (promptEntryDisabled) return;
-                    props.onCaptureModeChange(event.currentTarget.checked ? "full_dom" : "readable");
-                  }}
-                />
-                <span>Send Full DOM</span>
-              </label>
-            </div>
-          ) : null}
+          <label className="composer-dom-toggle">
+            <input
+              type="checkbox"
+              checked={sendFullDom}
+              disabled={promptEntryDisabled}
+              onChange={(event) => {
+                if (promptEntryDisabled) return;
+                props.onCaptureModeChange(event.currentTarget.checked ? "full_dom" : "readable");
+              }}
+            />
+            <span>Send DOM</span>
+          </label>
           {turnRunning ? (
             <button
               type="button"
@@ -212,7 +191,6 @@ export function SidePanelView(props: {
                 aria-controls="send-mode-menu"
                 disabled={promptEntryDisabled}
                 onClick={() => {
-                  setPromptOptionsOpen(false);
                   setSendModeMenuOpen((open) => !open);
                 }}
               >

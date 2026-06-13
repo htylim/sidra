@@ -94,12 +94,12 @@ The side panel has:
 - Split send button with modes:
   - **Capture + Send**
   - **Send**
+- Inline `Send DOM` checkbox for full DOM capture.
 - Cancel state while an agent response is in flight.
-- Compact prompt-options popover.
 
 Settings live in a separate dedicated extension settings/options page, not inside the side panel. The gear icon opens that page.
 
-Settings changes apply live to the side panel via `chrome.storage.onChanged`.
+Settings include quick actions, prompt text size, and response text size. Prompt text size defaults to `15px`. Response text size defaults to `17px`. Settings changes apply live to the side panel via `chrome.storage.onChanged`.
 
 The visual style should be neutral Sidra branding. The Leo AI screenshot is a conceptual reference only, not a design to copy.
 
@@ -120,9 +120,8 @@ The UI mockups establish these V1 layout details:
 - Truncate long page titles with ellipsis.
 - Show page context status in the card, such as `No context sent yet` or `Context attached`.
 - Empty state should be centered in the chat area with a small chat illustration/icon, a short heading, helper text, and quick actions.
-- The composer should be visually separated at the bottom with a large text area, context/options button on the left, and split send button on the right.
+- The composer should be visually separated at the bottom with a large text area, inline `Send DOM` checkbox on the left, and split send button on the right.
 - The send button should use an icon plus text, such as `Capture + Send` or `Send`.
-- The options button opens a small popover anchored above the composer.
 
 ## Current Page Card
 
@@ -156,24 +155,18 @@ The composer uses a split send button.
 
 The first prompt in a new URL session defaults to `Capture + Send`. After a successful context send, the main button changes to `Send`.
 
-## Prompt Options Popover
+## Composer Capture Option
 
-The prompt options control opens a compact popover. This is a general options surface, not exclusively a context settings surface.
+The composer shows a quiet inline `Send DOM` checkbox.
 
-For V1, the popover contains one capture-content option:
-
-- `Send Full DOM`, default off.
-
-`Send Full DOM` switches the capture mode from readable text to full DOM. Capture mode is mutually exclusive:
+`Send DOM` switches the capture mode from readable text to full DOM. Capture mode is mutually exclusive:
 
 - Off: send readable extracted text plus metadata.
 - On: send full DOM plus metadata.
 
 Sidra should not send both readable text and full DOM in the same capture request.
 
-The DOM size limit is controlled by extension settings, not by the prompt popover.
-
-Future non-V1 options may include provider/model selector, reasoning effort, or other agent options.
+The DOM size limit is controlled by extension settings.
 
 ## Chat Behavior
 
@@ -193,7 +186,7 @@ While a prompt is in flight:
 - The user cannot send another prompt in that URL session.
 - Cancel preserves partial output and marks the turn as cancelled.
 
-Assistant responses render as sanitized Markdown. Links open in a new tab. Code blocks include copy buttons. User prompts are displayed as escaped user text.
+Assistant responses render as sanitized Markdown. Links open in a new tab. Code blocks include copy buttons. Manual user prompts are displayed as escaped user text. Quick-action user prompts display the action label first and can expand to show the full escaped prompt.
 
 Transcript layout:
 
@@ -280,7 +273,7 @@ V1 is optimized for articles and text-heavy pages. Other page types are best eff
 V1 includes optional full DOM capture.
 
 - Default off.
-- Controlled by the prompt-options popover.
+- Controlled by the inline `Send DOM` checkbox.
 - Separate size limit from readable content.
 - If DOM exceeds the configured limit, skip the DOM and show a clear marker.
 - Full DOM and readable text are mutually exclusive capture modes.

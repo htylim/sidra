@@ -3,17 +3,26 @@ import {
   DEFAULT_QUICK_ACTIONS_SETTINGS,
   DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT,
   DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+  DEFAULT_PROMPT_FONT_SIZE_PX,
   DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
+  DEFAULT_RESPONSE_FONT_SIZE_PX,
   MAX_DOM_CONTENT_LIMIT_CHARACTERS,
   MAX_READABLE_CONTENT_LIMIT_CHARACTERS,
+  MAX_TRANSCRIPT_FONT_SIZE_PX,
   MIN_DOM_CONTENT_LIMIT_CHARACTERS,
   MIN_READABLE_CONTENT_LIMIT_CHARACTERS,
+  MIN_TRANSCRIPT_FONT_SIZE_PX,
   SIDRA_SETTINGS_STORAGE_KEY,
   SettingsStore,
   type SettingsStorageArea,
   type SettingsStorageChange,
   type SettingsStorageGateway
 } from "./settings-store";
+
+const DEFAULT_FONT_SIZE_FIELDS = {
+  promptFontSizePx: DEFAULT_PROMPT_FONT_SIZE_PX,
+  responseFontSizePx: DEFAULT_RESPONSE_FONT_SIZE_PX
+};
 
 describe("SettingsStore", () => {
   it("loads_default_readable_content_limit_when_storage_is_empty", async () => {
@@ -24,7 +33,8 @@ describe("SettingsStore", () => {
     expect(store.getSnapshot()).toEqual({
       domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
-      readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS
+      readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
+      ...DEFAULT_FONT_SIZE_FIELDS
     });
   });
 
@@ -40,8 +50,44 @@ describe("SettingsStore", () => {
     expect(store.getSnapshot()).toEqual({
       domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
-      readableContentLimitCharacters: 42_000
+      readableContentLimitCharacters: 42_000,
+      ...DEFAULT_FONT_SIZE_FIELDS
     });
+  });
+
+  it("loads_default_transcript_font_sizes_when_storage_is_empty", async () => {
+    const store = new SettingsStore({ storage: new FakeSettingsStorage() });
+
+    await store.start();
+
+    expect(store.getSnapshot().promptFontSizePx).toBe(DEFAULT_PROMPT_FONT_SIZE_PX);
+    expect(store.getSnapshot().responseFontSizePx).toBe(DEFAULT_RESPONSE_FONT_SIZE_PX);
+  });
+
+  it("loads_stored_transcript_font_sizes_when_valid", async () => {
+    const store = new SettingsStore({
+      storage: new FakeSettingsStorage({
+        [SIDRA_SETTINGS_STORAGE_KEY]: { promptFontSizePx: 14, responseFontSizePx: 18 }
+      })
+    });
+
+    await store.start();
+
+    expect(store.getSnapshot().promptFontSizePx).toBe(14);
+    expect(store.getSnapshot().responseFontSizePx).toBe(18);
+  });
+
+  it("uses_legacy_transcript_font_size_for_prompt_and_response_when_split_sizes_are_missing", async () => {
+    const store = new SettingsStore({
+      storage: new FakeSettingsStorage({
+        [SIDRA_SETTINGS_STORAGE_KEY]: { transcriptFontSizePx: 18 }
+      })
+    });
+
+    await store.start();
+
+    expect(store.getSnapshot().promptFontSizePx).toBe(18);
+    expect(store.getSnapshot().responseFontSizePx).toBe(18);
   });
 
   it("loads_default_dom_content_limit_when_storage_is_empty", async () => {
@@ -64,7 +110,8 @@ describe("SettingsStore", () => {
     expect(store.getSnapshot()).toEqual({
       domContentLimitCharacters: 222_000,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
-      readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS
+      readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
+      ...DEFAULT_FONT_SIZE_FIELDS
     });
   });
 
@@ -75,9 +122,13 @@ describe("SettingsStore", () => {
     const snapshot = store.getSnapshot();
     snapshot.readableContentLimitCharacters = 1;
     snapshot.domContentLimitCharacters = 1;
+    snapshot.promptFontSizePx = 1;
+    snapshot.responseFontSizePx = 1;
 
     expect(store.getSnapshot().readableContentLimitCharacters).toBe(DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS);
     expect(store.getSnapshot().domContentLimitCharacters).toBe(DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS);
+    expect(store.getSnapshot().promptFontSizePx).toBe(DEFAULT_PROMPT_FONT_SIZE_PX);
+    expect(store.getSnapshot().responseFontSizePx).toBe(DEFAULT_RESPONSE_FONT_SIZE_PX);
   });
 
   it("ignores_invalid_readable_content_limit_and_keeps_default", async () => {
@@ -124,6 +175,23 @@ describe("SettingsStore", () => {
     }
   });
 
+  it("ignores_invalid_transcript_font_sizes_and_keeps_defaults", async () => {
+    const invalidValues = [undefined, "15", 12.5, MIN_TRANSCRIPT_FONT_SIZE_PX - 1, MAX_TRANSCRIPT_FONT_SIZE_PX + 1];
+
+    for (const value of invalidValues) {
+      const store = new SettingsStore({
+        storage: new FakeSettingsStorage({
+          [SIDRA_SETTINGS_STORAGE_KEY]: { promptFontSizePx: value, responseFontSizePx: value }
+        })
+      });
+
+      await store.start();
+
+      expect(store.getSnapshot().promptFontSizePx).toBe(DEFAULT_PROMPT_FONT_SIZE_PX);
+      expect(store.getSnapshot().responseFontSizePx).toBe(DEFAULT_RESPONSE_FONT_SIZE_PX);
+    }
+  });
+
   it("keeps_valid_readable_limit_when_dom_limit_is_invalid", async () => {
     const store = new SettingsStore({
       storage: new FakeSettingsStorage({
@@ -139,7 +207,8 @@ describe("SettingsStore", () => {
     expect(store.getSnapshot()).toEqual({
       domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
-      readableContentLimitCharacters: 42_000
+      readableContentLimitCharacters: 42_000,
+      ...DEFAULT_FONT_SIZE_FIELDS
     });
   });
 
@@ -158,7 +227,8 @@ describe("SettingsStore", () => {
     expect(store.getSnapshot()).toEqual({
       domContentLimitCharacters: 222_000,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
-      readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS
+      readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
+      ...DEFAULT_FONT_SIZE_FIELDS
     });
   });
 
@@ -227,6 +297,29 @@ describe("SettingsStore", () => {
     );
 
     expect(store.getSnapshot().domContentLimitCharacters).toBe(444_000);
+    expect(notificationCount).toBe(1);
+  });
+
+  it("applies_live_transcript_font_size_changes_from_local_storage", async () => {
+    const storage = new FakeSettingsStorage();
+    const store = new SettingsStore({ storage });
+    let notificationCount = 0;
+    store.subscribe(() => {
+      notificationCount += 1;
+    });
+    await store.start();
+
+    storage.emitChange(
+      {
+        [SIDRA_SETTINGS_STORAGE_KEY]: {
+          newValue: { promptFontSizePx: 14, responseFontSizePx: 19 }
+        }
+      },
+      "local"
+    );
+
+    expect(store.getSnapshot().promptFontSizePx).toBe(14);
+    expect(store.getSnapshot().responseFontSizePx).toBe(19);
     expect(notificationCount).toBe(1);
   });
 
@@ -302,7 +395,8 @@ describe("SettingsStore", () => {
     expect(store.getSnapshot()).toEqual({
       readableContentLimitCharacters: 4_000,
       domContentLimitCharacters: 444_000,
-      quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS
+      quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
+      ...DEFAULT_FONT_SIZE_FIELDS
     });
   });
 
@@ -483,6 +577,7 @@ describe("SettingsStore", () => {
         [SIDRA_SETTINGS_STORAGE_KEY]: {
           readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
           domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+          ...DEFAULT_FONT_SIZE_FIELDS,
           quickActions: {
             enabled: false,
             actions: [{ id: "custom", label: "Custom", prompt: "Prompt" }]
@@ -534,6 +629,79 @@ describe("SettingsStore", () => {
       domContentLimitCharacters: 6_000,
       quickActions: { enabled: true, actions: [] }
     });
+  });
+
+  it("writes_transcript_font_sizes_to_storage", async () => {
+    const storage = new FakeSettingsStorage();
+    const store = new SettingsStore({ storage });
+    await store.start();
+
+    await store.saveTranscriptFontSizesPx({ promptFontSizePx: 14, responseFontSizePx: 18 });
+
+    expect(storage.setCalls).toEqual([
+      {
+        [SIDRA_SETTINGS_STORAGE_KEY]: {
+          readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
+          domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+          promptFontSizePx: 14,
+          responseFontSizePx: 18,
+          quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS
+        }
+      }
+    ]);
+  });
+
+  it("saving_transcript_font_sizes_preserves_existing_capture_limits_and_quick_actions", async () => {
+    const storage = new FakeSettingsStorage({
+      [SIDRA_SETTINGS_STORAGE_KEY]: {
+        readableContentLimitCharacters: 5_000,
+        domContentLimitCharacters: 6_000,
+        quickActions: { enabled: false, actions: [{ id: "explain", label: "Explain", prompt: "Explain this" }] }
+      }
+    });
+    const store = new SettingsStore({ storage });
+    await store.start();
+
+    await store.saveTranscriptFontSizesPx({ promptFontSizePx: 14, responseFontSizePx: 19 });
+
+    expect(storage.storedSnapshot()[SIDRA_SETTINGS_STORAGE_KEY]).toMatchObject({
+      readableContentLimitCharacters: 5_000,
+      domContentLimitCharacters: 6_000,
+      promptFontSizePx: 14,
+      responseFontSizePx: 19,
+      quickActions: { enabled: false, actions: [{ id: "explain", label: "Explain", prompt: "Explain this" }] }
+    });
+  });
+
+  it("saving_quick_actions_preserves_existing_transcript_font_sizes", async () => {
+    const storage = new FakeSettingsStorage({
+      [SIDRA_SETTINGS_STORAGE_KEY]: {
+        promptFontSizePx: 14,
+        responseFontSizePx: 19
+      }
+    });
+    const store = new SettingsStore({ storage });
+    await store.start();
+
+    await store.saveQuickActions({ enabled: true, actions: [] });
+
+    expect(storage.storedSnapshot()[SIDRA_SETTINGS_STORAGE_KEY]).toMatchObject({
+      promptFontSizePx: 14,
+      responseFontSizePx: 19,
+      quickActions: { enabled: true, actions: [] }
+    });
+  });
+
+  it("returns_snapshots_that_cannot_mutate_transcript_font_size_state", async () => {
+    const store = new SettingsStore({ storage: new FakeSettingsStorage() });
+    await store.start();
+
+    const snapshot = store.getSnapshot();
+    snapshot.promptFontSizePx = 22;
+    snapshot.responseFontSizePx = 22;
+
+    expect(store.getSnapshot().promptFontSizePx).toBe(DEFAULT_PROMPT_FONT_SIZE_PX);
+    expect(store.getSnapshot().responseFontSizePx).toBe(DEFAULT_RESPONSE_FONT_SIZE_PX);
   });
 
   it("default_summarize_quick_action_prompt_matches_the_prd_literal", () => {
