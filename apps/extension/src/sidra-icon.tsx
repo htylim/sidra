@@ -1,14 +1,17 @@
-import { AlertTriangle, Check, ChevronDown, FileText, Plus, Settings, Sparkles } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Copy, FileText, Pause, Play, Plus, Settings, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-export type IconName = "alert" | "check" | "chevron-down" | "file-text" | "plus" | "settings" | "sparkle";
+export type IconName = "alert" | "check" | "chevron-down" | "copy" | "file-text" | "pause" | "play" | "plus" | "settings" | "sparkle";
 
 export function SidraIcon(props: { name: IconName; className?: string }) {
   const IconByName: Record<IconName, LucideIcon> = {
     alert: AlertTriangle,
     check: Check,
     "chevron-down": ChevronDown,
+    copy: Copy,
     "file-text": FileText,
+    pause: Pause,
+    play: Play,
     plus: Plus,
     settings: Settings,
     sparkle: Sparkles

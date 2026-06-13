@@ -35,6 +35,7 @@ function SidePanel() {
       onNewChat={sidePanelController.newChat}
       onRetryBridge={sidePanelController.retryBridge}
       onOpenSettings={sidePanelController.openSettings}
+      onToggleSpeechForTranscriptEntry={sidePanelController.toggleSpeechForTranscriptEntry}
     />
   );
 }

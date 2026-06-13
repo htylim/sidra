@@ -1,0 +1,1005 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transcript Bubble Text To Speech Implementation Plan</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --line: #8a8a8a66;
+      --muted: #666;
+      --accent: #0f766e;
+      --warn: #b45309;
+      --bg-soft: #f6f8f7;
+    }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+    header, main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      margin-top: 16px;
+    }
+    nav a {
+      color: var(--accent);
+    }
+    section, article {
+      border-top: 1px solid var(--line);
+      padding-block: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-block: 12px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px;
+      vertical-align: top;
+      text-align: left;
+    }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.95em;
+    }
+    pre {
+      overflow-x: auto;
+      padding: 12px;
+      border: 1px solid var(--line);
+      background: var(--bg-soft);
+    }
+    .meta, .muted, figcaption, .evidence {
+      color: var(--muted);
+    }
+    .phase-status, .checklist label {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+    }
+    .evidence {
+      display: block;
+      margin-left: 24px;
+    }
+    .callout {
+      border-left: 4px solid var(--accent);
+      padding-left: 12px;
+      margin-block: 12px;
+    }
+    .warning {
+      border-left-color: var(--warn);
+    }
+    .command-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 2px 8px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+    svg {
+      width: 100%;
+      max-width: 760px;
+      height: auto;
+    }
+    @media print {
+      button, nav { display: none; }
+      body { color: #000; background: #fff; }
+      a { color: #000; }
+    }
+  </style>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      document.querySelectorAll("[data-copy-target]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const target = document.querySelector(button.dataset.copyTarget);
+          if (!target || !navigator.clipboard) return;
+          try {
+            await navigator.clipboard.writeText(target.textContent.trim());
+          } catch {
+            // The plan remains usable without clipboard access.
+          }
+        });
+      });
+    });
+  </script>
+</head>
+<body>
+  <header>
+    <p class="meta">Implementation Plan</p>
+    <h1>Transcript Bubble Text To Speech</h1>
+    <p>
+      Add a hover and keyboard-focus playback button to Sidra transcript bubbles so the user can listen to a
+      user prompt or completed assistant response without reading it.
+    </p>
+    <nav aria-label="Spec sections">
+      <a href="#overview">Overview</a>
+      <a href="#current-state">Current State</a>
+      <a href="#research">Research</a>
+      <a href="#desired-state">Desired State</a>
+      <a href="#approach">Approach</a>
+      <a href="#phase-1">Phase 1</a>
+      <a href="#phase-2">Phase 2</a>
+      <a href="#phase-3">Phase 3</a>
+      <a href="#phase-4">Phase 4</a>
+      <a href="#testing-strategy">Testing</a>
+      <a href="#references">References</a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="overview">
+      <h2>Overview</h2>
+      <p>
+        V1 uses Chrome's native <code>chrome.tts</code> extension API. This avoids API keys, separate billing,
+        network latency, provider secrets, and bridge/protocol changes. Hosted TTS providers stay out of scope for V1.
+      </p>
+      <p>
+        The feature belongs in <code>apps/extension</code>. Transcript text already exists in the extension snapshot,
+        and native speech is browser-side UI behavior over that text.
+      </p>
+    </section>
+
+    <section id="current-state">
+      <h2>Current State Analysis</h2>
+      <ul>
+        <li>
+          <code>apps/extension</code> owns side panel rendering and browser-side application state:
+          <code>docs/ARCHITECTURE.md:9</code>.
+        </li>
+        <li>
+          <code>SidePanelView</code> receives a derived snapshot and passes transcript entries into
+          <code>TranscriptView</code>: <code>apps/extension/src/side-panel-view.tsx:110</code>.
+        </li>
+        <li>
+          <code>TranscriptView</code> renders user messages and assistant turns:
+          <code>apps/extension/src/transcript-view.tsx:21</code>,
+          <code>apps/extension/src/transcript-view.tsx:81</code>,
+          <code>apps/extension/src/transcript-view.tsx:117</code>.
+        </li>
+        <li>
+          User messages and assistant turns already carry plain text suitable for speech:
+          <code>apps/extension/src/transcript.ts:19</code>,
+          <code>apps/extension/src/transcript.ts:31</code>.
+        </li>
+        <li>
+          Current transcript bubble CSS is local to <code>styles.css</code>:
+          <code>apps/extension/src/styles.css:333</code>.
+        </li>
+        <li>
+          Current boundary tests forbid browser API usage in React view files:
+          <code>apps/extension/src/side-panel-boundary.test.ts:27</code>.
+        </li>
+        <li>
+          The manifest does not declare <code>tts</code> yet:
+          <code>apps/extension/public/manifest.json:8</code>.
+        </li>
+      </ul>
+    </section>
+
+    <section id="research">
+      <h2>Research</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Option</th>
+            <th>Fit</th>
+            <th>Cost and access</th>
+            <th>Decision</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>chrome.tts</code></td>
+            <td>Best fit for V1. Extension API. Supports speak, stop, queueing, language, rate, events.</td>
+            <td>No separate account, no OpenAI API key, no network billing.</td>
+            <td>Use for V1.</td>
+          </tr>
+          <tr>
+            <td><code>window.speechSynthesis</code></td>
+            <td>Works in web pages, but less extension-specific than <code>chrome.tts</code>.</td>
+            <td>No separate account.</td>
+            <td>Do not use while <code>chrome.tts</code> is available.</td>
+          </tr>
+          <tr>
+            <td>OpenAI Speech API</td>
+            <td>Good hosted TTS quality. Uses <code>POST /v1/audio/speech</code> and <code>gpt-4o-mini-tts</code>.</td>
+            <td>OpenAI APIs are billed separately from ChatGPT plans. Needs API key and billing.</td>
+            <td>Defer to later provider work.</td>
+          </tr>
+          <tr>
+            <td>Realtime voice</td>
+            <td>Built for live voice agents. Too much state and transport for reading one bubble.</td>
+            <td>Separate API billing and realtime session complexity.</td>
+            <td>Out of scope.</td>
+          </tr>
+          <tr>
+            <td>ElevenLabs, Amazon Polly, Google Cloud TTS</td>
+            <td>Common hosted TTS options, useful if native quality is not enough.</td>
+            <td>Each needs provider account, billing, secrets, and network handling.</td>
+            <td>Out of scope for V1.</td>
+          </tr>
+        </tbody>
+      </table>
+      <details>
+        <summary>Provider notes</summary>
+        <ul>
+          <li>OpenAI's text-to-speech guide recommends <code>gpt-4o-mini-tts</code> as the newest reliable TTS model.</li>
+          <li>OpenAI's audio guide separates bounded request-based TTS from realtime voice sessions.</li>
+          <li>OpenAI API pricing FAQ states APIs are billed separately from ChatGPT Plus, Business, Enterprise, and Edu. Pro is a ChatGPT plan and should be treated the same product boundary for Sidra API usage.</li>
+          <li>Provider TTS must not put an API key in the extension UI. It would require a bridge-owned or local-secret-backed provider boundary.</li>
+        </ul>
+      </details>
+    </section>
+
+    <section id="desired-state">
+      <h2>Desired End State</h2>
+      <ol>
+        <li>Hovering a speakable transcript bubble reveals an icon button.</li>
+        <li>Keyboard focus can reach the same button, and focus makes the button visible.</li>
+        <li>Clicking the button speaks that bubble's text through native Chrome TTS.</li>
+        <li>Clicking a different bubble stops current speech and starts the selected bubble.</li>
+        <li>Clicking the active bubble's button stops speech.</li>
+        <li>User message bubbles are speakable.</li>
+        <li>Completed, failed, or cancelled assistant response bubbles with visible text are speakable.</li>
+        <li>Streaming assistant responses are not speakable until the response stops changing.</li>
+        <li>Status cards, permission cards, activity details, and empty assistant turns are not speakable in V1.</li>
+        <li>Quick-action user messages speak the full prompt text, not just the collapsed label.</li>
+        <li>Speech stops on New Chat, active page change, side panel unload, and controller shutdown.</li>
+        <li>No OpenAI API, no hosted TTS provider, and no bridge/protocol changes are added in V1.</li>
+      </ol>
+
+      <h3>Behavior Matrix</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Scenario</th>
+            <th>Expected behavior</th>
+            <th>Named test</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>B1</td>
+            <td>Plain user message bubble</td>
+            <td>Shows listen button and speaks user text.</td>
+            <td><code>clicking_user_message_listen_button_speaks_user_text</code></td>
+          </tr>
+          <tr>
+            <td>B2</td>
+            <td>Quick-action user message</td>
+            <td>Shows listen button and speaks stored prompt text.</td>
+            <td><code>quick_action_user_message_listen_reads_full_prompt_text</code></td>
+          </tr>
+          <tr>
+            <td>B3</td>
+            <td>Complete assistant response with text</td>
+            <td>Shows listen button and speaks plain assistant text.</td>
+            <td><code>clicking_complete_assistant_listen_button_speaks_assistant_text</code></td>
+          </tr>
+          <tr>
+            <td>B4</td>
+            <td>Streaming assistant response</td>
+            <td>No listen button until the turn is terminal.</td>
+            <td><code>does_not_render_listen_button_for_streaming_assistant_response</code></td>
+          </tr>
+          <tr>
+            <td>B5</td>
+            <td>Empty assistant response</td>
+            <td>No listen button.</td>
+            <td><code>does_not_render_listen_button_for_empty_assistant_response</code></td>
+          </tr>
+          <tr>
+            <td>B6</td>
+            <td>Status or permission entry</td>
+            <td>No listen button in V1.</td>
+            <td><code>does_not_render_listen_button_for_status_or_permission_entries</code></td>
+          </tr>
+          <tr>
+            <td>B7</td>
+            <td>Same entry is already speaking</td>
+            <td>Button becomes stop control and stops current speech.</td>
+            <td><code>clicking_active_message_button_stops_speech</code></td>
+          </tr>
+          <tr>
+            <td>B8</td>
+            <td>Another entry starts speaking</td>
+            <td>Current speech stops and new entry starts.</td>
+            <td><code>stops_existing_speech_before_starting_next_entry</code></td>
+          </tr>
+          <tr>
+            <td>B9</td>
+            <td>TTS error event</td>
+            <td>State records an error without crashing the side panel.</td>
+            <td><code>reports_speech_errors_without_throwing</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="out-of-scope">
+      <h2>What We're NOT Doing</h2>
+      <ul>
+        <li>No OpenAI TTS integration.</li>
+        <li>No ElevenLabs, Amazon Polly, Google Cloud, or other hosted provider.</li>
+        <li>No API key UI, secret storage, or local credential flow.</li>
+        <li>No bridge protocol changes.</li>
+        <li>No TTS settings page for voice, rate, pitch, or provider selection.</li>
+        <li>No automatic reading of every assistant response.</li>
+        <li>No live reading of streaming deltas.</li>
+        <li>No transcript persistence changes.</li>
+      </ul>
+    </section>
+
+    <section id="approach">
+      <h2>Implementation Approach</h2>
+      <p>
+        Add a small browser-side speech boundary under <code>apps/extension/src/transcript-speech.ts</code>.
+        It wraps <code>chrome.tts</code>, exposes an application-level interface, owns speech state, and hides
+        event ordering details from React.
+      </p>
+      <p>
+        Integrate that boundary into <code>SidePanelController</code>. The React view receives speech state and
+        intent callbacks, but it does not call <code>chrome.tts</code> or read browser APIs directly.
+      </p>
+      <p>
+        Render a stable icon button inside speakable transcript bubbles. CSS reveals the button on hover and
+        focus-within. The button is always present in the DOM for keyboard and screen reader access.
+      </p>
+    </section>
+
+    <section id="visual-map" aria-labelledby="visual-map-title">
+      <h2 id="visual-map-title">Visual Map</h2>
+      <figure>
+        <svg role="img" aria-labelledby="diagram-title diagram-desc" viewBox="0 0 760 190">
+          <title id="diagram-title">Transcript speech data flow</title>
+          <desc id="diagram-desc">
+            Transcript entries flow from SidePanelController to SidePanelView and TranscriptView. User clicks flow back to the controller, then to TranscriptSpeechController, then to chrome.tts.
+          </desc>
+          <rect x="20" y="60" width="150" height="60" rx="6" fill="none" stroke="currentColor"></rect>
+          <text x="95" y="88" text-anchor="middle">Transcript</text>
+          <text x="95" y="108" text-anchor="middle">entries</text>
+
+          <path d="M175 90 H250" stroke="currentColor" fill="none"></path>
+          <path d="M250 90 l-10 -6 v12 z" fill="currentColor"></path>
+
+          <rect x="260" y="60" width="150" height="60" rx="6" fill="none" stroke="currentColor"></rect>
+          <text x="335" y="88" text-anchor="middle">TranscriptView</text>
+          <text x="335" y="108" text-anchor="middle">listen button</text>
+
+          <path d="M415 90 H490" stroke="currentColor" fill="none"></path>
+          <path d="M490 90 l-10 -6 v12 z" fill="currentColor"></path>
+
+          <rect x="500" y="60" width="150" height="60" rx="6" fill="none" stroke="currentColor"></rect>
+          <text x="575" y="88" text-anchor="middle">SidePanel</text>
+          <text x="575" y="108" text-anchor="middle">Controller</text>
+
+          <path d="M575 125 V155 H250 V125" stroke="currentColor" fill="none"></path>
+          <path d="M250 125 l-6 10 h12 z" fill="currentColor"></path>
+          <text x="410" y="150" text-anchor="middle">speech snapshot</text>
+
+          <path d="M655 90 H720" stroke="currentColor" fill="none"></path>
+          <path d="M720 90 l-10 -6 v12 z" fill="currentColor"></path>
+          <text x="690" y="78" text-anchor="middle">speak</text>
+          <text x="720" y="108" text-anchor="middle">chrome.tts</text>
+        </svg>
+        <figcaption>
+          React renders transcript controls and emits intents. The controller owns speech state and calls the native
+          TTS gateway.
+        </figcaption>
+      </figure>
+    </section>
+
+    <article id="phase-1">
+      <h2>Phase 1: Native Transcript Speech Boundary</h2>
+      <label class="phase-status"><input type="checkbox" disabled> Phase complete</label>
+
+      <h3>Overview</h3>
+      <p>
+        Add the <code>tts</code> manifest permission, TypeScript declarations, and a tested
+        <code>TranscriptSpeechController</code> that wraps <code>chrome.tts</code>.
+      </p>
+
+      <h3>Why This Phase Can Be Validated Independently</h3>
+      <p>
+        This phase can be proven with fake <code>chrome.tts</code> gateways. It does not need React or the bridge.
+      </p>
+
+      <h3>Changes Required</h3>
+      <aside class="callout">
+        <p><strong>TDD ordering:</strong> Add tests first. Confirm they fail before adding the implementation.</p>
+      </aside>
+
+      <h4>1. Tests (RED)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Test name</th>
+            <th>What it proves</th>
+            <th>Behavior covered</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>apps/extension/src/manifest.test.ts</code></td>
+            <td><code>declares_tts_permission_for_transcript_playback</code></td>
+            <td>The extension can call <code>chrome.tts</code>.</td>
+            <td>Manifest requirement.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/transcript-speech.test.ts</code></td>
+            <td><code>starts_speaking_trimmed_message_text</code></td>
+            <td>Non-empty transcript text is sent to the TTS gateway.</td>
+            <td>B1, B3.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/transcript-speech.test.ts</code></td>
+            <td><code>does_not_start_speech_for_blank_text</code></td>
+            <td>Blank text is ignored.</td>
+            <td>B5.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/transcript-speech.test.ts</code></td>
+            <td><code>stops_existing_speech_before_starting_next_entry</code></td>
+            <td>New playback replaces old playback.</td>
+            <td>B8.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/transcript-speech.test.ts</code></td>
+            <td><code>marks_matching_entry_as_speaking_until_final_event</code></td>
+            <td>Speech state tracks the active entry and returns to idle on final event.</td>
+            <td>B7.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/transcript-speech.test.ts</code></td>
+            <td><code>ignores_stale_final_events_from_interrupted_speech</code></td>
+            <td>Old events cannot clear newer speech state.</td>
+            <td>B8.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/transcript-speech.test.ts</code></td>
+            <td><code>reports_speech_errors_without_throwing</code></td>
+            <td>Error events become safe snapshot state.</td>
+            <td>B9.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/transcript-speech.test.ts</code></td>
+            <td><code>stop_returns_to_idle_and_calls_gateway_stop</code></td>
+            <td>Stop command clears state and calls <code>chrome.tts.stop</code>.</td>
+            <td>B7.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/transcript-speech.test.ts</code></td>
+            <td><code>shutdown_stops_speech_and_prevents_late_events</code></td>
+            <td>Unmount cleanup is safe.</td>
+            <td>Lifecycle.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>2. Implementation (GREEN)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Change</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>apps/extension/public/manifest.json</code></td>
+            <td>Add <code>tts</code> to <code>permissions</code>.</td>
+            <td>Chrome requires the permission for the extension TTS API.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/chrome.d.ts</code></td>
+            <td>Add minimal <code>chrome.tts</code> types for <code>speak</code>, <code>stop</code>, events, and options.</td>
+            <td>Keep browser API usage typed without pulling extra dependencies.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/transcript-speech.ts</code></td>
+            <td>Create <code>TranscriptSpeechController</code>, <code>TranscriptSpeechSnapshot</code>, gateway types, and <code>createChromeTranscriptSpeechController()</code>.</td>
+            <td>Hide native TTS sequencing and event handling from React.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/transcript-speech.test.ts</code></td>
+            <td>Add fake gateway tests listed above.</td>
+            <td>Protect lifecycle and stale-event behavior.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Success Criteria</h3>
+      <h4>Automated Verification</h4>
+      <ul class="checklist">
+        <li>
+          <label><input type="checkbox" disabled> Phase-1 tests fail before implementation:
+            <code id="phase-1-red">pnpm --filter @sidra/extension test -- src/transcript-speech.test.ts src/manifest.test.ts -t "transcript speech|tts"</code>
+          </label>
+          <button type="button" data-copy-target="#phase-1-red">Copy</button>
+          <span class="evidence">Actual: pending.</span>
+        </li>
+        <li>
+          <label><input type="checkbox" disabled> Phase-1 tests pass after implementation:
+            <code id="phase-1-green">pnpm --filter @sidra/extension test -- src/transcript-speech.test.ts src/manifest.test.ts -t "transcript speech|tts"</code>
+          </label>
+          <button type="button" data-copy-target="#phase-1-green">Copy</button>
+          <span class="evidence">Actual: pending.</span>
+        </li>
+        <li><label><input type="checkbox" disabled> Extension type checking passes: <code>pnpm --filter @sidra/extension check</code></label><span class="evidence">Actual: pending.</span></li>
+      </ul>
+
+      <h4>Manual Verification</h4>
+      <ul class="checklist">
+        <li><label><input type="checkbox" disabled> Not required in this phase. Native TTS is covered by fake gateway tests here.</label></li>
+      </ul>
+    </article>
+
+    <article id="phase-2">
+      <h2>Phase 2: Side Panel Speech Commands</h2>
+      <label class="phase-status"><input type="checkbox" disabled> Phase complete</label>
+
+      <h3>Overview</h3>
+      <p>
+        Integrate the speech boundary into <code>SidePanelController</code> so the view gets application-level
+        commands and speech state without direct browser API access.
+      </p>
+
+      <h3>Why This Phase Can Be Validated Independently</h3>
+      <p>
+        Controller tests can use a fake speech controller and prove snapshot state plus lifecycle stop behavior.
+      </p>
+
+      <h3>Changes Required</h3>
+      <aside class="callout">
+        <p><strong>TDD ordering:</strong> Add controller tests first. Confirm RED before implementation.</p>
+      </aside>
+
+      <h4>1. Tests (RED)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Test name</th>
+            <th>What it proves</th>
+            <th>Behavior covered</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.test.ts</code></td>
+            <td><code>includes_idle_transcript_speech_snapshot_by_default</code></td>
+            <td>Speech state is visible in <code>SidePanelSnapshot</code>.</td>
+            <td>Snapshot contract.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.test.ts</code></td>
+            <td><code>speakTranscriptEntry_sends_text_to_transcript_speech_boundary</code></td>
+            <td>Controller exposes a speak command backed by the speech boundary.</td>
+            <td>B1, B3.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.test.ts</code></td>
+            <td><code>stopTranscriptSpeech_stops_active_speech</code></td>
+            <td>Controller exposes stop command.</td>
+            <td>B7.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.test.ts</code></td>
+            <td><code>newChat_stops_active_transcript_speech</code></td>
+            <td>New Chat stops current audio.</td>
+            <td>Lifecycle.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.test.ts</code></td>
+            <td><code>active_page_change_stops_active_transcript_speech</code></td>
+            <td>Switching page sessions stops current audio.</td>
+            <td>Lifecycle.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.test.ts</code></td>
+            <td><code>shutdown_stops_transcript_speech</code></td>
+            <td>Panel shutdown stops native speech.</td>
+            <td>Lifecycle.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-boundary.test.ts</code></td>
+            <td><code>keeps_transcript_speech_browser_api_usage_out_of_react_views</code></td>
+            <td>React view files do not call <code>chrome.tts</code>.</td>
+            <td>Architecture boundary.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>2. Implementation (GREEN)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Change</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.ts</code></td>
+            <td>Add <code>transcriptSpeech</code> to controller options, add speech snapshot to <code>SidePanelSnapshot</code>, and add <code>speakTranscriptEntry</code> plus <code>stopTranscriptSpeech</code>.</td>
+            <td>The controller already exposes application commands to the side panel.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.ts</code></td>
+            <td>Call <code>transcriptSpeech.stop()</code> on New Chat, active page change, and shutdown.</td>
+            <td>Audio must not leak across sessions or panel lifecycle.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.ts</code></td>
+            <td>Wire <code>createChromeTranscriptSpeechController()</code> in <code>createChromeSidePanelController()</code>.</td>
+            <td>Keep Chrome-backed dependencies at the application boundary.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel.tsx</code></td>
+            <td>Pass speech snapshot and controller commands into <code>SidePanelView</code>.</td>
+            <td>Entry point remains thin and does not call browser TTS directly.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-boundary.test.ts</code></td>
+            <td>Update boundary assertions for <code>chrome.tts</code> ownership.</td>
+            <td>Prevent future browser API drift into React components.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Success Criteria</h3>
+      <h4>Automated Verification</h4>
+      <ul class="checklist">
+        <li>
+          <label><input type="checkbox" disabled> Phase-2 tests fail before implementation:
+            <code id="phase-2-red">pnpm --filter @sidra/extension test -- src/side-panel-controller.test.ts src/side-panel-boundary.test.ts -t "transcript speech"</code>
+          </label>
+          <button type="button" data-copy-target="#phase-2-red">Copy</button>
+          <span class="evidence">Actual: pending.</span>
+        </li>
+        <li>
+          <label><input type="checkbox" disabled> Phase-2 tests pass after implementation:
+            <code id="phase-2-green">pnpm --filter @sidra/extension test -- src/side-panel-controller.test.ts src/side-panel-boundary.test.ts -t "transcript speech"</code>
+          </label>
+          <button type="button" data-copy-target="#phase-2-green">Copy</button>
+          <span class="evidence">Actual: pending.</span>
+        </li>
+        <li><label><input type="checkbox" disabled> Phase-1 tests still pass: <code>pnpm --filter @sidra/extension test -- src/transcript-speech.test.ts src/manifest.test.ts -t "transcript speech|tts"</code></label><span class="evidence">Actual: pending.</span></li>
+        <li><label><input type="checkbox" disabled> Extension type checking passes: <code>pnpm --filter @sidra/extension check</code></label><span class="evidence">Actual: pending.</span></li>
+      </ul>
+
+      <h4>Manual Verification</h4>
+      <ul class="checklist">
+        <li><label><input type="checkbox" disabled> Not required in this phase. Behavior is not yet exposed in UI.</label></li>
+      </ul>
+    </article>
+
+    <article id="phase-3">
+      <h2>Phase 3: Transcript Bubble Listen Button</h2>
+      <label class="phase-status"><input type="checkbox" disabled> Phase complete</label>
+
+      <h3>Overview</h3>
+      <p>
+        Render the hover and focus listen button on speakable bubbles and wire it to the controller commands.
+      </p>
+
+      <h3>Why This Phase Can Be Validated Independently</h3>
+      <p>
+        React Testing Library can verify button presence, accessible names, and click behavior. CSS contract tests
+        can verify hover and focus selectors.
+      </p>
+
+      <h3>Changes Required</h3>
+      <aside class="callout">
+        <p><strong>TDD ordering:</strong> Add view and CSS tests first. Confirm RED before implementation.</p>
+      </aside>
+
+      <h4>1. Tests (RED)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Test name</th>
+            <th>What it proves</th>
+            <th>Behavior covered</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+            <td><code>renders_listen_button_for_plain_user_message</code></td>
+            <td>Speakable user bubbles expose a button.</td>
+            <td>B1.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+            <td><code>clicking_user_message_listen_button_speaks_user_text</code></td>
+            <td>User text is passed to the speech command.</td>
+            <td>B1.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+            <td><code>quick_action_user_message_listen_reads_full_prompt_text</code></td>
+            <td>Quick-action collapsed label does not replace speech payload.</td>
+            <td>B2.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+            <td><code>renders_listen_button_for_complete_assistant_response</code></td>
+            <td>Completed assistant response is speakable.</td>
+            <td>B3.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+            <td><code>clicking_complete_assistant_listen_button_speaks_assistant_text</code></td>
+            <td>Plain assistant text, not sanitized HTML, is sent to speech.</td>
+            <td>B3.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+            <td><code>does_not_render_listen_button_for_streaming_assistant_response</code></td>
+            <td>Streaming text is not read as a moving target.</td>
+            <td>B4.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+            <td><code>does_not_render_listen_button_for_empty_assistant_response</code></td>
+            <td>Empty assistant turns have no control.</td>
+            <td>B5.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+            <td><code>does_not_render_listen_button_for_status_or_permission_entries</code></td>
+            <td>V1 scope excludes non-chat entries.</td>
+            <td>B6.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+            <td><code>clicking_active_message_button_stops_speech</code></td>
+            <td>Active button toggles to stop.</td>
+            <td>B7.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/styles.test.ts</code></td>
+            <td><code>styles_transcript_speech_button_as_hover_and_focus_affordance</code></td>
+            <td>Button is visually quiet until hover or focus-within.</td>
+            <td>Hover/focus requirement.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/styles.test.ts</code></td>
+            <td><code>keeps_transcript_speech_button_position_from_shifting_message_layout</code></td>
+            <td>Button positioning does not resize the bubble.</td>
+            <td>Layout stability.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>2. Implementation (GREEN)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Change</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>apps/extension/src/side-panel-view.tsx</code></td>
+            <td>Add <code>speech</code>, <code>onSpeakTranscriptEntry</code>, and <code>onStopTranscriptSpeech</code> props, then pass them to <code>TranscriptView</code>.</td>
+            <td>The side panel view coordinates presentation props.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/transcript-view.tsx</code></td>
+            <td>Add a <code>SpeakableMessage</code> wrapper or equivalent local component for user and terminal assistant bubbles.</td>
+            <td>Keeps transcript rendering readable and localized.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/transcript-view.tsx</code></td>
+            <td>Compute a stable view key from <code>entry.id</code> or the current map fallback key and pass that key to speech commands.</td>
+            <td>Speech state must identify the active bubble.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/transcript-view.tsx</code></td>
+            <td>Use user <code>entry.text</code> and assistant <code>entry.text</code> as speech payloads.</td>
+            <td>Speech reads plain content, not rendered markup.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/sidra-icon.tsx</code></td>
+            <td>Add Lucide icons for listen and stop controls, for example <code>Volume2</code> and <code>Square</code>.</td>
+            <td>Existing icon abstraction owns SVG icon selection.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/styles.css</code></td>
+            <td>Add <code>.speakable-message</code> and <code>.transcript-speech-button</code> rules with hover, focus-within, active, and speaking states.</td>
+            <td>Button appears only as an affordance without shifting layout.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Success Criteria</h3>
+      <h4>Automated Verification</h4>
+      <ul class="checklist">
+        <li>
+          <label><input type="checkbox" disabled> Phase-3 tests fail before implementation:
+            <code id="phase-3-red">pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx src/styles.test.ts -t "listen button|transcript speech|speakable"</code>
+          </label>
+          <button type="button" data-copy-target="#phase-3-red">Copy</button>
+          <span class="evidence">Actual: pending.</span>
+        </li>
+        <li>
+          <label><input type="checkbox" disabled> Phase-3 tests pass after implementation:
+            <code id="phase-3-green">pnpm --filter @sidra/extension test -- src/side-panel-view.test.tsx src/styles.test.ts -t "listen button|transcript speech|speakable"</code>
+          </label>
+          <button type="button" data-copy-target="#phase-3-green">Copy</button>
+          <span class="evidence">Actual: pending.</span>
+        </li>
+        <li><label><input type="checkbox" disabled> Phase-1 and Phase-2 tests still pass: <code>pnpm --filter @sidra/extension test -- src/transcript-speech.test.ts src/side-panel-controller.test.ts src/side-panel-boundary.test.ts src/manifest.test.ts -t "transcript speech|tts"</code></label><span class="evidence">Actual: pending.</span></li>
+        <li><label><input type="checkbox" disabled> Extension type checking passes: <code>pnpm --filter @sidra/extension check</code></label><span class="evidence">Actual: pending.</span></li>
+      </ul>
+
+      <h4>Manual Verification</h4>
+      <ul class="checklist">
+        <li><label><input type="checkbox" disabled> Hovering a user bubble reveals the listen button.</label></li>
+        <li><label><input type="checkbox" disabled> Keyboard tabbing can reach the listen button and makes it visible.</label></li>
+        <li><label><input type="checkbox" disabled> Button does not change bubble width, height, or transcript spacing.</label></li>
+        <li><label><input type="checkbox" disabled> Active speech button visibly changes to a stop affordance.</label></li>
+      </ul>
+    </article>
+
+    <article id="phase-4">
+      <h2>Phase 4: Browser Smoke Verification</h2>
+      <label class="phase-status"><input type="checkbox" disabled> Phase complete</label>
+
+      <h3>Overview</h3>
+      <p>
+        Verify native speech behavior in a loaded Chromium extension. This is manual because jsdom cannot play
+        system speech output.
+      </p>
+
+      <h3>Why TDD Does Not Apply</h3>
+      <p>
+        The automated phases already cover code behavior. This phase verifies browser permission, native TTS
+        availability, and user-facing sound output.
+      </p>
+
+      <h3>Changes Required</h3>
+      <h4>1. Tests</h4>
+      <p>TDD does not apply. Use the manual smoke checklist below.</p>
+
+      <h4>2. Implementation</h4>
+      <p>No implementation files should change in this phase unless the smoke finds a defect.</p>
+
+      <h3>Success Criteria</h3>
+      <h4>Automated Verification</h4>
+      <ul class="checklist">
+        <li><label><input type="checkbox" disabled> Focused extension test suite passes: <code id="phase-4-focused">pnpm --filter @sidra/extension test -- src/transcript-speech.test.ts src/side-panel-controller.test.ts src/side-panel-view.test.tsx src/styles.test.ts src/manifest.test.ts src/side-panel-boundary.test.ts</code></label><button type="button" data-copy-target="#phase-4-focused">Copy</button><span class="evidence">Actual: pending.</span></li>
+        <li><label><input type="checkbox" disabled> Extension type checking passes: <code>pnpm --filter @sidra/extension check</code></label><span class="evidence">Actual: pending.</span></li>
+      </ul>
+
+      <h4>Manual Verification</h4>
+      <ul class="checklist">
+        <li><label><input type="checkbox" disabled> Before browser launch, read <code>docs/MANUAL-E2E-RUNBOOK.md</code>.</label></li>
+        <li><label><input type="checkbox" disabled> Build and load the unpacked extension in the runbook-supported browser path.</label></li>
+        <li><label><input type="checkbox" disabled> Send a manual prompt and wait for an assistant response.</label></li>
+        <li><label><input type="checkbox" disabled> Hover the user bubble and click listen. The prompt audio plays.</label></li>
+        <li><label><input type="checkbox" disabled> Hover the assistant bubble and click listen. The response audio plays.</label></li>
+        <li><label><input type="checkbox" disabled> Click the active bubble button again. Audio stops.</label></li>
+        <li><label><input type="checkbox" disabled> Start one bubble, then another. The first stops and the second plays.</label></li>
+        <li><label><input type="checkbox" disabled> Click New Chat during playback. Audio stops.</label></li>
+        <li><label><input type="checkbox" disabled> Navigate to another active page during playback. Audio stops.</label></li>
+      </ul>
+
+      <aside class="callout warning">
+        <p>
+          If the browser or OS has no available TTS voice, report a visible non-crashing error state. Do not add a
+          cloud fallback inside this V1 implementation.
+        </p>
+      </aside>
+    </article>
+
+    <section id="testing-strategy">
+      <h2>Testing Strategy</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Layer</th>
+            <th>What to test</th>
+            <th>Key edge cases</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Unit</td>
+            <td><code>TranscriptSpeechController</code> gateway calls, state, final events, errors, shutdown.</td>
+            <td>Blank text, stale events, interrupted playback, missing voice errors.</td>
+          </tr>
+          <tr>
+            <td>Controller</td>
+            <td>Snapshot speech state and application commands.</td>
+            <td>New Chat, page switch, shutdown.</td>
+          </tr>
+          <tr>
+            <td>React</td>
+            <td>Button presence, payload selection, active stop state, excluded entries.</td>
+            <td>Quick-action labels, assistant markdown vs plain text, streaming responses.</td>
+          </tr>
+          <tr>
+            <td>CSS</td>
+            <td>Hover/focus reveal and layout stability selectors.</td>
+            <td>Disabled or active state, keyboard focus.</td>
+          </tr>
+          <tr>
+            <td>Manual browser</td>
+            <td>Native audio output and extension permission behavior.</td>
+            <td>No TTS voices, OS audio muted, browser-specific voice behavior.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="performance">
+      <h2>Performance Considerations</h2>
+      <ul>
+        <li>Native TTS avoids network requests and audio file caching.</li>
+        <li>Do not precompute speech or enumerate voices on every render.</li>
+        <li>Transcript buttons should be ordinary DOM controls with CSS opacity, not per-message timers.</li>
+        <li>Controller state should emit only when speech state changes.</li>
+      </ul>
+    </section>
+
+    <section id="migration">
+      <h2>Migration Notes</h2>
+      <p>
+        Existing transcript state does not need migration. The manifest permission change affects extension install or
+        reload prompts in Chromium. Existing local Native Messaging setup is unchanged.
+      </p>
+    </section>
+
+    <section id="references">
+      <h2>References</h2>
+      <ul>
+        <li><a href="https://developer.chrome.com/docs/extensions/reference/api/tts">Chrome <code>tts</code> API</a>.</li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API">MDN Web Speech API</a>.</li>
+        <li><a href="https://developers.openai.com/api/docs/guides/text-to-speech">OpenAI Text to speech guide</a>.</li>
+        <li><a href="https://developers.openai.com/api/docs/guides/audio">OpenAI Audio and speech guide</a>.</li>
+        <li><a href="https://openai.com/api/pricing/">OpenAI API pricing FAQ</a>.</li>
+        <li><a href="https://elevenlabs.io/docs/api-reference/text-to-speech/convert">ElevenLabs Text to Speech API</a>.</li>
+        <li><a href="https://aws.amazon.com/polly/">Amazon Polly</a>.</li>
+        <li><a href="https://cloud.google.com/text-to-speech">Google Cloud Text-to-Speech</a>.</li>
+        <li><code>docs/ARCHITECTURE.md</code>.</li>
+        <li><code>docs/ENGINEERING-GUIDELINES.md</code>.</li>
+        <li><code>docs/MANUAL-E2E-RUNBOOK.md</code> for manual browser smoke only.</li>
+      </ul>
+      <details>
+        <summary>Decision record</summary>
+        <p>
+          V1 intentionally uses native Chrome TTS. Hosted TTS remains a future provider feature because it needs
+          separate billing, credentials, provider selection, bridge ownership, privacy decisions, and audio response
+          handling. Those decisions are larger than the transcript hover button request.
+        </p>
+      </details>
+    </section>
+  </main>
+</body>
+</html>

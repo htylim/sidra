@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BRIDGE_PAYLOAD_TOO_LARGE_CODE,
+  PROTOCOL_VERSION,
   exceedsPayloadByteLimit,
   parseAgentEvent,
   parseBridgeToExtension,
@@ -8,12 +9,172 @@ import {
   serializedJsonByteLength
 } from "./index";
 
+describe("speech protocol validation", () => {
+  it("protocol_accepts_speech_synthesize_and_cancel", () => {
+    expect(PROTOCOL_VERSION).toBe(3);
+
+    expect(
+      parseExtensionToBridge({
+        type: "speech.synthesize",
+        version: 3,
+        requestId: "speech-1",
+        text: "Read this bubble aloud.",
+        options: {
+          model: "gpt-4o-mini-tts",
+          voice: "marin",
+          format: "mp3",
+          speed: 1,
+          instructions: "Speak clearly."
+        }
+      })
+    ).toMatchObject({ ok: true });
+
+    expect(
+      parseExtensionToBridge({
+        type: "speech.cancel",
+        version: 3,
+        requestId: "speech-1"
+      })
+    ).toMatchObject({ ok: true });
+
+    expect(
+      parseExtensionToBridge({
+        type: "speech.synthesize",
+        version: 3,
+        requestId: "speech-2",
+        text: "Read this bubble aloud.",
+        options: {
+          model: "gpt-4o-mini-tts",
+          voice: "alloy",
+          format: "mp3",
+          speed: 1,
+          instructions: ""
+        }
+      })
+    ).toMatchObject({ ok: true });
+  });
+
+  it("protocol_accepts_speech_credential_messages", () => {
+    for (const message of [
+      { type: "speech.credentials.status", version: 3 },
+      { type: "speech.credentials.save", version: 3, apiKey: "sk-test" },
+      { type: "speech.credentials.test", version: 3 },
+      { type: "speech.credentials.test", version: 3, apiKey: "sk-unsaved-test" },
+      { type: "speech.credentials.remove", version: 3 }
+    ]) {
+      expect(parseExtensionToBridge(message)).toMatchObject({ ok: true });
+    }
+  });
+
+  it("protocol_rejects_invalid_speech_messages", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "speech.synthesize",
+        version: 3,
+        requestId: "speech-1",
+        text: "",
+        options: { model: "gpt-4o-mini-tts", voice: "alloy", format: "mp3", speed: 1 }
+      })
+    ).toEqual({ ok: false, error: "text is required" });
+
+    expect(
+      parseExtensionToBridge({
+        type: "speech.synthesize",
+        version: 3,
+        requestId: "speech-1",
+        text: "Read this.",
+        options: { model: "gpt-4o-mini-tts", voice: "made-up", format: "mp3", speed: 1 }
+      })
+    ).toEqual({ ok: false, error: "speech options are invalid" });
+
+    expect(
+      parseExtensionToBridge({
+        type: "speech.synthesize",
+        version: 3,
+        requestId: "speech-1",
+        text: "Read this.",
+        options: { model: "gpt-4o-mini-tts", voice: "alloy", format: "mp3", speed: 5 }
+      })
+    ).toEqual({ ok: false, error: "speech options are invalid" });
+
+    expect(
+      parseExtensionToBridge({
+        type: "speech.synthesize",
+        version: 3,
+        requestId: "speech-1",
+        text: "Read this.",
+        options: { model: "gpt-4o-mini-tts", voice: "alloy", format: "mp3", speed: 1 },
+        apiKey: "sk-should-not-cross"
+      })
+    ).toEqual({ ok: false, error: "Message has invalid fields" });
+  });
+
+  it("protocol_accepts_speech_bridge_events", () => {
+    for (const message of [
+      { type: "speech.started", version: 3, requestId: "speech-1", mimeType: "audio/mpeg" },
+      { type: "speech.chunk", version: 3, requestId: "speech-1", sequence: 0, audioBase64: "AA==" },
+      { type: "speech.done", version: 3, requestId: "speech-1" },
+      {
+        type: "speech.error",
+        version: 3,
+        requestId: "speech-1",
+        message: "OpenAI API key is missing.",
+        code: "openai_api_key_missing"
+      },
+      {
+        type: "speech.credentials.status",
+        version: 3,
+        configured: true,
+        source: "keychain",
+        redactedKey: "sk-...abcd"
+      },
+      { type: "speech.credentials.saved", version: 3, configured: true, source: "keychain", redactedKey: "sk-...abcd" },
+      { type: "speech.credentials.tested", version: 3, ok: true },
+      { type: "speech.credentials.removed", version: 3, configured: false },
+      {
+        type: "speech.credentials.removed",
+        version: 3,
+        configured: true,
+        source: "environment",
+        redactedKey: "sk-...env1"
+      },
+      { type: "speech.credentials.error", version: 3, message: "Credential check failed.", code: "credential_test_failed" }
+    ]) {
+      expect(parseBridgeToExtension(message)).toMatchObject({ ok: true });
+    }
+  });
+
+  it("protocol_never_accepts_raw_key_in_bridge_responses", () => {
+    expect(
+      parseBridgeToExtension({
+        type: "speech.credentials.status",
+        version: 3,
+        configured: true,
+        source: "keychain",
+        redactedKey: "sk-...abcd",
+        apiKey: "sk-secret"
+      })
+    ).toEqual({ ok: false, error: "Message has invalid fields" });
+
+    expect(
+      parseBridgeToExtension({
+        type: "speech.credentials.saved",
+        version: 3,
+        configured: true,
+        source: "keychain",
+        redactedKey: "sk-...abcd",
+        apiKey: "sk-secret"
+      })
+    ).toEqual({ ok: false, error: "Message has invalid fields" });
+  });
+});
+
 describe("extension-to-bridge protocol validation", () => {
   it("accepts valid session start and send messages", () => {
     expect(
       parseExtensionToBridge({
         type: "session.start",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         providerId: "codex"
       })
@@ -22,7 +183,7 @@ describe("extension-to-bridge protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "What is this?"
       })
@@ -30,7 +191,7 @@ describe("extension-to-bridge protocol validation", () => {
   });
 
   it("rejects unknown commands and invalid payloads", () => {
-    expect(parseExtensionToBridge({ type: "session.delete", version: 2 })).toEqual({
+    expect(parseExtensionToBridge({ type: "session.delete", version: 3 })).toEqual({
       ok: false,
       error: "Unknown command"
     });
@@ -38,7 +199,7 @@ describe("extension-to-bridge protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: ""
       })
@@ -46,7 +207,7 @@ describe("extension-to-bridge protocol validation", () => {
   });
 
   it("rejects unknown extension commands with a parser-backed error", () => {
-    expect(parseExtensionToBridge({ type: "session.delete", version: 2 })).toEqual({
+    expect(parseExtensionToBridge({ type: "session.delete", version: 3 })).toEqual({
       ok: false,
       error: "Unknown command"
     });
@@ -56,7 +217,7 @@ describe("extension-to-bridge protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "permission.respond",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         requestId: "permission-1",
         decision: "allow_once"
@@ -66,7 +227,7 @@ describe("extension-to-bridge protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "permission.respond",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         requestId: "permission-1",
         decision: "allow_for_session"
@@ -76,7 +237,7 @@ describe("extension-to-bridge protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "permission.respond",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         requestId: "permission-1",
         decision: "deny"
@@ -88,7 +249,7 @@ describe("extension-to-bridge protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "permission.respond",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         decision: "allow_once"
       })
@@ -99,7 +260,7 @@ describe("extension-to-bridge protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "permission.respond",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         requestId: "permission-1",
         decision: "allow_forever"
@@ -111,7 +272,7 @@ describe("extension-to-bridge protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "permission.respond",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         requestId: "permission-1",
         decision: "allow_once",
@@ -126,7 +287,7 @@ describe("bridge-to-extension permission protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "permission.request",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         request: {
           requestId: "permission-1",
@@ -146,7 +307,7 @@ describe("bridge-to-extension permission protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "permission.request",
-        version: 2,
+        version: 3,
         request: {
           requestId: "permission-1",
           permissionKey: "shell:ls",
@@ -160,7 +321,7 @@ describe("bridge-to-extension permission protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "permission.request",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         request: {
           permissionKey: "shell:ls",
@@ -174,7 +335,7 @@ describe("bridge-to-extension permission protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "permission.request",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         request: {
           requestId: "permission-1",
@@ -189,7 +350,7 @@ describe("bridge-to-extension permission protocol validation", () => {
       expect(
         parseBridgeToExtension({
           type: "permission.request",
-          version: 2,
+          version: 3,
           clientSessionId: "page-1",
           request: {
             requestId: "permission-1",
@@ -204,7 +365,7 @@ describe("bridge-to-extension permission protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "permission.request",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         request: {
           requestId: "permission-1",
@@ -227,7 +388,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "Summarize this page",
         pageContext: {
@@ -248,7 +409,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "Summarize this page",
         pageContext: {
@@ -268,7 +429,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "Summarize this page",
         pageContext: {
@@ -290,7 +451,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "Summarize this page",
         pageContext: {
@@ -313,7 +474,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "What is this?",
         pageContext: {
@@ -333,7 +494,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "Summarize this page",
         pageContext: {
@@ -360,7 +521,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "What is this?",
         pageContext: {
@@ -380,7 +541,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "What is this?",
         pageContext: {
@@ -400,7 +561,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "What is this?",
         pageContext: {
@@ -419,7 +580,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "Summarize this page",
         pageContext: {
@@ -435,7 +596,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "Summarize this page",
         pageContext: {
@@ -450,7 +611,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "Summarize this page",
         pageContext: {
@@ -471,7 +632,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "Summarize this page",
         pageContext: {
@@ -492,7 +653,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "Summarize this page",
         pageContext: {
@@ -512,7 +673,7 @@ describe("page context protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "Summarize this page",
         pageContext: {
@@ -534,7 +695,7 @@ describe("session.cancel protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.cancel",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1"
       })
     ).toMatchObject({ ok: true });
@@ -544,7 +705,7 @@ describe("session.cancel protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.cancel",
-        version: 2
+        version: 3
       })
     ).toEqual({ ok: false, error: "clientSessionId is required" });
   });
@@ -553,7 +714,7 @@ describe("session.cancel protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.abort",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1"
       })
     ).toEqual({ ok: false, error: "Unknown command" });
@@ -565,7 +726,7 @@ describe("session lifecycle protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.reset",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1"
       })
     ).toMatchObject({ ok: true });
@@ -575,7 +736,7 @@ describe("session lifecycle protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.close",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1"
       })
     ).toMatchObject({ ok: true });
@@ -585,7 +746,7 @@ describe("session lifecycle protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.reset",
-        version: 2
+        version: 3
       })
     ).toEqual({ ok: false, error: "clientSessionId is required" });
   });
@@ -594,7 +755,7 @@ describe("session lifecycle protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.close",
-        version: 2
+        version: 3
       })
     ).toEqual({ ok: false, error: "clientSessionId is required" });
   });
@@ -603,7 +764,7 @@ describe("session lifecycle protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.destroy",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1"
       })
     ).toEqual({ ok: false, error: "Unknown command" });
@@ -612,11 +773,11 @@ describe("session lifecycle protocol validation", () => {
 
 describe("bridge-to-extension protocol validation", () => {
   it("accepts valid bridge messages and rejects malformed assistant deltas", () => {
-    expect(parseBridgeToExtension({ type: "bridge.ready", version: 2 })).toMatchObject({ ok: true });
+    expect(parseBridgeToExtension({ type: "bridge.ready", version: 3 })).toMatchObject({ ok: true });
     expect(
       parseBridgeToExtension({
         type: "session.started",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         bridgeSessionId: "bridge-1"
       })
@@ -624,7 +785,7 @@ describe("bridge-to-extension protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "agent.event",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         event: { type: "assistant.text.delta", text: "hello" }
       })
@@ -632,7 +793,7 @@ describe("bridge-to-extension protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "agent.event",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         event: { type: "assistant.done" }
       })
@@ -640,7 +801,7 @@ describe("bridge-to-extension protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "session.error",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         message: "failed",
         code: "provider_error"
@@ -649,7 +810,7 @@ describe("bridge-to-extension protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "bridge.error",
-        version: 2,
+        version: 3,
         message: "failed",
         code: "internal_error"
       })
@@ -658,7 +819,7 @@ describe("bridge-to-extension protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "agent.event",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         event: { type: "assistant.cancelled" }
       })
@@ -666,7 +827,7 @@ describe("bridge-to-extension protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "agent.event",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         event: { type: "assistant.text.delta" }
       })
@@ -674,7 +835,7 @@ describe("bridge-to-extension protocol validation", () => {
   });
 
   it("rejects unknown bridge messages with a parser-backed error", () => {
-    expect(parseBridgeToExtension({ type: "bridge.noop", version: 2 })).toEqual({
+    expect(parseBridgeToExtension({ type: "bridge.noop", version: 3 })).toEqual({
       ok: false,
       error: "Unknown message"
     });
@@ -684,7 +845,7 @@ describe("bridge-to-extension protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "bridge.error",
-        version: 2,
+        version: 3,
         message: "Payload is too large.",
         code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
       })
@@ -692,7 +853,7 @@ describe("bridge-to-extension protocol validation", () => {
       ok: true,
       value: {
         type: "bridge.error",
-        version: 2,
+        version: 3,
         message: "Payload is too large.",
         code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
       }
@@ -701,14 +862,14 @@ describe("bridge-to-extension protocol validation", () => {
 
   it("accepts_known_bridge_error_codes", () => {
     for (const code of ["invalid_message", "internal_error", "payload_too_large"]) {
-      expect(parseBridgeToExtension({ type: "bridge.error", version: 2, message: "failed", code })).toMatchObject({
+      expect(parseBridgeToExtension({ type: "bridge.error", version: 3, message: "failed", code })).toMatchObject({
         ok: true
       });
     }
   });
 
   it("rejects_unknown_bridge_error_codes", () => {
-    expect(parseBridgeToExtension({ type: "bridge.error", version: 2, message: "failed", code: "setup-error" })).toEqual({
+    expect(parseBridgeToExtension({ type: "bridge.error", version: 3, message: "failed", code: "setup-error" })).toEqual({
       ok: false,
       error: "code is invalid"
     });
@@ -718,7 +879,7 @@ describe("bridge-to-extension protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "bridge.error",
-        version: 2,
+        version: 3,
         message: "Codex setup failed.",
         code: "codex_setup_failed"
       })
@@ -852,7 +1013,7 @@ describe("assistant activity protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "agent.event",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         event: { type: "assistant.activity", activity: { kind: "reasoning_summary_delta", text: "Checked the code." } }
       })
@@ -860,7 +1021,7 @@ describe("assistant activity protocol validation", () => {
       ok: true,
       value: {
         type: "agent.event",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         event: { type: "assistant.activity", activity: { kind: "reasoning_summary_delta", text: "Checked the code." } }
       }
@@ -887,7 +1048,7 @@ describe("assistant activity protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "agent.event",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         event: { type: "assistant.activity", activity: { kind: "progress", label: "Thinking privately" } }
       })
@@ -921,14 +1082,14 @@ describe("assistant activity protocol validation", () => {
   });
 
   it("rejects extra fields on bridge message envelopes", () => {
-    expect(parseBridgeToExtension({ type: "bridge.ready", version: 2, extra: true })).toEqual({
+    expect(parseBridgeToExtension({ type: "bridge.ready", version: 3, extra: true })).toEqual({
       ok: false,
       error: "Message has invalid fields"
     });
     expect(
       parseBridgeToExtension({
         type: "agent.event",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         event: { type: "assistant.done" },
         extra: true
@@ -942,7 +1103,7 @@ describe("assistant activity protocol validation", () => {
       expect(
         parseBridgeToExtension({
           type: "agent.event",
-          version: 2,
+          version: 3,
           clientSessionId: "page-1",
           event: { type: "assistant.done" },
           [privateField]: "secret"
@@ -955,7 +1116,7 @@ describe("assistant activity protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "session.error",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         message: "failed",
         prompt: "secret"
@@ -967,14 +1128,14 @@ describe("assistant activity protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.start",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         providerId: "codex",
         extra: true
       })
     ).toEqual({ ok: false, error: "Message has invalid fields" });
 
-    expect(parseExtensionToBridge({ type: "heartbeat", version: 2, clientSessionId: "page-1" })).toEqual({
+    expect(parseExtensionToBridge({ type: "heartbeat", version: 3, clientSessionId: "page-1" })).toEqual({
       ok: false,
       error: "Message has invalid fields"
     });
@@ -984,13 +1145,13 @@ describe("assistant activity protocol validation", () => {
     expect(
       parseExtensionToBridge({
         type: "session.cancel",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         reasoning: "private"
       })
     ).toEqual({ ok: false, error: "Message has invalid fields" });
 
-    expect(parseExtensionToBridge({ type: "session.start", version: 2, clientSessionId: "page-1", providerId: "codex", prompt: "secret" })).toEqual({
+    expect(parseExtensionToBridge({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex", prompt: "secret" })).toEqual({
       ok: false,
       error: "Message has invalid fields"
     });
@@ -1002,7 +1163,7 @@ describe("assistant activity protocol validation", () => {
       expect(
         parseExtensionToBridge({
           type: "session.send",
-          version: 2,
+          version: 3,
           clientSessionId: "page-1",
           prompt: "summarize",
           [privateField]: "secret"
@@ -1022,7 +1183,7 @@ describe("assistant activity protocol validation", () => {
       "unsafe_provider_event",
       "unknown_error"
     ]) {
-      expect(parseBridgeToExtension({ type: "session.error", version: 2, clientSessionId: "page-1", message: "failed", code })).toMatchObject({
+      expect(parseBridgeToExtension({ type: "session.error", version: 3, clientSessionId: "page-1", message: "failed", code })).toMatchObject({
         ok: true
       });
     }
@@ -1032,7 +1193,7 @@ describe("assistant activity protocol validation", () => {
     expect(
       parseBridgeToExtension({
         type: "session.error",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         message: "failed",
         code: "provider-error"

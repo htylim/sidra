@@ -40,7 +40,8 @@ describe("extension UI interaction state CSS", () => {
   });
 
   it("keeps_disabled_controls_visually_inert_without_hover_override", () => {
-    expectRule("button:disabled,\ninput:disabled,\ntextarea:disabled", ["cursor: not-allowed", "opacity: 0.58"]);
+    expectRule("button:disabled,\ninput:disabled,\nselect:disabled,\ntextarea:disabled", ["cursor: not-allowed", "opacity: 0.58"]);
+    expectRule(".options-actions .send-button:disabled", ["background: #e6ece9", "color: #62716d", "opacity: 1"]);
     const unguardedButtonStateSelectors = ruleSelectors.filter((selector) => {
       if (!selector.includes(":hover") && !selector.includes(":active")) return false;
       if (!selector.includes("button")) return false;
@@ -109,6 +110,25 @@ describe("extension UI interaction state CSS", () => {
   it("uses_response_font_size_variable_for_assistant_markdown_code_text", () => {
     expectRule(".assistant-markdown code", ["font-size: var(--sidra-response-font-size"]);
     expectRule(".code-block code", ["font-size: var(--sidra-response-font-size"]);
+  });
+
+  it("defines_transcript_action_rail_visibility_target_size_and_active_states", () => {
+    expectRule(".transcript-action-rail", ["display: grid", "gap: 6px", "opacity: 0"]);
+    expectRule(".transcript-action-button", ["width: 28px", "height: 28px", "border: 1px solid #d8e1dd"]);
+    expectRule(".transcript-action-button .sidra-icon", ["width: 16px", "height: 16px"]);
+    expectRule(
+      ".transcript-message-row:hover .transcript-action-rail,\n.transcript-message-row:focus-within .transcript-action-rail,\n.transcript-message-row[data-speech-active=\"true\"] .transcript-action-rail,\n.transcript-message-row[data-copy-active=\"true\"] .transcript-action-rail",
+      ["opacity: 1", "pointer-events: auto"]
+    );
+    expectRule(".transcript-action-button:not(:disabled):hover,\n.transcript-action-button:not(:disabled):focus-visible", [
+      "background: #eef3f1",
+      "color: #52615d"
+    ]);
+    expectRule(".transcript-action-button[data-speech-state=\"active\"],\n.transcript-action-button[data-copy-state=\"copied\"]", [
+      "border-color: #83b8ae",
+      "background: #eef8f5",
+      "color: #075e56"
+    ]);
   });
 
   it("keeps_non_prompt_transcript_ui_at_fixed_supporting_font_size", () => {

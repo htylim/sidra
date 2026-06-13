@@ -7,19 +7,21 @@ This document records project-level decisions that should guide future implement
 Use this map to decide where behavior belongs. It is not a file catalog.
 
 - `apps/extension`: Browser extension UI and browser-side application state.
-  - Owns side panel rendering, tab-scoped side panel visibility, options-page rendering, active page tracking, URL Session mapping, Draft Prompt state, capture orchestration, settings, quick-action configuration, and bridge-facing application commands.
+  - Owns side panel rendering, tab-scoped side panel visibility, options-page rendering, active page tracking, URL Session mapping, Draft Prompt state, capture orchestration, settings, quick-action configuration, transcript speech controls, clipboard actions, and bridge-facing application commands.
   - Side panel visibility is tab-scoped browser state. `SidePanelTabVisibilityController` configures tab-specific side panel availability and lets Chromium own toolbar open/close state. It must not use URL Session state.
+  - Browser-side speech playback belongs in extension application code. The extension may request speech synthesis through the bridge, but it owns audio playback, pause/resume state, transcript action state, and stopping local audio when the active page or bridge lifecycle changes.
   - Must not own provider lifecycle, low-level bridge protocol sequencing, or raw Native Messaging IO.
 - `apps/extension/src/bridge`: Extension-side bridge boundary.
-  - Owns Chrome Native Messaging connection state, bridge readiness, reconnect/disconnect behavior, and session-start coordination before prompts are sent.
+  - Owns Chrome Native Messaging connection state, bridge readiness, reconnect/disconnect behavior, session-start coordination before prompts are sent, and extension-side clients for bridge-owned services such as speech credential status.
   - Must expose application-level behavior to the side panel instead of leaking transport sequencing into React code.
 - `apps/bridge`: Local Native Messaging bridge.
-  - Owns process IO, protocol command handling, provider session lifecycle, in-flight turn state, cancellation, reset/close, heartbeat/disconnect cleanup, and provider allowlisting.
+  - Owns process IO, protocol command handling, provider session lifecycle, in-flight turn state, cancellation, reset/close, heartbeat/disconnect cleanup, provider allowlisting, OpenAI Speech API requests, and OS secret-store access for speech credentials.
+  - Speech credentials must stay in the bridge process or OS secret store. The extension may send a replacement key during a save/test request, but stored key material must not be persisted in browser storage or echoed back over Native Messaging.
   - Production Codex wiring starts `codex app-server` from bridge process configuration. It must use an explicit `SIDRA_CODEX_WORKSPACE_ROOT` value for Codex thread working directories and must not fall back to the Native Messaging process cwd.
   - The Codex provider owns app-server thread naming for Sidra history UX. `BridgeSessionManager` may pass raw prompt plus selected page metadata as provider-neutral display-title source, but Codex-specific title derivation and `thread/name/set` belong to the Codex provider. Thread naming must not use captured body text, captured HTML, or the provider-facing safety wrapper.
   - Must keep raw transport, protocol dispatch, and provider session management in separate modules as those concerns grow.
 - `packages/protocol`: Versioned extension-to-bridge message contract.
-  - Owns message types and runtime validation for the Native Messaging boundary.
+  - Owns message types and runtime validation for the Native Messaging boundary, including session, speech synthesis, speech credential, and speech audio chunk messages.
   - Must grow protocol commands before UI or bridge code depends on new message shapes.
 - `docs`: Current architecture and engineering guidance.
   - Owns durable decisions, ownership boundaries, and non-obvious lifecycle rules.

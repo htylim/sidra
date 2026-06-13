@@ -86,6 +86,21 @@ describe("transcript reducer", () => {
       ]);
     });
 
+    it("assigns_stable_distinct_ids_to_duplicate_assistant_turns", () => {
+      const firstTurn = completeAssistantTurn(addAssistantTextDelta([], "Same reply"));
+      const secondTurn = completeAssistantTurn(addAssistantTextDelta(addUserPrompt(firstTurn, "next"), "Same reply"));
+      const assistantTurns = secondTurn.filter((entry): entry is Extract<TranscriptEntry, { kind: "assistant_turn" }> => {
+        return entry.kind === "assistant_turn";
+      });
+
+      expect(assistantTurns).toHaveLength(2);
+      expect(assistantTurns[0].id).toBeDefined();
+      expect(assistantTurns[1].id).toBeDefined();
+      expect(assistantTurns[0].id).not.toBe(assistantTurns[1].id);
+      expect(assistantTurns[0].status).toBe("complete");
+      expect(assistantTurns[1].status).toBe("complete");
+    });
+
     it("starts_a_new_assistant_turn_after_a_user_message", () => {
       const transcript = addAssistantTextDelta(addUserPrompt(addAssistantTextDelta([], "Previous"), "next"), "New");
 

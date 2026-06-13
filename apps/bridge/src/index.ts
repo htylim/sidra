@@ -17,6 +17,7 @@ import {
   type AgentSession,
   type ConnectionCleanupReason
 } from "./session-manager.js";
+import type { BridgeSpeechManager } from "./speech-synthesis-manager.js";
 
 export type BridgeRuntime = {
   emit(message: BridgeToExtension): void;
@@ -30,9 +31,11 @@ export function createBridge(
     heartbeatTimeoutMs?: number;
     setTimeout?: typeof setTimeout;
     clearTimeout?: typeof clearTimeout;
+    speech?: BridgeSpeechManager;
   } = {}
 ) {
   const sessions = new BridgeSessionManager({ provider, emit: (message) => runtime.emit(message) });
+  const speech = options.speech;
   const hardPayloadByteLimit = options.hardPayloadByteLimit ?? BRIDGE_HARD_PAYLOAD_BYTE_LIMIT;
   const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 30_000;
   const scheduleTimeout = options.setTimeout ?? setTimeout;
@@ -85,6 +88,60 @@ export function createBridge(
       case "permission.respond":
         await sessions.respondToPermission(message.clientSessionId, message.requestId, message.decision);
         return;
+      case "speech.synthesize":
+        if (!speech) {
+          runtime.emit({
+            type: "speech.error",
+            version: PROTOCOL_VERSION,
+            requestId: message.requestId,
+            message: "Speech is unavailable.",
+            code: "unknown_error"
+          });
+          return;
+        }
+        await speech.synthesize(message);
+        return;
+      case "speech.cancel":
+        if (!speech) {
+          runtime.emit({
+            type: "speech.error",
+            version: PROTOCOL_VERSION,
+            requestId: message.requestId,
+            message: "Speech is unavailable.",
+            code: "unknown_error"
+          });
+          return;
+        }
+        await speech.cancel(message);
+        return;
+      case "speech.credentials.status":
+        if (!speech) {
+          emitSpeechCredentialUnavailable();
+          return;
+        }
+        await speech.getCredentialStatus();
+        return;
+      case "speech.credentials.save":
+        if (!speech) {
+          emitSpeechCredentialUnavailable();
+          return;
+        }
+        await speech.saveCredentials(message);
+        return;
+      case "speech.credentials.test":
+        if (!speech) {
+          emitSpeechCredentialUnavailable();
+          return;
+        }
+        await speech.testCredentials(message);
+        return;
+      case "speech.credentials.remove":
+        if (!speech) {
+          emitSpeechCredentialUnavailable();
+          return;
+        }
+        await speech.removeCredentials();
+        return;
       case "heartbeat":
         scheduleHeartbeatTimeout();
         return;
@@ -106,11 +163,23 @@ export function createBridge(
 
   async function closeConnection(reason: ConnectionCleanupReason): Promise<void> {
     stopHeartbeatTimeout();
+    await speech?.cancelAll();
     await sessions.closeAllSessions(reason);
+  }
+
+  function emitSpeechCredentialUnavailable(): void {
+    runtime.emit({
+      type: "speech.credentials.error",
+      version: PROTOCOL_VERSION,
+      message: "Speech is unavailable.",
+      code: "unknown_error"
+    });
   }
 
   return { handleMessage, closeConnection };
 }
 
 export { runNativeMessagingBridge } from "./native-messaging.js";
+export { SpeechSynthesisManager, OpenAISpeechGateway } from "./speech-synthesis-manager.js";
+export { createDefaultSpeechCredentialStore } from "./speech-credential-store.js";
 export type { AgentProvider, AgentSendInput, AgentSession };

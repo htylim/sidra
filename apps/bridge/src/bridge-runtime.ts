@@ -2,7 +2,9 @@ import { createCodexAppServerProvider } from "./codex-app-server-provider.js";
 import { runNativeMessagingBridge, writeNativeMessage } from "./native-messaging.js";
 import { startCodexAppServer, type RunningCodexAppServer } from "./codex-app-server-process.js";
 import type { AgentProvider } from "./session-manager.js";
-import { PROTOCOL_VERSION, parseExtensionToBridge } from "@sidra/protocol";
+import { PROTOCOL_VERSION, parseExtensionToBridge, type BridgeToExtension, type ExtensionToBridge } from "@sidra/protocol";
+import { createDefaultSpeechCredentialStore } from "./speech-credential-store.js";
+import { OpenAISpeechGateway, SpeechSynthesisManager, type BridgeSpeechManager } from "./speech-synthesis-manager.js";
 
 const CODEX_WORKSPACE_ROOT_ENV = "SIDRA_CODEX_WORKSPACE_ROOT";
 const CODEX_SETUP_FAILED_MESSAGE = "Codex setup failed.";
@@ -17,6 +19,7 @@ type RuntimeEnvironment = Record<string, string | undefined>;
 
 type BridgeRuntimeDependencies = {
   startCodexAppServer(options: { clientInfo: { name: string; version: string } }): Promise<RunningCodexAppServer>;
+  createSpeechManager?(options: { environment: RuntimeEnvironment; emit(message: BridgeToExtension): void }): BridgeSpeechManager;
 };
 
 export type RuntimeAgentProvider = AgentProvider & {
@@ -86,14 +89,15 @@ export async function runBridgeFromEnvironment(
   environment: RuntimeEnvironment = process.env,
   dependencies: BridgeRuntimeDependencies = defaultDependencies
 ): Promise<void> {
+  const speech = createSpeechManager(environment, (message) => writeNativeMessage(output, message), dependencies);
   const providerRuntime = await createRuntimeForNativeMessaging(environment, dependencies);
   if (!providerRuntime.provider) {
-    runNativeMessagingBridge(input, output, { bridge: createSetupBlockedBridge(output) });
+    runNativeMessagingBridge(input, output, { bridge: createSetupBlockedBridge(output, speech) });
     writeNativeMessage(output, CODEX_SETUP_FAILED_ERROR);
     return;
   }
 
-  runNativeMessagingBridge(input, output, { provider: providerRuntime.provider });
+  runNativeMessagingBridge(input, output, { provider: providerRuntime.provider, speech });
   writeNativeMessage(output, { type: "bridge.ready", version: PROTOCOL_VERSION });
   let providerRuntimeClosed = false;
   const closeProviderRuntime = () => {
@@ -120,7 +124,22 @@ async function createRuntimeForNativeMessaging(
   }
 }
 
-function createSetupBlockedBridge(output: NodeJS.WritableStream) {
+function createSpeechManager(
+  environment: RuntimeEnvironment,
+  emit: (message: BridgeToExtension) => void,
+  dependencies: BridgeRuntimeDependencies
+): BridgeSpeechManager {
+  return (
+    dependencies.createSpeechManager?.({ environment, emit }) ??
+    new SpeechSynthesisManager({
+      credentialStore: createDefaultSpeechCredentialStore(environment),
+      gateway: new OpenAISpeechGateway(),
+      emit
+    })
+  );
+}
+
+function createSetupBlockedBridge(output: NodeJS.WritableStream, speech: BridgeSpeechManager) {
   return {
     async handleMessage(message: unknown): Promise<void> {
       const parsed = parseExtensionToBridge(message);
@@ -133,9 +152,46 @@ function createSetupBlockedBridge(output: NodeJS.WritableStream) {
         });
         return;
       }
+      if (parsed.value.type === "heartbeat") return;
+      if (await handleSpeechMessage(parsed.value, speech)) return;
       writeNativeMessage(output, CODEX_SETUP_FAILED_ERROR);
+    },
+    async closeConnection(): Promise<void> {
+      await speech.cancelAll();
     }
   };
+}
+
+async function handleSpeechMessage(message: ExtensionToBridge, speech: BridgeSpeechManager): Promise<boolean> {
+  switch (message.type) {
+    case "speech.synthesize":
+      await speech.synthesize(message);
+      return true;
+    case "speech.cancel":
+      await speech.cancel(message);
+      return true;
+    case "speech.credentials.status":
+      await speech.getCredentialStatus();
+      return true;
+    case "speech.credentials.save":
+      await speech.saveCredentials(message);
+      return true;
+    case "speech.credentials.test":
+      await speech.testCredentials(message);
+      return true;
+    case "speech.credentials.remove":
+      await speech.removeCredentials();
+      return true;
+    case "heartbeat":
+      return false;
+    case "session.start":
+    case "session.send":
+    case "session.cancel":
+    case "session.reset":
+    case "session.close":
+    case "permission.respond":
+      return false;
+  }
 }
 
 async function assertCodexAuthenticated(appServer: RunningCodexAppServer): Promise<void> {

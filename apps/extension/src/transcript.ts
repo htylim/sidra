@@ -68,6 +68,8 @@ type TranscriptEntryInput =
   | Omit<StatusEntry, "id">
   | Omit<PermissionRequestEntry, "id">;
 
+let nextAssistantTurnId = 0;
+
 export type ContextAttachmentMarker =
   | { kind: "page_context_attached"; text: "Page context attached" }
   | { kind: "full_dom_attached"; text: "Full DOM attached" }
@@ -230,15 +232,17 @@ function updateCurrentAssistantTurn(
 ): TranscriptEntry[] {
   const currentAssistantTurnIndex = findLatestAssistantTurnIndexAfterLatestUser(transcript);
   if (currentAssistantTurnIndex === -1) {
-    return [...transcript, update(createAssistantTurn())];
+    const nextTurn = createAssistantTurn();
+    return [...transcript, preserveTranscriptEntryId(nextTurn, update(nextTurn))];
   }
 
   const currentEntry = transcript[currentAssistantTurnIndex];
   if (currentEntry?.kind !== "assistant_turn" || currentEntry.status !== "streaming") {
-    return [...transcript, update(createAssistantTurn())];
+    const nextTurn = createAssistantTurn();
+    return [...transcript, preserveTranscriptEntryId(nextTurn, update(nextTurn))];
   }
 
-  return replaceTranscriptEntry(transcript, currentAssistantTurnIndex, update(currentEntry));
+  return replaceTranscriptEntry(transcript, currentAssistantTurnIndex, preserveTranscriptEntryId(currentEntry, update(currentEntry)));
 }
 
 function setCurrentAssistantTurnStatus(
@@ -250,18 +254,34 @@ function setCurrentAssistantTurnStatus(
 
   const currentEntry = transcript[currentAssistantTurnIndex];
   if (currentEntry?.kind !== "assistant_turn" || currentEntry.status !== "streaming") return transcript;
-  return replaceTranscriptEntry(transcript, currentAssistantTurnIndex, { ...currentEntry, status });
+  return replaceTranscriptEntry(
+    transcript,
+    currentAssistantTurnIndex,
+    preserveTranscriptEntryId(currentEntry, { ...currentEntry, status })
+  );
 }
 
 function createAssistantTurn(): AssistantTurnEntry {
-  return {
-    kind: "assistant_turn",
-    role: "assistant",
-    markdown: "",
-    text: "",
-    activity: createEmptyActivity(),
-    status: "streaming"
-  };
+  return transcriptEntry(
+    {
+      kind: "assistant_turn",
+      role: "assistant",
+      markdown: "",
+      text: "",
+      activity: createEmptyActivity(),
+      status: "streaming"
+    },
+    nextGeneratedAssistantTurnId()
+  ) as AssistantTurnEntry;
+}
+
+function preserveTranscriptEntryId<TEntry extends TranscriptEntry>(previousEntry: TranscriptEntry, nextEntry: TEntry): TEntry {
+  return previousEntry.id ? (transcriptEntry(nextEntry, previousEntry.id) as TEntry) : nextEntry;
+}
+
+function nextGeneratedAssistantTurnId(): string {
+  nextAssistantTurnId += 1;
+  return `assistant-turn-${nextAssistantTurnId}`;
 }
 
 function createEmptyActivity(): TranscriptActivity {

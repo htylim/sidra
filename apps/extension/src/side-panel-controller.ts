@@ -19,6 +19,12 @@ import {
   type SettingsStore
 } from "./settings-store";
 import type { TranscriptEntry, UserPromptDisplay } from "./transcript";
+import {
+  MediaSourceSpeechPlaybackGateway,
+  TranscriptSpeechController,
+  type TranscriptSpeechPlaybackGateway,
+  type TranscriptSpeechSnapshot
+} from "./transcript-speech-controller";
 import { UrlSessionStore, type ContextState, type SendMode } from "./url-session-store";
 
 export type SidePanelSnapshot = {
@@ -33,6 +39,7 @@ export type SidePanelSnapshot = {
     promptFontSizePx: number;
     responseFontSizePx: number;
   };
+  speech: TranscriptSpeechSnapshot;
   activePage: PageIdentity;
   activeSession: {
     pageKey: string;
@@ -67,6 +74,7 @@ export type SidePanelController = {
   updateCaptureMode(captureMode: CaptureMode): void;
   updateSendMode(sendMode: SendMode): void;
   updateDraftPrompt(text: string): void;
+  toggleSpeechForTranscriptEntry(entryId: string, text: string): boolean;
   newChat(): void;
   retryBridge(): void;
   shutdown(): void;
@@ -94,6 +102,8 @@ type SidePanelControllerOptions = {
   captureService?: CaptureServiceLike;
   captureGateway?: CaptureGateway;
   settingsStore?: Pick<SettingsStore, "start" | "getSnapshot" | "whenReady" | "subscribe">;
+  speechPlaybackGateway?: TranscriptSpeechPlaybackGateway;
+  createSpeechRequestId?: () => string;
   openOptionsPage?: () => void;
   providerId?: ProviderId;
 };
@@ -135,32 +145,44 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
   let bridgeSnapshot = connection.getSnapshot();
   let activePageSnapshot = activePageTracker.getSnapshot();
   let settingsSnapshot = settingsStore.getSnapshot();
+  const speechController = new TranscriptSpeechController({
+    transport: connection,
+    playback: options.speechPlaybackGateway ?? new MediaSourceSpeechPlaybackGateway(),
+    settings: settingsSnapshot.transcriptSpeech,
+    createRequestId: options.createSpeechRequestId
+  });
   let settingsReady = false;
   urlSessionStore.selectPage(activePageSnapshot);
   let urlSessionSnapshot = urlSessionStore.getSnapshot();
-  let snapshot = createSnapshot(bridgeSnapshot, activePageSnapshot, urlSessionSnapshot, settingsSnapshot, settingsReady);
+  let speechSnapshot = speechController.getSnapshot();
+  let snapshot = createSnapshot(bridgeSnapshot, activePageSnapshot, urlSessionSnapshot, settingsSnapshot, settingsReady, speechSnapshot);
   let snapshotSettingsSnapshot = settingsSnapshot;
   let snapshotSettingsReady = settingsReady;
+  let snapshotSpeechSnapshot = speechSnapshot;
   let shutdownStarted = false;
 
   const refreshSnapshot = () => {
     const nextBridgeSnapshot = connection.getSnapshot();
     const nextUrlSessionSnapshot = urlSessionStore.getSnapshot();
+    const nextSpeechSnapshot = speechController.getSnapshot();
     if (
       nextBridgeSnapshot === bridgeSnapshot &&
       activePageSnapshot === snapshot.activePage &&
       snapshotsMatch(nextUrlSessionSnapshot, urlSessionSnapshot) &&
       settingsSnapshot === snapshotSettingsSnapshot &&
-      settingsReady === snapshotSettingsReady
+      settingsReady === snapshotSettingsReady &&
+      nextSpeechSnapshot === snapshotSpeechSnapshot
     ) {
       return;
     }
 
     bridgeSnapshot = nextBridgeSnapshot;
     urlSessionSnapshot = nextUrlSessionSnapshot;
-    snapshot = createSnapshot(bridgeSnapshot, activePageSnapshot, urlSessionSnapshot, settingsSnapshot, settingsReady);
+    speechSnapshot = nextSpeechSnapshot;
+    snapshot = createSnapshot(bridgeSnapshot, activePageSnapshot, urlSessionSnapshot, settingsSnapshot, settingsReady, speechSnapshot);
     snapshotSettingsSnapshot = settingsSnapshot;
     snapshotSettingsReady = settingsReady;
+    snapshotSpeechSnapshot = speechSnapshot;
   };
 
   const emit = () => {
@@ -175,25 +197,33 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
 
     if (disconnected) {
       urlSessionStore.markBridgeDisconnected();
+      speechController.stopLocalSpeech();
     }
 
     emit();
   });
   const unsubscribeActivePageTracker = activePageTracker.subscribe(() => {
+    const previousActivePageSnapshot = activePageSnapshot;
     activePageSnapshot = activePageTracker.getSnapshot();
+    if (!activePageIdentityMatches(previousActivePageSnapshot, activePageSnapshot)) {
+      speechController.stopActiveSpeech();
+    }
     urlSessionStore.selectPage(activePageSnapshot);
     emit();
   });
   const unsubscribeUrlSessionStore = urlSessionStore.subscribe(emit);
   const unsubscribeSettingsStore = settingsStore.subscribe(() => {
     settingsSnapshot = settingsStore.getSnapshot();
+    speechController.updateSettings(settingsSnapshot.transcriptSpeech);
     emit();
   });
+  const unsubscribeSpeechController = speechController.subscribe(emit);
   connection.connect();
   void settingsStore.start();
   void settingsStore.whenReady().then(() => {
     if (shutdownStarted) return;
     settingsSnapshot = settingsStore.getSnapshot();
+    speechController.updateSettings(settingsSnapshot.transcriptSpeech);
     settingsReady = true;
     emit();
   });
@@ -285,7 +315,11 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     updateCaptureMode: (captureMode) => urlSessionStore.updateActiveCaptureMode(captureMode),
     updateSendMode: (sendMode) => urlSessionStore.updateActiveSendMode(sendMode),
     updateDraftPrompt: (text) => urlSessionStore.updateActiveDraftPrompt(text),
-    newChat: () => urlSessionStore.newChat(),
+    toggleSpeechForTranscriptEntry: (entryId, text) => speechController.toggleSpeech({ entryId, text }),
+    newChat: () => {
+      speechController.stopActiveSpeech();
+      urlSessionStore.newChat();
+    },
     retryBridge: () => {
       urlSessionStore.markBridgeDisconnected();
       connection.retry();
@@ -298,7 +332,9 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       unsubscribeActivePageTracker();
       unsubscribeUrlSessionStore();
       unsubscribeSettingsStore();
+      unsubscribeSpeechController();
       urlSessionStore.clearAllSessions();
+      speechController.dispose();
       connection.disconnect();
       emit();
     },
@@ -311,7 +347,8 @@ function createSnapshot(
   activePage: PageIdentity,
   urlSessions: ReturnType<UrlSessionStore["getSnapshot"]>,
   settings: SidraSettings,
-  settingsReady: boolean
+  settingsReady: boolean,
+  speech: TranscriptSpeechSnapshot
 ): SidePanelSnapshot {
   const activeSession = urlSessions.activeSession;
   const canUseChat = bridge.availability.status === "ready" && activePage.status === "ready";
@@ -327,6 +364,7 @@ function createSnapshot(
       promptFontSizePx: settings.promptFontSizePx,
       responseFontSizePx: settings.responseFontSizePx
     },
+    speech,
     activePage,
     activeSession: {
       pageKey: activeSession.pageKey,
@@ -390,6 +428,15 @@ function toVisibleQuickAction(action: QuickAction): VisibleQuickAction {
     id: action.id,
     label: action.label
   };
+}
+
+function activePageIdentityMatches(first: PageIdentity, second: PageIdentity): boolean {
+  if (first.status !== second.status) return false;
+  if (first.status === "ready" && second.status === "ready") return first.pageKey === second.pageKey;
+  if (first.status === "unsupported" && second.status === "unsupported") {
+    return first.reason === second.reason && first.url === second.url;
+  }
+  return true;
 }
 
 function createDefaultControllerSettingsSource(): ControllerSettingsSource {

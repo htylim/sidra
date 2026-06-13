@@ -9,10 +9,12 @@ import {
   DEFAULT_QUICK_ACTIONS_SETTINGS,
   DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
   DEFAULT_RESPONSE_FONT_SIZE_PX,
+  DEFAULT_TRANSCRIPT_SPEECH_SETTINGS,
   MAX_TRANSCRIPT_FONT_SIZE_PX,
   MIN_TRANSCRIPT_FONT_SIZE_PX,
   type QuickActionsSettings,
   type SidraSettings,
+  type TranscriptSpeechSettings,
   type SettingsStore
 } from "./settings-store";
 import { OptionsPageView } from "./options-page-view";
@@ -129,7 +131,7 @@ describe("OptionsPage quick actions", () => {
     expect(store.saveCalls).toEqual([]);
 
     store.resolveReadiness();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", false));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true));
   });
 
   it("does_not_overwrite_unsaved_edits_when_live_settings_change", async () => {
@@ -184,7 +186,8 @@ describe("OptionsPage quick actions", () => {
     store.holdSave();
     render(<OptionsPageView settingsStore={store} />);
 
-    await screen.findByLabelText("Action 1 label");
+    const label = await screen.findByLabelText("Action 1 label");
+    await user.type(label, " edited");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(screen.getByLabelText("Action 1 label")).toHaveProperty("disabled", true);
@@ -303,14 +306,193 @@ describe("OptionsPage quick actions", () => {
     expect(await screen.findByDisplayValue("18")).not.toBeNull();
   });
 
+  describe("speech settings", () => {
+    it("options_page_renders_speech_settings", async () => {
+      render(
+        <OptionsPageView
+          settingsStore={
+            new FakeSettingsStore({
+              transcriptSpeech: {
+                enabled: true,
+                voice: "cedar",
+                speed: 1.2,
+                instructions: "Read clearly.",
+                maxCharactersPerBubble: 15_000
+              }
+            })
+          }
+          speechCredentials={new FakeSpeechCredentialClient()}
+        />
+      );
+
+      expect(await screen.findByRole("checkbox", { name: "Enable read aloud" })).toHaveProperty("checked", true);
+      expect(screen.getByRole("combobox", { name: "Voice" })).toHaveProperty("value", "cedar");
+      expect(screen.getByRole("slider", { name: "Speech speed" })).toHaveProperty("value", "1.2");
+      expect(screen.getByRole("textbox", { name: "Speech instructions" })).toHaveProperty("value", "Read clearly.");
+      expect(screen.getByRole("spinbutton", { name: "Maximum characters per bubble" })).toHaveProperty("value", "15000");
+    });
+
+    it("options_page_renders_speech_credential_status_and_key_controls", async () => {
+      render(
+        <OptionsPageView
+          settingsStore={new FakeSettingsStore()}
+          speechCredentials={
+            new FakeSpeechCredentialClient({
+              status: { configured: true, source: "keychain", redactedKey: "sk-...7d42" }
+            })
+          }
+        />
+      );
+
+      expect(await screen.findByText("OpenAI key saved in Keychain, ending in 7d42.")).not.toBeNull();
+      expect(screen.getByLabelText("OpenAI API key")).toHaveProperty("type", "password");
+      expect(screen.getByLabelText("OpenAI API key")).toHaveProperty("placeholder", "Saved key sk-...7d42");
+      expect(screen.getByRole("button", { name: "Save OpenAI API key" })).not.toBeNull();
+      expect(screen.getByRole("button", { name: "Test OpenAI API key" })).not.toBeNull();
+      expect(screen.getByRole("button", { name: "Remove OpenAI API key" })).not.toBeNull();
+      expect(screen.getByText("Stored by the local Sidra bridge in the OS secret store. Not saved in chrome.storage.")).not.toBeNull();
+    });
+
+    it("options_page_saves_tests_and_removes_api_key_through_bridge", async () => {
+      const user = userEvent.setup();
+      const credentials = new FakeSpeechCredentialClient();
+      render(<OptionsPageView settingsStore={new FakeSettingsStore()} speechCredentials={credentials} />);
+
+      const input = await screen.findByLabelText("OpenAI API key");
+      await user.type(input, "sk-test-secret");
+      await user.click(screen.getByRole("button", { name: "Save OpenAI API key" }));
+      await user.type(input, "sk-test-secret");
+      await user.click(screen.getByRole("button", { name: "Test OpenAI API key" }));
+      await user.click(screen.getByRole("button", { name: "Remove OpenAI API key" }));
+
+      expect(credentials.calls).toEqual([
+        { type: "status" },
+        { type: "save", apiKey: "sk-test-secret" },
+        { type: "test", apiKey: "sk-test-secret" },
+        { type: "remove" }
+      ]);
+    });
+
+    it("options_page_observes_synchronous_credential_status_failure", async () => {
+      render(
+        <OptionsPageView
+          settingsStore={new FakeSettingsStore()}
+          speechCredentials={new FakeSpeechCredentialClient({ requestStatusError: "Sidra bridge disconnected." })}
+        />
+      );
+
+      expect(await screen.findByText("Sidra bridge disconnected.")).not.toBeNull();
+    });
+
+    it("options_page_clears_api_key_input_after_secret_actions", async () => {
+      const user = userEvent.setup();
+      const credentials = new FakeSpeechCredentialClient();
+      render(<OptionsPageView settingsStore={new FakeSettingsStore()} speechCredentials={credentials} />);
+
+      const input = await screen.findByLabelText("OpenAI API key");
+      await user.type(input, "sk-test-secret");
+      await user.click(screen.getByRole("button", { name: "Save OpenAI API key" }));
+      expect(input).toHaveProperty("value", "");
+
+      await user.type(input, "sk-test-secret");
+      await user.click(screen.getByRole("button", { name: "Test OpenAI API key" }));
+      expect(input).toHaveProperty("value", "");
+
+      await user.type(input, "sk-test-secret");
+      await user.click(screen.getByRole("button", { name: "Remove OpenAI API key" }));
+      expect(input).toHaveProperty("value", "");
+    });
+
+    it("options_page_validates_speech_settings_before_save", async () => {
+      const user = userEvent.setup();
+      const store = new FakeSettingsStore();
+      render(<OptionsPageView settingsStore={store} speechCredentials={new FakeSpeechCredentialClient()} />);
+
+      fireEvent.change(await screen.findByRole("textbox", { name: "Speech instructions" }), { target: { value: "x".repeat(601) } });
+      fireEvent.change(screen.getByRole("spinbutton", { name: "Maximum characters per bubble" }), { target: { value: "100" } });
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(store.transcriptSpeechSaveCalls).toEqual([]);
+      expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true);
+      expect(screen.getByText("Use 600 characters or fewer.")).not.toBeNull();
+      expect(screen.getByText("Enter a whole number from 500 to 50000.")).not.toBeNull();
+    });
+
+    it("options_page_saves_speech_settings_with_existing_save_flow", async () => {
+      const user = userEvent.setup();
+      const store = new FakeSettingsStore();
+      render(<OptionsPageView settingsStore={store} speechCredentials={new FakeSpeechCredentialClient()} />);
+
+      await user.click(await screen.findByRole("checkbox", { name: "Enable read aloud" }));
+      fireEvent.change(screen.getByRole("combobox", { name: "Voice" }), { target: { value: "cedar" } });
+      fireEvent.change(screen.getByRole("slider", { name: "Speech speed" }), { target: { value: "1.25" } });
+      await user.clear(screen.getByRole("textbox", { name: "Speech instructions" }));
+      await user.type(screen.getByRole("textbox", { name: "Speech instructions" }), "Read like a radio host.");
+      fireEvent.change(screen.getByRole("spinbutton", { name: "Maximum characters per bubble" }), { target: { value: "20000" } });
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(store.transcriptSpeechSaveCalls).toEqual([
+        {
+          enabled: false,
+          voice: "cedar",
+          speed: 1.25,
+          instructions: "Read like a radio host.",
+          maxCharactersPerBubble: 20_000
+        }
+      ]);
+    });
+
+    it("options_page_tests_tts_sample_with_current_speech_settings", async () => {
+      const user = userEvent.setup();
+      const speechPreview = new FakeSpeechPreviewClient();
+      render(
+        <OptionsPageView
+          settingsStore={new FakeSettingsStore()}
+          speechCredentials={
+            new FakeSpeechCredentialClient({
+              status: { configured: true, source: "keychain", redactedKey: "sk-...7d42" }
+            })
+          }
+          speechPreview={speechPreview}
+        />
+      );
+
+      fireEvent.change(await screen.findByRole("combobox", { name: "Voice" }), { target: { value: "cedar" } });
+      fireEvent.change(screen.getByRole("slider", { name: "Speech speed" }), { target: { value: "1.25" } });
+      await user.clear(screen.getByRole("textbox", { name: "Speech instructions" }));
+      await user.type(screen.getByRole("textbox", { name: "Speech instructions" }), "Read like a radio host.");
+      await user.click(screen.getByRole("button", { name: "Play TTS sample" }));
+
+      expect(speechPreview.calls).toEqual([
+        {
+          voice: "cedar",
+          speed: 1.25,
+          instructions: "Read like a radio host."
+        }
+      ]);
+    });
+  });
+
   describe("settings save feedback", () => {
+    it("disables_save_until_settings_are_changed", async () => {
+      const user = userEvent.setup();
+      render(<OptionsPageView settingsStore={new FakeSettingsStore()} />);
+
+      const saveButton = await screen.findByRole("button", { name: "Save" });
+      expect(saveButton).toHaveProperty("disabled", true);
+
+      await user.type(screen.getByLabelText("Action 1 label"), " edited");
+
+      expect(saveButton).toHaveProperty("disabled", false);
+    });
+
     it("shows_saving_feedback_and_busy_state_while_quick_action_save_is_in_flight", async () => {
       const user = userEvent.setup();
       const store = new FakeSettingsStore();
       store.holdSave();
       render(<OptionsPageView settingsStore={store} />);
 
-      await screen.findByLabelText("Action 1 label");
+      await user.type(await screen.findByLabelText("Action 1 label"), " edited");
       await user.click(screen.getByRole("button", { name: "Save" }));
 
       const saveButton = screen.getByRole("button", { name: "Saving..." });
@@ -324,11 +506,23 @@ describe("OptionsPage quick actions", () => {
       store.holdSave();
       render(<OptionsPageView settingsStore={store} />);
 
-      await screen.findByLabelText("Action 1 label");
+      await user.type(await screen.findByLabelText("Action 1 label"), " edited");
       await user.click(screen.getByRole("button", { name: "Save" }));
       store.resolveSave();
 
       expect((await screen.findByRole("button", { name: "Save" })).getAttribute("aria-busy")).toBeNull();
+    });
+
+    it("shows_success_feedback_and_disables_save_after_successful_save", async () => {
+      const user = userEvent.setup();
+      const store = new FakeSettingsStore();
+      render(<OptionsPageView settingsStore={store} />);
+
+      await user.type(await screen.findByLabelText("Action 1 label"), " edited");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(await screen.findByText("Settings saved.")).not.toBeNull();
+      expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true);
     });
 
     it("restores_save_button_label_after_failed_quick_action_save", async () => {
@@ -337,7 +531,7 @@ describe("OptionsPage quick actions", () => {
       store.nextSaveError = new Error("quota exceeded");
       render(<OptionsPageView settingsStore={store} />);
 
-      await screen.findByLabelText("Action 1 label");
+      await user.type(await screen.findByLabelText("Action 1 label"), " edited");
       await user.click(screen.getByRole("button", { name: "Save" }));
 
       expect((await screen.findByRole("button", { name: "Save" })).getAttribute("aria-busy")).toBeNull();
@@ -476,11 +670,17 @@ class FakeSettingsStore
   implements
     Pick<
       SettingsStore,
-      "getSnapshot" | "whenReady" | "subscribe" | "saveQuickActions" | "saveTranscriptFontSizesPx"
+      | "getSnapshot"
+      | "whenReady"
+      | "subscribe"
+      | "saveQuickActions"
+      | "saveTranscriptFontSizesPx"
+      | "saveTranscriptSpeechSettings"
     >
 {
   readonly saveCalls: QuickActionsSettings[] = [];
   readonly transcriptFontSizeSaveCalls: Array<{ promptFontSizePx: number; responseFontSizePx: number }> = [];
+  readonly transcriptSpeechSaveCalls: TranscriptSpeechSettings[] = [];
   nextSaveError: Error | undefined;
   private readonly listeners = new Set<() => void>();
   private snapshot: SidraSettings;
@@ -496,6 +696,7 @@ class FakeSettingsStore
       promptFontSizePx: DEFAULT_PROMPT_FONT_SIZE_PX,
       responseFontSizePx: DEFAULT_RESPONSE_FONT_SIZE_PX,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
+      transcriptSpeech: DEFAULT_TRANSCRIPT_SPEECH_SETTINGS,
       ...overrides
     };
   }
@@ -506,7 +707,8 @@ class FakeSettingsStore
       quickActions: {
         enabled: this.snapshot.quickActions.enabled,
         actions: this.snapshot.quickActions.actions.map((action) => ({ ...action }))
-      }
+      },
+      transcriptSpeech: { ...this.snapshot.transcriptSpeech }
     };
   }
 
@@ -533,6 +735,17 @@ class FakeSettingsStore
           .filter((action) => action.label.trim() && action.prompt.trim())
           .map((action) => ({ ...action, label: action.label.trim(), prompt: action.prompt.trim() }))
       }
+    };
+    for (const listener of this.listeners) listener();
+  }
+
+  async saveTranscriptSpeechSettings(nextTranscriptSpeech: TranscriptSpeechSettings): Promise<void> {
+    if (this.nextSaveError) throw this.nextSaveError;
+    if (this.savePromise) await this.savePromise;
+    this.transcriptSpeechSaveCalls.push(nextTranscriptSpeech);
+    this.snapshot = {
+      ...this.snapshot,
+      transcriptSpeech: { ...nextTranscriptSpeech }
     };
     for (const listener of this.listeners) listener();
   }
@@ -580,5 +793,100 @@ class FakeSettingsStore
   resolveSave(): void {
     this.resolvePendingSave?.();
     this.savePromise = undefined;
+  }
+}
+
+type FakeSpeechCredentialStatus =
+  | { configured: false }
+  | { configured: true; source: "keychain" | "environment"; redactedKey: string };
+
+class FakeSpeechCredentialClient {
+  readonly calls: Array<{ type: "status" } | { type: "save"; apiKey: string } | { type: "test"; apiKey?: string } | { type: "remove" }> = [];
+  private readonly listeners = new Set<() => void>();
+  private readonly requestStatusError: string | undefined;
+  private snapshot: { status: FakeSpeechCredentialStatus; busy: boolean; error?: string; disconnectGeneration: number };
+
+  constructor(overrides: Partial<{ status: FakeSpeechCredentialStatus; busy: boolean; error: string; requestStatusError: string }> = {}) {
+    const { requestStatusError, ...snapshotOverrides } = overrides;
+    this.requestStatusError = requestStatusError;
+    this.snapshot = {
+      status: { configured: false },
+      busy: false,
+      disconnectGeneration: 0,
+      ...snapshotOverrides
+    };
+  }
+
+  getSnapshot() {
+    return this.snapshot;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  requestStatus(): void {
+    this.calls.push({ type: "status" });
+    if (!this.requestStatusError) return;
+    this.snapshot = {
+      ...this.snapshot,
+      busy: false,
+      error: this.requestStatusError
+    };
+    this.emit();
+  }
+
+  saveApiKey(apiKey: string) {
+    this.calls.push({ type: "save", apiKey });
+    this.snapshot = {
+      status: { configured: true, source: "keychain", redactedKey: "sk-...cret" },
+      busy: false,
+      disconnectGeneration: this.snapshot.disconnectGeneration
+    };
+    this.emit();
+    return { ok: true as const };
+  }
+
+  testApiKey(apiKey?: string) {
+    this.calls.push(apiKey === undefined ? { type: "test" } : { type: "test", apiKey });
+    return { ok: true as const };
+  }
+
+  removeApiKey() {
+    this.calls.push({ type: "remove" });
+    this.snapshot = { status: { configured: false }, busy: false, disconnectGeneration: this.snapshot.disconnectGeneration };
+    this.emit();
+    return { ok: true as const };
+  }
+
+  private emit(): void {
+    for (const listener of this.listeners) listener();
+  }
+}
+
+class FakeSpeechPreviewClient {
+  readonly calls: Array<{ voice: string; speed: number; instructions: string }> = [];
+  private readonly listeners = new Set<() => void>();
+  private snapshot: { status: "idle" | "loading" | "playing" | "paused" | "error"; error?: string } = { status: "idle" };
+
+  getSnapshot() {
+    return this.snapshot;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  playSample(settings: { voice: string; speed: number; instructions: string }) {
+    this.calls.push(settings);
+    this.snapshot = { status: "playing" };
+    for (const listener of this.listeners) listener();
+    return { ok: true as const };
   }
 }

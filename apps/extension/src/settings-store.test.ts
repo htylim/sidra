@@ -6,6 +6,7 @@ import {
   DEFAULT_PROMPT_FONT_SIZE_PX,
   DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
   DEFAULT_RESPONSE_FONT_SIZE_PX,
+  DEFAULT_TRANSCRIPT_SPEECH_SETTINGS,
   MAX_DOM_CONTENT_LIMIT_CHARACTERS,
   MAX_READABLE_CONTENT_LIMIT_CHARACTERS,
   MAX_TRANSCRIPT_FONT_SIZE_PX,
@@ -23,8 +24,76 @@ const DEFAULT_FONT_SIZE_FIELDS = {
   promptFontSizePx: DEFAULT_PROMPT_FONT_SIZE_PX,
   responseFontSizePx: DEFAULT_RESPONSE_FONT_SIZE_PX
 };
+const DEFAULT_TRANSCRIPT_SPEECH_FIELD = {
+  transcriptSpeech: DEFAULT_TRANSCRIPT_SPEECH_SETTINGS
+};
 
 describe("SettingsStore", () => {
+  it("settings_defaults_include_transcript_speech", async () => {
+    const store = new SettingsStore({ storage: new FakeSettingsStorage() });
+
+    await store.start();
+
+    expect(store.getSnapshot().transcriptSpeech).toEqual(DEFAULT_TRANSCRIPT_SPEECH_SETTINGS);
+  });
+
+  it("settings_parse_invalid_transcript_speech_values_to_defaults", async () => {
+    const store = new SettingsStore({
+      storage: new FakeSettingsStorage({
+        [SIDRA_SETTINGS_STORAGE_KEY]: {
+          transcriptSpeech: {
+            enabled: "yes",
+            voice: "made-up",
+            speed: 9,
+            instructions: "x".repeat(601),
+            maxCharactersPerBubble: 100
+          }
+        }
+      })
+    });
+
+    await store.start();
+
+    expect(store.getSnapshot().transcriptSpeech).toEqual(DEFAULT_TRANSCRIPT_SPEECH_SETTINGS);
+  });
+
+  it("save_transcript_speech_preserves_other_settings", async () => {
+    const storage = new FakeSettingsStorage({
+      [SIDRA_SETTINGS_STORAGE_KEY]: {
+        readableContentLimitCharacters: 5_000,
+        domContentLimitCharacters: 6_000,
+        promptFontSizePx: 14,
+        responseFontSizePx: 19,
+        quickActions: { enabled: false, actions: [{ id: "explain", label: "Explain", prompt: "Explain this" }] }
+      }
+    });
+    const store = new SettingsStore({ storage });
+    await store.start();
+
+    await store.saveTranscriptSpeechSettings({
+      enabled: false,
+      voice: "cedar",
+      speed: 1.25,
+      instructions: "Read like a radio host.",
+      maxCharactersPerBubble: 20_000
+    });
+
+    expect(storage.storedSnapshot()[SIDRA_SETTINGS_STORAGE_KEY]).toMatchObject({
+      readableContentLimitCharacters: 5_000,
+      domContentLimitCharacters: 6_000,
+      promptFontSizePx: 14,
+      responseFontSizePx: 19,
+      quickActions: { enabled: false, actions: [{ id: "explain", label: "Explain", prompt: "Explain this" }] },
+      transcriptSpeech: {
+        enabled: false,
+        voice: "cedar",
+        speed: 1.25,
+        instructions: "Read like a radio host.",
+        maxCharactersPerBubble: 20_000
+      }
+    });
+  });
+
   it("loads_default_readable_content_limit_when_storage_is_empty", async () => {
     const store = new SettingsStore({ storage: new FakeSettingsStorage() });
 
@@ -34,7 +103,8 @@ describe("SettingsStore", () => {
       domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
-      ...DEFAULT_FONT_SIZE_FIELDS
+      ...DEFAULT_FONT_SIZE_FIELDS,
+      ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
   });
 
@@ -51,7 +121,8 @@ describe("SettingsStore", () => {
       domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: 42_000,
-      ...DEFAULT_FONT_SIZE_FIELDS
+      ...DEFAULT_FONT_SIZE_FIELDS,
+      ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
   });
 
@@ -111,7 +182,8 @@ describe("SettingsStore", () => {
       domContentLimitCharacters: 222_000,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
-      ...DEFAULT_FONT_SIZE_FIELDS
+      ...DEFAULT_FONT_SIZE_FIELDS,
+      ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
   });
 
@@ -208,7 +280,8 @@ describe("SettingsStore", () => {
       domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: 42_000,
-      ...DEFAULT_FONT_SIZE_FIELDS
+      ...DEFAULT_FONT_SIZE_FIELDS,
+      ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
   });
 
@@ -228,7 +301,8 @@ describe("SettingsStore", () => {
       domContentLimitCharacters: 222_000,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
-      ...DEFAULT_FONT_SIZE_FIELDS
+      ...DEFAULT_FONT_SIZE_FIELDS,
+      ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
   });
 
@@ -396,7 +470,8 @@ describe("SettingsStore", () => {
       readableContentLimitCharacters: 4_000,
       domContentLimitCharacters: 444_000,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
-      ...DEFAULT_FONT_SIZE_FIELDS
+      ...DEFAULT_FONT_SIZE_FIELDS,
+      ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
   });
 
@@ -578,6 +653,7 @@ describe("SettingsStore", () => {
           readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
           domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
           ...DEFAULT_FONT_SIZE_FIELDS,
+          ...DEFAULT_TRANSCRIPT_SPEECH_FIELD,
           quickActions: {
             enabled: false,
             actions: [{ id: "custom", label: "Custom", prompt: "Prompt" }]
@@ -645,7 +721,8 @@ describe("SettingsStore", () => {
           domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
           promptFontSizePx: 14,
           responseFontSizePx: 18,
-          quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS
+          quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
+          ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
         }
       }
     ]);

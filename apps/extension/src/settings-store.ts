@@ -1,9 +1,22 @@
+import type { SpeechVoice } from "@sidra/protocol";
+
 export type SidraSettings = {
   readableContentLimitCharacters: number;
   domContentLimitCharacters: number;
   promptFontSizePx: number;
   responseFontSizePx: number;
   quickActions: QuickActionsSettings;
+  transcriptSpeech: TranscriptSpeechSettings;
+};
+
+export type TranscriptSpeechVoice = SpeechVoice;
+
+export type TranscriptSpeechSettings = {
+  enabled: boolean;
+  voice: TranscriptSpeechVoice;
+  speed: number;
+  instructions: string;
+  maxCharactersPerBubble: number;
 };
 
 export type QuickAction = {
@@ -42,6 +55,36 @@ export const DEFAULT_PROMPT_FONT_SIZE_PX = 15;
 export const DEFAULT_RESPONSE_FONT_SIZE_PX = 17;
 export const MIN_TRANSCRIPT_FONT_SIZE_PX = 12;
 export const MAX_TRANSCRIPT_FONT_SIZE_PX = 22;
+export const TRANSCRIPT_SPEECH_VOICES: TranscriptSpeechVoice[] = [
+  "marin",
+  "cedar",
+  "alloy",
+  "ash",
+  "ballad",
+  "coral",
+  "echo",
+  "fable",
+  "nova",
+  "onyx",
+  "sage",
+  "shimmer",
+  "verse"
+];
+export const DEFAULT_TRANSCRIPT_SPEECH_INSTRUCTIONS =
+  "Read naturally and clearly. Preserve the text language. Use a calm conversational tone.";
+export const DEFAULT_TRANSCRIPT_SPEECH_SETTINGS: TranscriptSpeechSettings = {
+  enabled: true,
+  voice: "marin",
+  speed: 1,
+  instructions: DEFAULT_TRANSCRIPT_SPEECH_INSTRUCTIONS,
+  maxCharactersPerBubble: 12_000
+};
+export const MIN_TRANSCRIPT_SPEECH_SPEED = 0.75;
+export const MAX_TRANSCRIPT_SPEECH_SPEED = 1.5;
+export const TRANSCRIPT_SPEECH_SPEED_STEP = 0.05;
+export const MAX_TRANSCRIPT_SPEECH_INSTRUCTIONS_CHARACTERS = 600;
+export const MIN_TRANSCRIPT_SPEECH_BUBBLE_CHARACTERS = 500;
+export const MAX_TRANSCRIPT_SPEECH_BUBBLE_CHARACTERS = 50_000;
 export const SIDRA_SETTINGS_STORAGE_KEY = "sidra.settings.v1";
 export const DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT = `Summarize this article following the instructions below.
 
@@ -135,6 +178,15 @@ export class SettingsStore {
     this.setSnapshot(nextSnapshot);
   }
 
+  async saveTranscriptSpeechSettings(nextTranscriptSpeech: TranscriptSpeechSettings): Promise<void> {
+    const nextSnapshot = {
+      ...this.getSnapshot(),
+      transcriptSpeech: normalizeTranscriptSpeechSettings(nextTranscriptSpeech, DEFAULT_TRANSCRIPT_SPEECH_SETTINGS)
+    };
+    await this.storage.set({ [SIDRA_SETTINGS_STORAGE_KEY]: cloneSettings(nextSnapshot) });
+    this.setSnapshot(nextSnapshot);
+  }
+
   private async loadInitialSettings(loadGeneration: number): Promise<void> {
     const generationAtLoadStart = this.liveChangeGeneration;
     let stored: unknown;
@@ -162,7 +214,8 @@ export class SettingsStore {
       nextSnapshot.domContentLimitCharacters === this.snapshot.domContentLimitCharacters &&
       nextSnapshot.promptFontSizePx === this.snapshot.promptFontSizePx &&
       nextSnapshot.responseFontSizePx === this.snapshot.responseFontSizePx &&
-      quickActionsMatch(nextSnapshot.quickActions, this.snapshot.quickActions)
+      quickActionsMatch(nextSnapshot.quickActions, this.snapshot.quickActions) &&
+      transcriptSpeechSettingsMatch(nextSnapshot.transcriptSpeech, this.snapshot.transcriptSpeech)
     ) {
       return;
     }
@@ -217,7 +270,8 @@ function parseStoredSettings(value: unknown): SidraSettings {
     responseFontSizePx: isValidTranscriptFontSize(responseFontSizePx)
       ? responseFontSizePx
       : legacyTranscriptFontSize ?? defaults.responseFontSizePx,
-    quickActions: parseQuickActionsSettings(value.quickActions)
+    quickActions: parseQuickActionsSettings(value.quickActions),
+    transcriptSpeech: parseTranscriptSpeechSettings(value.transcriptSpeech)
   };
 }
 
@@ -227,7 +281,8 @@ function defaultSidraSettings(): SidraSettings {
     domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
     promptFontSizePx: DEFAULT_PROMPT_FONT_SIZE_PX,
     responseFontSizePx: DEFAULT_RESPONSE_FONT_SIZE_PX,
-    quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS
+    quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
+    transcriptSpeech: DEFAULT_TRANSCRIPT_SPEECH_SETTINGS
   };
 }
 
@@ -237,7 +292,33 @@ function cloneSettings(settings: SidraSettings): SidraSettings {
     domContentLimitCharacters: settings.domContentLimitCharacters,
     promptFontSizePx: settings.promptFontSizePx,
     responseFontSizePx: settings.responseFontSizePx,
-    quickActions: cloneQuickActionsSettings(settings.quickActions)
+    quickActions: cloneQuickActionsSettings(settings.quickActions),
+    transcriptSpeech: { ...settings.transcriptSpeech }
+  };
+}
+
+function parseTranscriptSpeechSettings(value: unknown): TranscriptSpeechSettings {
+  if (!isRecord(value)) return { ...DEFAULT_TRANSCRIPT_SPEECH_SETTINGS };
+  return normalizeTranscriptSpeechSettings(value, DEFAULT_TRANSCRIPT_SPEECH_SETTINGS);
+}
+
+function normalizeTranscriptSpeechSettings(value: unknown, fallback: TranscriptSpeechSettings): TranscriptSpeechSettings {
+  if (!isRecord(value)) return { ...fallback };
+
+  const enabled = typeof value.enabled === "boolean" ? value.enabled : fallback.enabled;
+  const voice = isTranscriptSpeechVoice(value.voice) ? value.voice : fallback.voice;
+  const speed = isValidTranscriptSpeechSpeed(value.speed) ? value.speed : fallback.speed;
+  const instructions = normalizeSpeechInstructions(value.instructions, fallback.instructions);
+  const maxCharactersPerBubble = isValidTranscriptSpeechBubbleLimit(value.maxCharactersPerBubble)
+    ? value.maxCharactersPerBubble
+    : fallback.maxCharactersPerBubble;
+
+  return {
+    enabled,
+    voice,
+    speed,
+    instructions,
+    maxCharactersPerBubble
   };
 }
 
@@ -314,6 +395,16 @@ function quickActionsMatch(first: QuickActionsSettings, second: QuickActionsSett
   });
 }
 
+function transcriptSpeechSettingsMatch(first: TranscriptSpeechSettings, second: TranscriptSpeechSettings): boolean {
+  return (
+    first.enabled === second.enabled &&
+    first.voice === second.voice &&
+    first.speed === second.speed &&
+    first.instructions === second.instructions &&
+    first.maxCharactersPerBubble === second.maxCharactersPerBubble
+  );
+}
+
 function isValidReadableContentLimit(value: unknown): value is number {
   return (
     typeof value === "number" &&
@@ -339,6 +430,34 @@ function isValidTranscriptFontSize(value: unknown): value is number {
     value >= MIN_TRANSCRIPT_FONT_SIZE_PX &&
     value <= MAX_TRANSCRIPT_FONT_SIZE_PX
   );
+}
+
+function isTranscriptSpeechVoice(value: unknown): value is TranscriptSpeechVoice {
+  return typeof value === "string" && TRANSCRIPT_SPEECH_VOICES.includes(value as TranscriptSpeechVoice);
+}
+
+function isValidTranscriptSpeechSpeed(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= MIN_TRANSCRIPT_SPEECH_SPEED &&
+    value <= MAX_TRANSCRIPT_SPEECH_SPEED
+  );
+}
+
+function isValidTranscriptSpeechBubbleLimit(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= MIN_TRANSCRIPT_SPEECH_BUBBLE_CHARACTERS &&
+    value <= MAX_TRANSCRIPT_SPEECH_BUBBLE_CHARACTERS
+  );
+}
+
+function normalizeSpeechInstructions(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  return trimmed.length <= MAX_TRANSCRIPT_SPEECH_INSTRUCTIONS_CHARACTERS ? trimmed : fallback;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

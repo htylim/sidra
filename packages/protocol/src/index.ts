@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const BRIDGE_PAYLOAD_TOO_LARGE_CODE = "payload_too_large";
 export const BRIDGE_PAYLOAD_TOO_LARGE_MESSAGE = "Payload is too large.";
 export const BRIDGE_HARD_PAYLOAD_BYTE_LIMIT = 1_000_000;
@@ -8,6 +8,45 @@ export type SerializedJsonByteLengthResult =
   | { ok: false; error: "not_json_serializable" };
 
 export type ProviderId = "codex";
+export type SpeechModel = "gpt-4o-mini-tts" | "tts-1" | "tts-1-hd";
+export type SpeechVoice =
+  | "marin"
+  | "cedar"
+  | "alloy"
+  | "ash"
+  | "ballad"
+  | "coral"
+  | "echo"
+  | "fable"
+  | "nova"
+  | "onyx"
+  | "sage"
+  | "shimmer"
+  | "verse";
+export type SpeechAudioFormat = "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm";
+export type SpeechSynthesisOptions = {
+  model: SpeechModel;
+  voice: SpeechVoice;
+  format: SpeechAudioFormat;
+  speed: number;
+  instructions?: string;
+};
+export type SpeechCredentialSource = "keychain" | "environment";
+export type SpeechCredentialStatus =
+  | { configured: false }
+  | { configured: true; source: SpeechCredentialSource; redactedKey: string };
+export type SpeechErrorCode =
+  | "openai_api_key_missing"
+  | "openai_request_failed"
+  | "speech_cancelled"
+  | "speech_request_not_found"
+  | "speech_invalid_request"
+  | "unknown_error";
+export type SpeechCredentialErrorCode =
+  | "credential_store_failed"
+  | "credential_test_failed"
+  | "credential_missing"
+  | "unknown_error";
 
 export type PageContextMetadata = {
   url: string;
@@ -48,28 +87,40 @@ export type PageContext =
 export type ExtensionToBridge =
   | {
       type: "session.start";
-      version: 2;
+      version: 3;
       clientSessionId: string;
       providerId: ProviderId;
     }
   | {
       type: "session.send";
-      version: 2;
+      version: 3;
       clientSessionId: string;
       prompt: string;
       pageContext?: PageContext;
     }
-  | { type: "session.cancel"; version: 2; clientSessionId: string }
-  | { type: "session.reset"; version: 2; clientSessionId: string }
-  | { type: "session.close"; version: 2; clientSessionId: string }
+  | { type: "session.cancel"; version: 3; clientSessionId: string }
+  | { type: "session.reset"; version: 3; clientSessionId: string }
+  | { type: "session.close"; version: 3; clientSessionId: string }
   | {
       type: "permission.respond";
-      version: 2;
+      version: 3;
       clientSessionId: string;
       requestId: string;
       decision: PermissionDecision;
     }
-  | { type: "heartbeat"; version: 2 };
+  | {
+      type: "speech.synthesize";
+      version: 3;
+      requestId: string;
+      text: string;
+      options: SpeechSynthesisOptions;
+    }
+  | { type: "speech.cancel"; version: 3; requestId: string }
+  | { type: "speech.credentials.status"; version: 3 }
+  | { type: "speech.credentials.save"; version: 3; apiKey: string }
+  | { type: "speech.credentials.test"; version: 3; apiKey?: string }
+  | { type: "speech.credentials.remove"; version: 3 }
+  | { type: "heartbeat"; version: 3 };
 
 export type PermissionRequestMetadata = {
   toolName?: string;
@@ -133,25 +184,34 @@ export type BridgeErrorCode = "invalid_message" | "internal_error" | "payload_to
 export type BridgeToExtension =
   | {
       type: "session.started";
-      version: 2;
+      version: 3;
       clientSessionId: string;
       bridgeSessionId: string;
     }
   | {
       type: "agent.event";
-      version: 2;
+      version: 3;
       clientSessionId: string;
       event: AgentEvent;
     }
   | {
       type: "permission.request";
-      version: 2;
+      version: 3;
       clientSessionId: string;
       request: PermissionRequest;
     }
-  | { type: "session.error"; version: 2; clientSessionId: string; message: string; code?: SessionErrorCode }
-  | { type: "bridge.ready"; version: 2 }
-  | { type: "bridge.error"; version: 2; message: string; code?: BridgeErrorCode };
+  | { type: "session.error"; version: 3; clientSessionId: string; message: string; code?: SessionErrorCode }
+  | { type: "bridge.ready"; version: 3 }
+  | { type: "bridge.error"; version: 3; message: string; code?: BridgeErrorCode }
+  | { type: "speech.started"; version: 3; requestId: string; mimeType: string }
+  | { type: "speech.chunk"; version: 3; requestId: string; sequence: number; audioBase64: string }
+  | { type: "speech.done"; version: 3; requestId: string }
+  | { type: "speech.error"; version: 3; requestId: string; message: string; code?: SpeechErrorCode }
+  | ({ type: "speech.credentials.status"; version: 3 } & SpeechCredentialStatus)
+  | ({ type: "speech.credentials.saved"; version: 3 } & Extract<SpeechCredentialStatus, { configured: true }>)
+  | { type: "speech.credentials.tested"; version: 3; ok: true }
+  | ({ type: "speech.credentials.removed"; version: 3 } & SpeechCredentialStatus)
+  | { type: "speech.credentials.error"; version: 3; message: string; code?: SpeechCredentialErrorCode };
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -258,6 +318,60 @@ export function parseExtensionToBridge(input: unknown): ParseResult<ExtensionToB
           decision: input.decision
         }
       };
+    case "speech.synthesize":
+      if (!hasOnlyKeys(input, ["type", "version", "requestId", "text", "options"])) {
+        return invalid("Message has invalid fields");
+      }
+      if (!isNonEmptyString(input.requestId)) return invalid("requestId is required");
+      if (!isBoundedDisplayString(input.text, SPEECH_TEXT_CHARACTER_LIMIT)) return invalid("text is required");
+      {
+        const options = parseSpeechSynthesisOptions(input.options);
+        if (!options) return invalid("speech options are invalid");
+        return {
+          ok: true,
+          value: {
+            type: "speech.synthesize",
+            version: PROTOCOL_VERSION,
+            requestId: input.requestId,
+            text: input.text,
+            options
+          }
+        };
+      }
+    case "speech.cancel":
+      if (!hasOnlyKeys(input, ["type", "version", "requestId"])) {
+        return invalid("Message has invalid fields");
+      }
+      if (!isNonEmptyString(input.requestId)) return invalid("requestId is required");
+      return {
+        ok: true,
+        value: {
+          type: "speech.cancel",
+          version: PROTOCOL_VERSION,
+          requestId: input.requestId
+        }
+      };
+    case "speech.credentials.status":
+    case "speech.credentials.remove":
+      if (!hasOnlyKeys(input, ["type", "version"])) return invalid("Message has invalid fields");
+      return { ok: true, value: { type: input.type, version: PROTOCOL_VERSION } };
+    case "speech.credentials.save":
+      if (!hasOnlyKeys(input, ["type", "version", "apiKey"])) return invalid("Message has invalid fields");
+      if (!isNonEmptyString(input.apiKey)) return invalid("apiKey is required");
+      return {
+        ok: true,
+        value: { type: "speech.credentials.save", version: PROTOCOL_VERSION, apiKey: input.apiKey }
+      };
+    case "speech.credentials.test":
+      if (!hasOnlyKeys(input, ["type", "version", "apiKey"])) return invalid("Message has invalid fields");
+      if (input.apiKey !== undefined && !isNonEmptyString(input.apiKey)) return invalid("apiKey is required");
+      return {
+        ok: true,
+        value:
+          input.apiKey === undefined
+            ? { type: "speech.credentials.test", version: PROTOCOL_VERSION }
+            : { type: "speech.credentials.test", version: PROTOCOL_VERSION, apiKey: input.apiKey }
+      };
     case "heartbeat":
       if (!hasOnlyKeys(input, ["type", "version"])) return invalid("Message has invalid fields");
       return { ok: true, value: { type: "heartbeat", version: PROTOCOL_VERSION } };
@@ -350,6 +464,102 @@ export function parseBridgeToExtension(input: unknown): ParseResult<BridgeToExte
       if (!optionalBridgeErrorCode(input.code)) return invalid("code is invalid");
       {
         const value: BridgeToExtension = { type: "bridge.error", version: PROTOCOL_VERSION, message: input.message };
+        if (input.code !== undefined) value.code = input.code;
+        return { ok: true, value };
+      }
+    case "speech.started":
+      if (!hasOnlyKeys(input, ["type", "version", "requestId", "mimeType"])) {
+        return invalid("Message has invalid fields");
+      }
+      if (!isNonEmptyString(input.requestId)) return invalid("requestId is required");
+      if (!isNonEmptyString(input.mimeType)) return invalid("mimeType is required");
+      return {
+        ok: true,
+        value: { type: "speech.started", version: PROTOCOL_VERSION, requestId: input.requestId, mimeType: input.mimeType }
+      };
+    case "speech.chunk":
+      if (!hasOnlyKeys(input, ["type", "version", "requestId", "sequence", "audioBase64"])) {
+        return invalid("Message has invalid fields");
+      }
+      if (!isNonEmptyString(input.requestId)) return invalid("requestId is required");
+      if (!isNonNegativeInteger(input.sequence)) return invalid("sequence is invalid");
+      if (!isNonEmptyString(input.audioBase64)) return invalid("audioBase64 is required");
+      return {
+        ok: true,
+        value: {
+          type: "speech.chunk",
+          version: PROTOCOL_VERSION,
+          requestId: input.requestId,
+          sequence: input.sequence,
+          audioBase64: input.audioBase64
+        }
+      };
+    case "speech.done":
+      if (!hasOnlyKeys(input, ["type", "version", "requestId"])) {
+        return invalid("Message has invalid fields");
+      }
+      if (!isNonEmptyString(input.requestId)) return invalid("requestId is required");
+      return { ok: true, value: { type: "speech.done", version: PROTOCOL_VERSION, requestId: input.requestId } };
+    case "speech.error":
+      if (!hasOnlyKeys(input, ["type", "version", "requestId", "message", "code"])) {
+        return invalid("Message has invalid fields");
+      }
+      if (!isNonEmptyString(input.requestId)) return invalid("requestId is required");
+      if (!isNonEmptyString(input.message)) return invalid("message is required");
+      if (!optionalSpeechErrorCode(input.code)) return invalid("code is invalid");
+      {
+        const value: BridgeToExtension = {
+          type: "speech.error",
+          version: PROTOCOL_VERSION,
+          requestId: input.requestId,
+          message: input.message
+        };
+        if (input.code !== undefined) value.code = input.code;
+        return { ok: true, value };
+      }
+    case "speech.credentials.status":
+      if (!hasOnlyKeys(input, ["type", "version", "configured", "source", "redactedKey"])) {
+        return invalid("Message has invalid fields");
+      }
+      {
+        const status = parseSpeechCredentialStatus(input);
+        if (!status) return invalid("credential status is invalid");
+        return { ok: true, value: { type: "speech.credentials.status", version: PROTOCOL_VERSION, ...status } };
+      }
+    case "speech.credentials.saved":
+      if (!hasOnlyKeys(input, ["type", "version", "configured", "source", "redactedKey"])) {
+        return invalid("Message has invalid fields");
+      }
+      {
+        const status = parseSpeechCredentialStatus(input);
+        if (!status || !status.configured) return invalid("credential status is invalid");
+        return { ok: true, value: { type: "speech.credentials.saved", version: PROTOCOL_VERSION, ...status } };
+      }
+    case "speech.credentials.tested":
+      if (!hasOnlyKeys(input, ["type", "version", "ok"])) return invalid("Message has invalid fields");
+      if (input.ok !== true) return invalid("ok is invalid");
+      return { ok: true, value: { type: "speech.credentials.tested", version: PROTOCOL_VERSION, ok: true } };
+    case "speech.credentials.removed":
+      if (!hasOnlyKeys(input, ["type", "version", "configured", "source", "redactedKey"])) {
+        return invalid("Message has invalid fields");
+      }
+      {
+        const status = parseSpeechCredentialStatus(input);
+        if (!status) return invalid("credential status is invalid");
+        return { ok: true, value: { type: "speech.credentials.removed", version: PROTOCOL_VERSION, ...status } };
+      }
+    case "speech.credentials.error":
+      if (!hasOnlyKeys(input, ["type", "version", "message", "code"])) {
+        return invalid("Message has invalid fields");
+      }
+      if (!isNonEmptyString(input.message)) return invalid("message is required");
+      if (!optionalSpeechCredentialErrorCode(input.code)) return invalid("code is invalid");
+      {
+        const value: BridgeToExtension = {
+          type: "speech.credentials.error",
+          version: PROTOCOL_VERSION,
+          message: input.message
+        };
         if (input.code !== undefined) value.code = input.code;
         return { ok: true, value };
       }
@@ -498,6 +708,10 @@ const SAFE_ACTIVITY_DETAIL_LABEL_LIMIT = 80;
 const SAFE_ACTIVITY_DETAIL_VALUE_LIMIT = 2_000;
 const SAFE_ACTIVITY_TEXT_LIMIT = 8_000;
 const SAFE_ACTIVITY_DETAIL_COUNT_LIMIT = 12;
+const SPEECH_TEXT_CHARACTER_LIMIT = 50_000;
+const SPEECH_INSTRUCTIONS_CHARACTER_LIMIT = 2_000;
+const SPEECH_MIN_SPEED = 0.25;
+const SPEECH_MAX_SPEED = 4;
 const BLOCKED_ACTIVITY_FIELD_NAMES = new Set([
   "reasoning",
   "chainofthought",
@@ -584,6 +798,74 @@ function isPermissionDecision(value: unknown): value is PermissionDecision {
   return value === "allow_once" || value === "allow_for_session" || value === "deny";
 }
 
+function parseSpeechSynthesisOptions(value: unknown): SpeechSynthesisOptions | null {
+  if (!isRecord(value)) return null;
+  if (!hasOnlyKeys(value, ["model", "voice", "format", "speed", "instructions"])) return null;
+  if (!isSpeechModel(value.model)) return null;
+  if (!isSpeechVoice(value.voice)) return null;
+  if (!isSpeechAudioFormat(value.format)) return null;
+  if (typeof value.speed !== "number" || !Number.isFinite(value.speed)) return null;
+  if (value.speed < SPEECH_MIN_SPEED || value.speed > SPEECH_MAX_SPEED) return null;
+  if (
+    value.instructions !== undefined &&
+    (typeof value.instructions !== "string" || value.instructions.length > SPEECH_INSTRUCTIONS_CHARACTER_LIMIT)
+  ) {
+    return null;
+  }
+
+  const options: SpeechSynthesisOptions = {
+    model: value.model,
+    voice: value.voice,
+    format: value.format,
+    speed: value.speed
+  };
+  if (typeof value.instructions === "string" && value.instructions.trim().length > 0) {
+    options.instructions = value.instructions;
+  }
+  return options;
+}
+
+function parseSpeechCredentialStatus(value: Record<string, unknown>): SpeechCredentialStatus | null {
+  if (value.configured === false) {
+    if (value.source !== undefined || value.redactedKey !== undefined) return null;
+    return { configured: false };
+  }
+  if (value.configured !== true) return null;
+  if (!isSpeechCredentialSource(value.source)) return null;
+  if (!isNonEmptyString(value.redactedKey)) return null;
+  return { configured: true, source: value.source, redactedKey: value.redactedKey };
+}
+
+function isSpeechModel(value: unknown): value is SpeechModel {
+  return value === "gpt-4o-mini-tts" || value === "tts-1" || value === "tts-1-hd";
+}
+
+function isSpeechVoice(value: unknown): value is SpeechVoice {
+  return (
+    value === "marin" ||
+    value === "cedar" ||
+    value === "alloy" ||
+    value === "ash" ||
+    value === "ballad" ||
+    value === "coral" ||
+    value === "echo" ||
+    value === "fable" ||
+    value === "nova" ||
+    value === "onyx" ||
+    value === "sage" ||
+    value === "shimmer" ||
+    value === "verse"
+  );
+}
+
+function isSpeechAudioFormat(value: unknown): value is SpeechAudioFormat {
+  return value === "mp3" || value === "opus" || value === "aac" || value === "flac" || value === "wav" || value === "pcm";
+}
+
+function isSpeechCredentialSource(value: unknown): value is SpeechCredentialSource {
+  return value === "keychain" || value === "environment";
+}
+
 function optionalSessionErrorCode(value: unknown): value is SessionErrorCode | undefined {
   return value === undefined || isSessionErrorCode(value);
 }
@@ -614,6 +896,38 @@ function isSessionErrorCode(value: unknown): value is SessionErrorCode {
     value === "permission_response_invalid" ||
     value === "unknown_error"
   );
+}
+
+function optionalSpeechErrorCode(value: unknown): value is SpeechErrorCode | undefined {
+  return value === undefined || isSpeechErrorCode(value);
+}
+
+function isSpeechErrorCode(value: unknown): value is SpeechErrorCode {
+  return (
+    value === "openai_api_key_missing" ||
+    value === "openai_request_failed" ||
+    value === "speech_cancelled" ||
+    value === "speech_request_not_found" ||
+    value === "speech_invalid_request" ||
+    value === "unknown_error"
+  );
+}
+
+function optionalSpeechCredentialErrorCode(value: unknown): value is SpeechCredentialErrorCode | undefined {
+  return value === undefined || isSpeechCredentialErrorCode(value);
+}
+
+function isSpeechCredentialErrorCode(value: unknown): value is SpeechCredentialErrorCode {
+  return (
+    value === "credential_store_failed" ||
+    value === "credential_test_failed" ||
+    value === "credential_missing" ||
+    value === "unknown_error"
+  );
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

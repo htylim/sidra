@@ -58,7 +58,7 @@ function pageIdentity(pageKey: string): PageIdentity {
 function agentTextDelta(clientSessionId: string, text: string): BridgeToExtension {
   return {
     type: "agent.event",
-    version: 2,
+    version: 3,
     clientSessionId,
     event: { type: "assistant.text.delta", text }
   };
@@ -67,7 +67,7 @@ function agentTextDelta(clientSessionId: string, text: string): BridgeToExtensio
 function permissionRequest(clientSessionId: string, requestId = "permission-1", permissionKey = "shell:ls"): BridgeToExtension {
   return {
     type: "permission.request",
-    version: 2,
+    version: 3,
     clientSessionId,
     request: {
       requestId,
@@ -80,7 +80,7 @@ function permissionRequest(clientSessionId: string, requestId = "permission-1", 
 function assistantCancelled(clientSessionId: string): BridgeToExtension {
   return {
     type: "agent.event",
-    version: 2,
+    version: 3,
     clientSessionId,
     event: { type: "assistant.cancelled" }
   };
@@ -89,7 +89,7 @@ function assistantCancelled(clientSessionId: string): BridgeToExtension {
 function sessionStarted(clientSessionId: string): BridgeToExtension {
   return {
     type: "session.started",
-    version: 2,
+    version: 3,
     clientSessionId,
     bridgeSessionId: `${clientSessionId}-bridge`
   };
@@ -234,12 +234,12 @@ describe("UrlSessionStore", () => {
 
     expect(transport.postedMessages).toContainEqual({
       type: "session.cancel",
-      version: 2,
+      version: 3,
       clientSessionId: "client-2"
     });
     expect(transport.postedMessages).not.toContainEqual({
       type: "session.cancel",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1"
     });
   });
@@ -271,7 +271,7 @@ describe("UrlSessionStore", () => {
 
     expect(transport.postedMessages).toContainEqual({
       type: "permission.respond",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       requestId: "permission-1",
       decision: "deny"
@@ -326,7 +326,7 @@ describe("UrlSessionStore", () => {
 
     expect(transport.postedMessages).toContainEqual({
       type: "permission.respond",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       requestId: "permission-1",
       decision: "allow_for_session"
@@ -362,7 +362,7 @@ describe("UrlSessionStore", () => {
 
     expect(transport.postedMessages).not.toContainEqual({
       type: "permission.respond",
-      version: 2,
+      version: 3,
       clientSessionId: "client-2",
       requestId: "permission-1",
       decision: "allow_for_session"
@@ -441,7 +441,7 @@ describe("UrlSessionStore", () => {
     harness.transport.emitMessage(agentTextDelta("client-1", "inactive text"));
     harness.transport.emitMessage({
       type: "session.error",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       message: "Inactive failure",
       code: "provider_error"
@@ -460,7 +460,7 @@ describe("UrlSessionStore", () => {
     harness.transport.emitMessage(agentTextDelta("client-1", "inactive text"));
     harness.transport.emitMessage({
       type: "session.error",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       message: "Inactive failure",
       code: "provider_error"
@@ -526,12 +526,12 @@ describe("UrlSessionStore", () => {
     harness.store.newChat();
     expect(harness.transport.postedMessages).toContainEqual({
       type: "session.reset",
-      version: 2,
+      version: 3,
       clientSessionId: "client-2"
     });
     expect(harness.transport.postedMessages).not.toContainEqual({
       type: "session.reset",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1"
     });
   });
@@ -606,7 +606,7 @@ describe("UrlSessionStore", () => {
     );
     expect(transport.postedMessages).not.toContainEqual({
       type: "session.reset",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1"
     });
   });

@@ -97,6 +97,7 @@ function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
       promptFontSizePx: options.promptFontSizePx ?? 15,
       responseFontSizePx: options.responseFontSizePx ?? 17
     },
+    speech: { enabled: true, status: "idle" },
     activePage: {
       status: "ready",
       pageKey: "https://example.com/article" as PageKey,
@@ -158,6 +159,7 @@ function renderSnapshot(bridge: SidePanelSnapshot["bridge"]): string {
       onNewChat={() => undefined}
       onRetryBridge={() => undefined}
       onOpenSettings={() => undefined}
+      onToggleSpeechForTranscriptEntry={() => false}
     />
   );
 }
@@ -177,6 +179,7 @@ function renderPageSnapshot(snapshot: SidePanelSnapshot): string {
       onNewChat={() => undefined}
       onRetryBridge={() => undefined}
       onOpenSettings={() => undefined}
+      onToggleSpeechForTranscriptEntry={() => false}
     />
   );
 }
@@ -194,6 +197,8 @@ function renderInteractiveSnapshot(
     onSendModeChange(sendMode: SidePanelSnapshot["activeSession"]["sendMode"]): void;
     onNewChat(): void;
     onOpenSettings(): void;
+    onToggleSpeechForTranscriptEntry(entryId: string, text: string): boolean;
+    clipboard: { writeText(text: string): Promise<void> };
   }> = {}
 ) {
   let currentSnapshot = snapshot;
@@ -235,6 +240,8 @@ function renderInteractiveSnapshot(
         onNewChat={overrides.onNewChat ?? (() => undefined)}
         onRetryBridge={() => undefined}
         onOpenSettings={overrides.onOpenSettings ?? (() => undefined)}
+        onToggleSpeechForTranscriptEntry={overrides.onToggleSpeechForTranscriptEntry ?? (() => false)}
+        clipboard={overrides.clipboard}
       />
     );
   }
@@ -275,6 +282,8 @@ function renderInteractiveSnapshot(
         onNewChat={overrides.onNewChat ?? (() => undefined)}
         onRetryBridge={() => undefined}
         onOpenSettings={overrides.onOpenSettings ?? (() => undefined)}
+        onToggleSpeechForTranscriptEntry={overrides.onToggleSpeechForTranscriptEntry ?? (() => false)}
+        clipboard={overrides.clipboard}
       />
     );
   }
@@ -668,6 +677,7 @@ describe("SidePanelView URL sessions", () => {
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
+        onToggleSpeechForTranscriptEntry={() => false}
       />
     );
     expect(screen.getByText("chrome://extensions")).not.toBeNull();
@@ -690,6 +700,7 @@ describe("SidePanelView URL sessions", () => {
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
+        onToggleSpeechForTranscriptEntry={() => false}
       />
     );
 
@@ -1090,6 +1101,7 @@ describe("SidePanelView Capture + Send", () => {
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
+        onToggleSpeechForTranscriptEntry={() => false}
       />
     );
 
@@ -1167,6 +1179,201 @@ describe("SidePanelView Capture + Send", () => {
     );
 
     expect(markup).toContain("Full DOM skipped: too large");
+  });
+});
+
+describe("SidePanelView transcript speech and copy actions", () => {
+  it("transcript_actions_render_for_plain_user_message", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ id: "user-1", kind: "user_message", role: "user", text: "Read this prompt" }]
+      })
+    );
+
+    expect(screen.getByRole("button", { name: "Read message aloud" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Copy message text" })).not.toBeNull();
+  });
+
+  it("quick_action_user_messages_do_not_render_transcript_actions", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            id: "quick-action-1",
+            kind: "user_message",
+            role: "user",
+            text: "Hidden full prompt",
+            display: { kind: "quick_action", label: "Summarize this page" }
+          }
+        ]
+      })
+    );
+
+    expect(screen.queryByRole("button", { name: "Read message aloud" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy message text" })).toBeNull();
+  });
+
+  it("transcript_actions_render_for_complete_assistant_response", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            id: "assistant-1",
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "Assistant answer",
+            text: "Assistant answer",
+            activity: { reasoningSummary: "", tools: [] },
+            status: "complete"
+          }
+        ]
+      })
+    );
+
+    expect(screen.getByRole("button", { name: "Read message aloud" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Copy message text" })).not.toBeNull();
+  });
+
+  it("streaming_assistant_speech_is_disabled_copy_is_enabled", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            id: "assistant-1",
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "Partial answer",
+            text: "Partial answer",
+            activity: { reasoningSummary: "", tools: [] },
+            status: "streaming"
+          }
+        ]
+      })
+    );
+
+    expect(screen.getByRole("button", { name: "Read message aloud" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Copy message text" })).toHaveProperty("disabled", false);
+  });
+
+  it("terminal_partial_assistant_response_remains_actionable", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            id: "assistant-1",
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "Partial answer",
+            text: "Partial answer",
+            activity: { reasoningSummary: "", tools: [] },
+            status: "failed"
+          }
+        ]
+      })
+    );
+
+    expect(screen.getByRole("button", { name: "Read message aloud" })).toHaveProperty("disabled", false);
+    expect(screen.getByRole("button", { name: "Copy message text" })).toHaveProperty("disabled", false);
+  });
+
+  it("non_message_entries_do_not_render_transcript_actions", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ id: "status-1", kind: "status", role: "status", tone: "neutral", text: "Session started" }]
+      })
+    );
+
+    expect(screen.queryByRole("button", { name: "Read message aloud" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy message text" })).toBeNull();
+  });
+
+  it("speech_idle_click_posts_synthesize_request", async () => {
+    const user = userEvent.setup();
+    const onToggleSpeechForTranscriptEntry = vi.fn(() => true);
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ id: "user-1", kind: "user_message", role: "user", text: "  Read this prompt  " }]
+      }),
+      { onToggleSpeechForTranscriptEntry }
+    );
+
+    await user.click(screen.getByRole("button", { name: "Read message aloud" }));
+
+    expect(onToggleSpeechForTranscriptEntry).toHaveBeenCalledWith("user-1", "Read this prompt");
+  });
+
+  it("speech_playing_button_uses_pause_icon_and_active_state", () => {
+    renderInteractiveSnapshot({
+      ...snapshotForPage({
+        transcript: [
+          {
+            id: "assistant-1",
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "Assistant answer",
+            text: "Assistant answer",
+            activity: { reasoningSummary: "", tools: [] },
+            status: "complete"
+          }
+        ]
+      }),
+      speech: { enabled: true, status: "playing", activeEntryId: "assistant-1" }
+    });
+
+    const button = screen.getByRole("button", { name: "Pause message audio" });
+    expect(button.getAttribute("data-speech-state")).toBe("active");
+    expect(button.querySelector(".sidra-icon")?.getAttribute("class")).toContain("transcript-action-icon");
+  });
+
+  it("copy_action_writes_message_text_to_clipboard", async () => {
+    const user = userEvent.setup();
+    const clipboard = { writeText: vi.fn(() => Promise.resolve()) };
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ id: "user-1", kind: "user_message", role: "user", text: "  Copy this prompt  " }]
+      }),
+      { clipboard }
+    );
+
+    await user.click(screen.getByRole("button", { name: "Copy message text" }));
+
+    expect(clipboard.writeText).toHaveBeenCalledWith("Copy this prompt");
+  });
+
+  it("copy_action_shows_copied_state_then_resets", async () => {
+    vi.useFakeTimers();
+    const clipboard = { writeText: vi.fn(() => Promise.resolve()) };
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ id: "user-1", kind: "user_message", role: "user", text: "Copy this prompt" }]
+      }),
+      { clipboard }
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy message text" }));
+    });
+    expect(screen.getByRole("button", { name: "Copied message text" })).not.toBeNull();
+
+    act(() => vi.advanceTimersByTime(1600));
+
+    expect(screen.getByRole("button", { name: "Copy message text" })).not.toBeNull();
+  });
+
+  it("copy_action_handles_clipboard_failure", async () => {
+    const user = userEvent.setup();
+    const clipboard = { writeText: vi.fn(() => Promise.reject(new Error("denied"))) };
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ id: "user-1", kind: "user_message", role: "user", text: "Copy this prompt" }]
+      }),
+      { clipboard }
+    );
+
+    await user.click(screen.getByRole("button", { name: "Copy message text" }));
+
+    expect(await screen.findByText("Could not copy message text.")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Copy failed" })).not.toBeNull();
   });
 });
 
@@ -1740,8 +1947,9 @@ describe("SidePanelView rich transcript rendering", () => {
 
     expect(activityDisclosure?.classList.contains("activity-disclosure")).toBe(true);
     expect(assistantResponse?.classList.contains("assistant-response")).toBe(true);
-    expect(activityDisclosure?.parentElement).toBe(assistantResponse?.parentElement);
-    expect(activityDisclosure?.nextElementSibling).toBe(assistantResponse);
+    expect(activityDisclosure?.parentElement).toBe(assistantResponse?.closest(".assistant-turn"));
+    expect(activityDisclosure?.nextElementSibling?.classList.contains("assistant-message-row")).toBe(true);
+    expect(activityDisclosure?.nextElementSibling?.querySelector(".assistant-response")).toBe(assistantResponse);
   });
 
   it("renders_reasoning_summary_when_activity_is_expanded", async () => {
@@ -2048,6 +2256,7 @@ describe("SidePanelView inline Send DOM option", () => {
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
+        onToggleSpeechForTranscriptEntry={() => false}
       />
     );
 
@@ -2070,6 +2279,7 @@ describe("SidePanelView inline Send DOM option", () => {
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
+        onToggleSpeechForTranscriptEntry={() => false}
       />
     );
 
@@ -2090,6 +2300,7 @@ describe("SidePanelView inline Send DOM option", () => {
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
+        onToggleSpeechForTranscriptEntry={() => false}
       />
     );
 

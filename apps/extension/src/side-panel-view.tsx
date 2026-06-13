@@ -5,7 +5,7 @@ import { CurrentPageCard } from "./current-page-card";
 import { SidraIcon } from "./sidra-icon";
 import type { SidePanelSnapshot } from "./side-panel-controller";
 import type { SendMode } from "./url-session-store";
-import { TranscriptView, type TranscriptWaitingState } from "./transcript-view";
+import { TranscriptView, type TranscriptClipboardGateway, type TranscriptWaitingState } from "./transcript-view";
 
 type ChatWorkState = "idle" | "queued_startup_prompt" | "turn_running" | "cancel_requested";
 type ChatWaitingState = TranscriptWaitingState;
@@ -23,6 +23,8 @@ export function SidePanelView(props: {
   onNewChat(): void;
   onRetryBridge(): void;
   onOpenSettings(): void;
+  onToggleSpeechForTranscriptEntry(entryId: string, text: string): boolean;
+  clipboard?: TranscriptClipboardGateway;
 }) {
   const [sendModeMenuOpen, setSendModeMenuOpen] = useState(false);
   const bridgeBlocked = props.snapshot.bridge.availability.status !== "ready";
@@ -141,7 +143,10 @@ export function SidePanelView(props: {
             promptFontSizePx={props.snapshot.display.promptFontSizePx}
             responseFontSizePx={props.snapshot.display.responseFontSizePx}
             waitingState={waitingState}
+            speech={props.snapshot.speech}
             onRespondToPermission={props.onRespondToPermission}
+            onToggleSpeechForTranscriptEntry={props.onToggleSpeechForTranscriptEntry}
+            clipboard={props.clipboard}
           />
         )}
       </section>

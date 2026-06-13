@@ -123,6 +123,15 @@ textarea:not(:disabled):focus-visible {
   pointer-events: none;
 }
 
+.visually-hidden {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .page-card {
   display: flex;
   align-items: center;
@@ -344,6 +353,93 @@ textarea:not(:disabled):focus-visible {
   display: grid;
   gap: calc(max(var(--sidra-prompt-font-size, 15px), var(--sidra-response-font-size, 17px)) * 0.75);
   min-width: 0;
+}
+
+.transcript-message-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.assistant-message-row {
+  width: 100%;
+}
+
+.user-message-row {
+  justify-self: end;
+  width: min(100%, calc(88% + 36px));
+}
+
+.transcript-message-row .message {
+  max-width: 100%;
+}
+
+.transcript-action-rail {
+  display: grid;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.transcript-message-row:hover .transcript-action-rail,
+.transcript-message-row:focus-within .transcript-action-rail,
+.transcript-message-row[data-speech-active="true"] .transcript-action-rail,
+.transcript-message-row[data-copy-active="true"] .transcript-action-rail {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.transcript-action-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid #d8e1dd;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 0.72);
+  color: #62716d;
+  padding: 0;
+  line-height: 0;
+}
+
+.transcript-action-button .sidra-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.transcript-action-button:not(:disabled):hover,
+.transcript-action-button:not(:disabled):focus-visible {
+  background: #eef3f1;
+  color: #52615d;
+}
+
+.transcript-action-button[data-speech-state="active"],
+.transcript-action-button[data-copy-state="copied"] {
+  border-color: #83b8ae;
+  background: #eef8f5;
+  color: #075e56;
+}
+
+.transcript-action-button[data-copy-state="failed"] {
+  border-color: #efc8bd;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.transcript-action-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.transcript-action-error {
+  grid-column: 1 / -1;
+  color: #9a3412;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .message.user {
@@ -1047,6 +1143,17 @@ textarea:not(:disabled):focus-visible {
   padding: 16px 0 24px;
 }
 
+.options-section + .options-section {
+  border-top: 1px solid #d8e1dd;
+}
+
+.options-section h2 {
+  margin: 0;
+  color: #17201f;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .settings-toggle {
   display: flex;
   align-items: center;
@@ -1069,13 +1176,48 @@ textarea:not(:disabled):focus-visible {
   font-size: 12px;
 }
 
-.font-size-setting input {
+.font-size-setting input,
+.font-size-setting select,
+.font-size-setting textarea {
   width: 100%;
   border: 1px solid #cfd9d5;
   border-radius: 6px;
   padding: 8px;
   color: #17201f;
   font-size: 13px;
+}
+
+.font-size-setting textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.speech-instructions-setting {
+  width: min(420px, 100%);
+}
+
+.speech-instructions-setting textarea {
+  min-height: 96px;
+}
+
+.speech-credential-settings {
+  display: grid;
+  gap: 8px;
+}
+
+.credential-status,
+.settings-help {
+  margin: 0;
+  color: #3f4f4b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.credential-actions,
+.speech-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .action-list {
@@ -1131,6 +1273,13 @@ textarea[aria-invalid="true"]:not(:disabled):focus-visible {
   gap: 8px;
 }
 
+.options-actions .send-button:disabled {
+  border-color: #cfd9d5;
+  background: #e6ece9;
+  color: #62716d;
+  opacity: 1;
+}
+
 .settings-error {
   border: 1px solid #efd2c3;
   border-radius: 6px;
@@ -1138,6 +1287,26 @@ textarea[aria-invalid="true"]:not(:disabled):focus-visible {
   color: #9a3412;
   background: #fff7ed;
   font-size: 13px;
+}
+
+.settings-success {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin: 0;
+  border: 1px solid #b9ded5;
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: #075f58;
+  background: #eef8f5;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.settings-success .sidra-icon {
+  width: 15px;
+  height: 15px;
 }
 
 .validation-error {
@@ -1148,6 +1317,10 @@ textarea[aria-invalid="true"]:not(:disabled):focus-visible {
 }
 
 .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 32px;
   padding: 0 12px;
   border: 1px solid #cfd9d5;
@@ -1157,6 +1330,11 @@ textarea[aria-invalid="true"]:not(:disabled):focus-visible {
   font-weight: 650;
 }
 
+.secondary-button .sidra-icon {
+  width: 15px;
+  height: 15px;
+}
+
 .secondary-button:not(:disabled):hover {
   border-color: #83b8ae;
   background: #eef8f5;
@@ -1164,6 +1342,7 @@ textarea[aria-invalid="true"]:not(:disabled):focus-visible {
 
 button:disabled,
 input:disabled,
+select:disabled,
 textarea:disabled {
   cursor: not-allowed;
   opacity: 0.58;

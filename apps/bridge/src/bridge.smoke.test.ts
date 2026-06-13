@@ -12,14 +12,14 @@ describe("mock bridge chat path", () => {
 
     await bridge.handleMessage({
       type: "session.start",
-      version: 2,
+      version: 3,
       clientSessionId: "page-1",
       providerId: "codex"
     });
 
     await bridge.handleMessage({
       type: "session.send",
-      version: 2,
+      version: 3,
       clientSessionId: "page-1",
       prompt: "Summarize this page"
     });
@@ -27,19 +27,19 @@ describe("mock bridge chat path", () => {
     expect(emitted).toEqual([
       {
         type: "session.started",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         bridgeSessionId: expect.any(String)
       },
       {
         type: "agent.event",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         event: { type: "assistant.text.delta", text: "Mock response to: Summarize this page" }
       },
       {
         type: "agent.event",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         event: { type: "assistant.done" }
       }
@@ -56,13 +56,13 @@ describe("mock bridge chat path", () => {
       Buffer.concat([
         encodeNativeMessage({
           type: "session.start",
-          version: 2,
+          version: 3,
           clientSessionId: "page-1",
           providerId: "codex"
         }),
         encodeNativeMessage({
           type: "session.send",
-          version: 2,
+          version: 3,
           clientSessionId: "page-1",
           prompt: "Summarize this page"
         })
@@ -72,19 +72,19 @@ describe("mock bridge chat path", () => {
     await expect(messages).resolves.toEqual([
       {
         type: "session.started",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         bridgeSessionId: expect.any(String)
       },
       {
         type: "agent.event",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         event: { type: "assistant.text.delta", text: "Mock response to: Summarize this page" }
       },
       {
         type: "agent.event",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         event: { type: "assistant.done" }
       }
@@ -99,17 +99,17 @@ describe("mock bridge chat path", () => {
     runNativeMessagingBridge(input, output);
     input.write(encodeRawNativeMessage("{"));
 
-    await expect(messages).resolves.toEqual([{ type: "bridge.error", version: 2, message: "Invalid JSON", code: "invalid_message" }]);
+    await expect(messages).resolves.toEqual([{ type: "bridge.error", version: 3, message: "Invalid JSON", code: "invalid_message" }]);
   });
 
   it("emits invalid_message bridge.error for unknown extension commands", async () => {
     const emitted: BridgeToExtension[] = [];
     const bridge = createBridge({ emit: (message) => emitted.push(message) }, createMockProvider());
 
-    await bridge.handleMessage({ type: "session.delete", version: 2, clientSessionId: "page-1" });
+    await bridge.handleMessage({ type: "session.delete", version: 3, clientSessionId: "page-1" });
 
     expect(emitted).toEqual([
-      { type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }
+      { type: "bridge.error", version: 3, message: "Unknown command", code: "invalid_message" }
     ]);
   });
 
@@ -117,12 +117,12 @@ describe("mock bridge chat path", () => {
     const emitted: BridgeToExtension[] = [];
     const bridge = createBridge({ emit: (message) => emitted.push(message) });
 
-    await bridge.handleMessage({ type: "session.start", version: 2, clientSessionId: "page-1" });
+    await bridge.handleMessage({ type: "session.start", version: 3, clientSessionId: "page-1" });
 
     expect(emitted).toEqual([
       {
         type: "bridge.error",
-        version: 2,
+        version: 3,
         message: "providerId must be codex",
         code: "invalid_message"
       }
@@ -140,9 +140,9 @@ describe("mock bridge chat path", () => {
     await bridge.handleMessage(1n);
 
     expect(emitted).toEqual([
-      { type: "bridge.error", version: 2, message: "Message must be valid JSON", code: "invalid_message" },
-      { type: "bridge.error", version: 2, message: "Message must be valid JSON", code: "invalid_message" },
-      { type: "bridge.error", version: 2, message: "Message must be valid JSON", code: "invalid_message" }
+      { type: "bridge.error", version: 3, message: "Message must be valid JSON", code: "invalid_message" },
+      { type: "bridge.error", version: 3, message: "Message must be valid JSON", code: "invalid_message" },
+      { type: "bridge.error", version: 3, message: "Message must be valid JSON", code: "invalid_message" }
     ]);
   });
 
@@ -152,7 +152,7 @@ describe("mock bridge chat path", () => {
 
     await bridge.handleMessage({
       type: "session.send",
-      version: 2,
+      version: 3,
       clientSessionId: "page-1",
       prompt: "x".repeat(200)
     });
@@ -160,7 +160,7 @@ describe("mock bridge chat path", () => {
     expect(emitted).toEqual([
       {
         type: "bridge.error",
-        version: 2,
+        version: 3,
         message: "Payload is too large.",
         code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
       }
@@ -173,7 +173,7 @@ describe("mock bridge chat path", () => {
 
     await bridge.handleMessage({
       type: "session.send",
-      version: 2,
+      version: 3,
       clientSessionId: "page-1",
       prompt: "Sensitive prompt text",
       pageContext: {
@@ -201,7 +201,7 @@ describe("mock bridge chat path", () => {
 
     await bridge.handleMessage({
       type: "session.send",
-      version: 2,
+      version: 3,
       clientSessionId: "page-1",
       prompt: "x".repeat(BRIDGE_HARD_PAYLOAD_BYTE_LIMIT)
     });
@@ -209,7 +209,7 @@ describe("mock bridge chat path", () => {
     expect(emitted).toEqual([
       {
         type: "bridge.error",
-        version: 2,
+        version: 3,
         message: "Payload is too large.",
         code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
       }
@@ -225,7 +225,7 @@ describe("mock bridge chat path", () => {
     input.write(
       encodeNativeMessage({
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "x".repeat(BRIDGE_HARD_PAYLOAD_BYTE_LIMIT + 1)
       })
@@ -234,7 +234,7 @@ describe("mock bridge chat path", () => {
     await expect(messages).resolves.toEqual([
       {
         type: "session.error",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         message: "Session has not been started",
         code: "session_not_started"
@@ -248,13 +248,13 @@ describe("mock bridge chat path", () => {
 
     await bridge.handleMessage({
       type: "session.start",
-      version: 2,
+      version: 3,
       clientSessionId: "page-1",
       providerId: "codex"
     });
     await bridge.handleMessage({
       type: "session.send",
-      version: 2,
+      version: 3,
       clientSessionId: "page-1",
       prompt: "Summarize this page",
       pageContext: {
@@ -272,7 +272,7 @@ describe("mock bridge chat path", () => {
 
     expect(emitted).toContainEqual({
       type: "agent.event",
-      version: 2,
+      version: 3,
       clientSessionId: "page-1",
       event: { type: "assistant.text.delta", text: "Mock response received." }
     });
@@ -286,23 +286,23 @@ describe("mock bridge chat path", () => {
 
     await bridge.handleMessage({
       type: "session.start",
-      version: 2,
+      version: 3,
       clientSessionId: "page-1",
       providerId: "codex"
     });
     await bridge.handleMessage({
       type: "session.reset",
-      version: 2,
+      version: 3,
       clientSessionId: "page-1"
     });
     await bridge.handleMessage({
       type: "session.close",
-      version: 2,
+      version: 3,
       clientSessionId: "page-1"
     });
     await bridge.handleMessage({
       type: "session.send",
-      version: 2,
+      version: 3,
       clientSessionId: "page-1",
       prompt: "After close"
     });
@@ -312,7 +312,7 @@ describe("mock bridge chat path", () => {
     expect(provider.createdSessions[1]?.closeCount).toBe(1);
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 2,
+      version: 3,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -323,8 +323,8 @@ describe("mock bridge chat path", () => {
     const provider = createRecordingProvider();
     const bridge = createBridge({ emit: () => {} }, provider);
 
-    await bridge.handleMessage({ type: "session.start", version: 2, clientSessionId: "page-1", providerId: "codex" });
-    await bridge.handleMessage({ type: "session.close", version: 2, clientSessionId: "page-1" });
+    await bridge.handleMessage({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex" });
+    await bridge.handleMessage({ type: "session.close", version: 3, clientSessionId: "page-1" });
 
     expect(provider.createdSessions[0]?.closeCount).toBe(1);
   });
@@ -333,7 +333,7 @@ describe("mock bridge chat path", () => {
     const emitted: BridgeToExtension[] = [];
     const bridge = createBridge({ emit: (message) => emitted.push(message) }, createRecordingProvider());
 
-    await bridge.handleMessage({ type: "heartbeat", version: 2 });
+    await bridge.handleMessage({ type: "heartbeat", version: 3 });
 
     expect(emitted).toEqual([]);
   });
@@ -369,13 +369,13 @@ describe("mock bridge chat path", () => {
       Buffer.concat([
         encodeNativeMessage({
           type: "session.send",
-          version: 2,
+          version: 3,
           clientSessionId: "page-1",
           prompt: "Long prompt"
         }),
         encodeNativeMessage({
           type: "session.send",
-          version: 2,
+          version: 3,
           clientSessionId: "page-2",
           prompt: "Independent prompt"
         })
@@ -388,13 +388,13 @@ describe("mock bridge chat path", () => {
     expect(handled).toEqual([
       {
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-1",
         prompt: "Long prompt"
       },
       {
         type: "session.send",
-        version: 2,
+        version: 3,
         clientSessionId: "page-2",
         prompt: "Independent prompt"
       }

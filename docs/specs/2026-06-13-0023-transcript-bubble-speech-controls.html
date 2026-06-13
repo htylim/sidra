@@ -1,0 +1,1435 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spec 0023: Transcript Bubble Speech Controls</title>
+    <style>
+      :root {
+        color: #17201f;
+        background: #f6f8f7;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      main {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 32px 20px 56px;
+      }
+
+      h1,
+      h2,
+      h3 {
+        line-height: 1.2;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 30px;
+      }
+
+      h2 {
+        margin-top: 34px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid #d8e1dd;
+        font-size: 22px;
+      }
+
+      h3 {
+        margin-top: 24px;
+        font-size: 17px;
+      }
+
+      p,
+      li,
+      td,
+      th {
+        line-height: 1.55;
+      }
+
+      code {
+        border-radius: 4px;
+        background: #eef3f1;
+        padding: 1px 4px;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 0.94em;
+      }
+
+      pre {
+        overflow: auto;
+        border: 1px solid #cfd9d5;
+        border-radius: 8px;
+        background: #101816;
+        color: #e9f0ed;
+        padding: 14px;
+      }
+
+      pre code {
+        background: transparent;
+        padding: 0;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 14px 0 24px;
+      }
+
+      th,
+      td {
+        vertical-align: top;
+        border: 1px solid #d8e1dd;
+        padding: 9px 10px;
+        text-align: left;
+      }
+
+      th {
+        background: #eef3f1;
+      }
+
+      .meta,
+      .note {
+        border: 1px solid #d8e1dd;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 12px 14px;
+      }
+
+      .meta {
+        display: grid;
+        gap: 4px;
+        margin: 18px 0 24px;
+      }
+
+      .callout {
+        border-left: 4px solid #087c71;
+        background: #eef8f5;
+        padding: 12px 14px;
+      }
+
+      .warning {
+        border-left-color: #9a3412;
+        background: #fff7ed;
+      }
+
+      .todo-list {
+        list-style: none;
+        padding-left: 0;
+      }
+
+      .todo-list li {
+        margin: 6px 0;
+      }
+
+      .badge {
+        display: inline-block;
+        border: 1px solid #cfd9d5;
+        border-radius: 999px;
+        background: #ffffff;
+        padding: 1px 8px;
+        color: #52615d;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .mock-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+        gap: 18px;
+        margin: 14px 0 24px;
+      }
+
+      .mock-panel {
+        border: 1px solid #d8e1dd;
+        border-radius: 8px;
+        background: #f6f8f7;
+        padding: 14px;
+      }
+
+      .mock-panel h3 {
+        margin: 0 0 12px;
+      }
+
+      .mock-chat {
+        display: grid;
+        gap: 10px;
+        border: 1px solid #e1e8e5;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 14px;
+      }
+
+      .mock-chip {
+        justify-self: center;
+        border: 1px solid #d8e1dd;
+        border-radius: 7px;
+        background: #ffffff;
+        padding: 6px 10px;
+        color: #62716d;
+        font-size: 12px;
+      }
+
+      .mock-message-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 32px;
+        align-items: start;
+        gap: 8px;
+      }
+
+      .mock-bubble {
+        max-width: 100%;
+        border: 1px solid #d8e1dd;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 9px 10px;
+        font-size: 14px;
+        line-height: 1.35;
+      }
+
+      .mock-bubble ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      .mock-action-rail {
+        display: grid;
+        gap: 6px;
+      }
+
+      .mock-action-button {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border: 1px solid #d8e1dd;
+        border-radius: 6px;
+        background: rgb(255 255 255 / 0.72);
+        color: #62716d;
+        padding: 0;
+      }
+
+      .mock-action-button:hover,
+      .mock-action-button.focused {
+        background: #eef3f1;
+        color: #52615d;
+      }
+
+      .mock-action-button.active {
+        border-color: #83b8ae;
+        background: #eef8f5;
+        color: #075e56;
+      }
+
+      .mock-action-button.copied {
+        border-color: #83b8ae;
+        background: #eef8f5;
+        color: #075e56;
+      }
+
+      .mock-icon {
+        position: relative;
+        display: block;
+        width: 16px;
+        height: 16px;
+        color: currentColor;
+      }
+
+      .mock-icon-play::before {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 5px;
+        width: 0;
+        height: 0;
+        border-top: 6px solid transparent;
+        border-bottom: 6px solid transparent;
+        border-left: 9px solid currentColor;
+      }
+
+      .mock-icon-pause::before {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 3px;
+        width: 10px;
+        height: 12px;
+        background: linear-gradient(to right, currentColor 0 3px, transparent 3px 7px, currentColor 7px 10px);
+      }
+
+      .mock-icon-copy::before,
+      .mock-icon-copy::after {
+        content: "";
+        position: absolute;
+        width: 9px;
+        height: 11px;
+        border: 1.7px solid currentColor;
+        border-radius: 2px;
+        background: transparent;
+      }
+
+      .mock-icon-copy::before {
+        top: 4px;
+        left: 2px;
+        opacity: 0.7;
+      }
+
+      .mock-icon-copy::after {
+        top: 1px;
+        left: 5px;
+        background: #ffffff;
+      }
+
+      .mock-action-button.active .mock-icon-copy::after,
+      .mock-action-button.copied .mock-icon-copy::after {
+        background: #eef8f5;
+      }
+
+      .mock-settings {
+        display: grid;
+        gap: 12px;
+      }
+
+      .mock-setting-row {
+        display: grid;
+        gap: 5px;
+      }
+
+      .mock-setting-row span:first-child {
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .mock-setting-row input,
+      .mock-setting-row select,
+      .mock-setting-row textarea {
+        width: 100%;
+        border: 1px solid #cfd9d5;
+        border-radius: 6px;
+        background: #ffffff;
+        padding: 7px 8px;
+        color: #17201f;
+      }
+
+      .mock-key-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto auto;
+        gap: 6px;
+      }
+
+      .mock-small-button {
+        min-height: 32px;
+        border: 1px solid #cfd9d5;
+        border-radius: 6px;
+        background: #ffffff;
+        color: #17201f;
+        padding: 0 9px;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .mock-help {
+        margin: 0;
+        color: #62716d;
+        font-size: 12px;
+      }
+
+      .mock-status {
+        display: inline-block;
+        width: fit-content;
+        border: 1px solid #c7dbd5;
+        border-radius: 999px;
+        background: #eef8f5;
+        padding: 2px 8px;
+        color: #075e56;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      a {
+        color: #075e56;
+        font-weight: 650;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Spec 0023: Transcript Bubble Speech Controls</h1>
+      <p class="badge">Created 2026-06-13</p>
+
+      <section class="meta" aria-label="Spec metadata">
+        <div><strong>Status:</strong> Ready for implementation after review.</div>
+        <div><strong>Owner:</strong> Sidra extension, bridge, and protocol boundaries.</div>
+        <div><strong>Supersedes:</strong> The chrome.tts direction in <code>2026-06-13-0022-transcript-bubble-tts.html</code>. Do not build on <code>chrome.tts</code>.</div>
+        <div><strong>Decision:</strong> Use the OpenAI Speech API through the local bridge. Do not use <code>chrome.tts</code> or the Realtime API for V1.</div>
+      </section>
+
+      <section>
+        <h2>Table of Contents</h2>
+        <ol>
+          <li><a href="#goal">Goal</a></li>
+          <li><a href="#research">Research Findings</a></li>
+          <li><a href="#current-state">Current State</a></li>
+          <li><a href="#product-behavior">Product Behavior</a></li>
+          <li><a href="#ui-mock">UI Mock</a></li>
+          <li><a href="#architecture">Architecture</a></li>
+          <li><a href="#settings">Settings</a></li>
+          <li><a href="#protocol">Protocol Contract</a></li>
+          <li><a href="#ui">UI and Accessibility</a></li>
+          <li><a href="#implementation-plan">Implementation Plan</a></li>
+          <li><a href="#verification">Verification</a></li>
+          <li><a href="#review-checklist">Review Checklist</a></li>
+        </ol>
+      </section>
+
+      <section id="goal">
+        <h2>Goal</h2>
+        <p>
+          Add two subtle action buttons to transcript message bubbles. The top button reads that bubble aloud with OpenAI
+          Speech. The lower button copies that bubble text to the clipboard.
+        </p>
+        <p>
+          The speech button starts as Play. While speech is loading or playing, it uses a Pause icon and a darker active
+          state. The user can pause active audio, resume paused audio, or start another bubble, which stops the current
+          bubble first.
+        </p>
+        <p>
+          The settings page must expose every user-facing control for this feature, including OpenAI API key management.
+          The API key must be stored by the local bridge in an OS secret store, not in Chrome extension settings.
+        </p>
+
+        <h3>Non-goals</h3>
+        <ul>
+          <li>No <code>chrome.tts</code>. The quality is not acceptable.</li>
+          <li>No Realtime API in V1. This is one-way click-to-read playback, not a live voice conversation.</li>
+          <li>No API key persistence in <code>chrome.storage</code>, local storage, logs, test snapshots, or plain config files.</li>
+          <li>No automatic read-aloud, prefetching, or background synthesis.</li>
+          <li>No custom voices or voice cloning.</li>
+          <li>No persistent audio cache.</li>
+          <li>No controls on status chips, permission cards, setup panels, activity disclosures without a response body, or page cards.</li>
+        </ul>
+      </section>
+
+      <section id="research">
+        <h2>Research Findings</h2>
+
+        <h3>OpenAI API access and billing</h3>
+        <ul>
+          <li>
+            OpenAI says ChatGPT subscriptions and the API platform use separate billing systems. API use is billed
+            separately from ChatGPT Pro, Plus, Business, Enterprise, and Edu.
+            Source:
+            <a href="https://help.openai.com/en/articles/9039756-billing-settings-in-chatgpt-vs-platform">OpenAI Help billing article</a>
+            and <a href="https://openai.com/api/pricing/">OpenAI API pricing</a>.
+          </li>
+          <li>
+            Sidra settings should let the user save, test, replace, and remove the OpenAI API key. The extension sends the
+            key to the local bridge only during an explicit save or test action. The bridge stores the key in the OS secret
+            store and never returns the raw key to the extension.
+          </li>
+          <li>
+            The bridge may also read <code>SIDRA_OPENAI_API_KEY</code> and <code>OPENAI_API_KEY</code> as fallbacks. A
+            settings-managed key takes precedence over environment keys.
+          </li>
+          <li>
+            A missing speech API key must not block normal chat bridge readiness. Chat can still work. A speech click
+            returns a scoped <code>speech.error</code> with <code>openai_api_key_missing</code>.
+          </li>
+        </ul>
+
+        <h3>Speech API choice</h3>
+        <ul>
+          <li>
+            The OpenAI Speech guide documents <code>gpt-4o-mini-tts</code> for text-to-speech and recommends
+            <code>marin</code> or <code>cedar</code> for best quality.
+            Source:
+            <a href="https://developers.openai.com/api/docs/guides/text-to-speech">OpenAI text-to-speech guide</a>.
+          </li>
+          <li>
+            The Speech API reference limits a single <code>input</code> to 4096 characters. Longer bubbles must be split
+            into ordered speech segments.
+            Source:
+            <a href="https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create">Create speech API reference</a>.
+          </li>
+          <li>
+            The Speech API supports streamed audio. Use streaming for faster first audio than waiting for a full article
+            audio file.
+          </li>
+          <li>
+            The Realtime API can be faster for live conversational audio, but it adds session state, microphone-oriented
+            semantics, and higher complexity. It is not the right first implementation for static bubble readback.
+          </li>
+        </ul>
+
+        <h3>UI and accessibility research</h3>
+        <ul>
+          <li>
+            Use real buttons. WAI-ARIA says buttons need accessible names, Space and Enter activation, and disabled state
+            when unavailable.
+            Source:
+            <a href="https://www.w3.org/WAI/ARIA/apg/patterns/button/">WAI-ARIA Authoring Practices button pattern</a>.
+          </li>
+          <li>
+            If the play/pause label changes by state, do not also model it as a fixed-label toggle button. The accessible
+            label should describe the next action: Read, Pause, or Resume.
+          </li>
+          <li>
+            Use a target size of at least 24 by 24 CSS pixels. Use 28 by 28 CSS pixels here so two stacked buttons remain
+            compact but not fragile.
+            Source:
+            <a href="https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html">WCAG 2.2 target size minimum</a>.
+          </li>
+          <li>
+            Icon-only buttons need an accessible name and visible affordance. Sidra already records this in
+            <code>docs/UI-GUIDELINES.md</code>.
+          </li>
+          <li>
+            Tooltip behavior must not be required to operate the feature. Use <code>aria-label</code> and
+            <code>title</code> for V1 rather than a custom tooltip.
+            Source:
+            <a href="https://www.w3.org/WAI/ARIA/apg/patterns/tooltip/">WAI-ARIA tooltip pattern</a>.
+          </li>
+          <li>
+            Clipboard writes are async, require permission from the user agent, and can fail. The copy button must show a
+            transient success or failure state.
+            Source:
+            <a href="https://developer.mozilla.org/en-US/docs/Web/API/Clipboard/writeText">MDN Clipboard.writeText</a>.
+          </li>
+        </ul>
+
+        <div class="callout">
+          UI decision: show the action rail only on message hover, message focus-within, or active audio state. Keep the
+          rail in the DOM so keyboard users can tab to it. Use opacity and color changes only; do not move the bubble.
+        </div>
+      </section>
+
+      <section id="current-state">
+        <h2>Current State</h2>
+        <ul>
+          <li>
+            <code>apps/extension/src/transcript-view.tsx</code> renders transcript entries and currently renders user and
+            assistant message bubbles without per-bubble action controls.
+          </li>
+          <li>
+            <code>apps/extension/src/transcript.ts</code> stores plain user text and assistant <code>text</code> alongside
+            assistant markdown. Assistant turns do not currently get stable ids when they are created from stream deltas.
+          </li>
+          <li>
+            <code>apps/extension/src/settings-store.ts</code> owns persisted Sidra settings. It already has grouped save
+            methods for quick actions and transcript font sizes.
+          </li>
+          <li>
+            <code>apps/extension/src/options-page-view.tsx</code> renders the settings page and has validation patterns
+            for number inputs, textareas, dirty section flags, save errors, and disabled save state.
+          </li>
+          <li>
+            <code>apps/extension/src/bridge/connection.ts</code> owns Native Messaging connection state and validates all
+            bridge messages through <code>parseBridgeToExtension</code>.
+          </li>
+          <li>
+            <code>apps/extension/src/side-panel-controller.ts</code> composes settings, page state, bridge connection, and
+            URL-scoped sessions into the side-panel snapshot.
+          </li>
+          <li>
+            <code>apps/bridge/src/index.ts</code> validates incoming Native Messaging messages and dispatches them to
+            bridge managers.
+          </li>
+          <li>
+            <code>apps/bridge/src/session-manager.ts</code> owns Codex provider sessions. Do not add OpenAI Speech behavior
+            there. Add a separate speech manager.
+          </li>
+          <li>
+            <code>packages/protocol/src/index.ts</code> owns protocol types and runtime validation. It must grow before
+            extension or bridge code depends on new speech messages.
+          </li>
+        </ul>
+      </section>
+
+      <section id="product-behavior">
+        <h2>Product Behavior</h2>
+
+        <h3>Message eligibility</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Entry</th>
+              <th>Speech</th>
+              <th>Copy</th>
+              <th>Reason</th>
+              <th>Named tests</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Plain user message with non-empty text</td>
+              <td>Enabled when speech setting is enabled and bridge can post speech messages.</td>
+              <td>Enabled.</td>
+              <td>It is a real message bubble with stable text.</td>
+              <td><code>transcript_actions_render_for_plain_user_message</code></td>
+            </tr>
+            <tr>
+              <td>Quick-action user message</td>
+              <td>Not rendered in V1.</td>
+              <td>Not rendered in V1.</td>
+              <td>The visible bubble is a command label while the full prompt is hidden behind disclosure. Reading or copying hidden text would be surprising.</td>
+              <td><code>quick_action_user_messages_do_not_render_transcript_actions</code></td>
+            </tr>
+            <tr>
+              <td>Assistant response with non-empty text and status <code>complete</code></td>
+              <td>Enabled.</td>
+              <td>Enabled.</td>
+              <td>This is the main target for article summaries and answers.</td>
+              <td><code>transcript_actions_render_for_complete_assistant_response</code></td>
+            </tr>
+            <tr>
+              <td>Assistant response with status <code>streaming</code></td>
+              <td>Disabled until the turn is terminal.</td>
+              <td>Enabled if text is non-empty.</td>
+              <td>Reading partial streamed text creates a poor experience. Copying partial text is harmless and explicit.</td>
+              <td><code>streaming_assistant_speech_is_disabled_copy_is_enabled</code></td>
+            </tr>
+            <tr>
+              <td>Assistant response with status <code>cancelled</code> or <code>failed</code> and non-empty text</td>
+              <td>Enabled.</td>
+              <td>Enabled.</td>
+              <td>The visible partial answer is still user-facing content.</td>
+              <td><code>terminal_partial_assistant_response_remains_actionable</code></td>
+            </tr>
+            <tr>
+              <td>Status entry, permission request, setup panel, page card, activity-only assistant turn</td>
+              <td>Not rendered.</td>
+              <td>Not rendered.</td>
+              <td>These are not transcript message bubbles.</td>
+              <td><code>non_message_entries_do_not_render_transcript_actions</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Speech state behavior</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>State</th>
+              <th>Icon</th>
+              <th>Click behavior</th>
+              <th>Visual state</th>
+              <th>Named tests</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>idle</code></td>
+              <td>Play</td>
+              <td>Start synthesis for that bubble.</td>
+              <td>Subtle, visible on hover or focus.</td>
+              <td><code>speech_idle_click_posts_synthesize_request</code></td>
+            </tr>
+            <tr>
+              <td><code>loading</code></td>
+              <td>Pause</td>
+              <td>Cancel the active speech request because no audible audio exists yet.</td>
+              <td>Darker active button, <code>aria-busy="true"</code>.</td>
+              <td><code>speech_loading_click_cancels_request</code></td>
+            </tr>
+            <tr>
+              <td><code>playing</code></td>
+              <td>Pause</td>
+              <td>Pause the audio element. Keep buffered audio.</td>
+              <td>Darker active button.</td>
+              <td><code>speech_playing_click_pauses_audio</code></td>
+            </tr>
+            <tr>
+              <td><code>paused</code></td>
+              <td>Play</td>
+              <td>Resume the same bubble audio.</td>
+              <td>Darker active button so ownership remains clear.</td>
+              <td><code>speech_paused_click_resumes_audio</code></td>
+            </tr>
+            <tr>
+              <td>Another bubble starts</td>
+              <td>New bubble: Pause after start</td>
+              <td>Stop old audio/request and start the new bubble.</td>
+              <td>Only one bubble can be active.</td>
+              <td><code>starting_another_bubble_stops_previous_audio</code></td>
+            </tr>
+            <tr>
+              <td>Bridge disconnects, New Chat, or side panel shutdown</td>
+              <td>Play</td>
+              <td>Stop audio and ignore late chunks.</td>
+              <td>Return to idle.</td>
+              <td><code>speech_stops_on_bridge_disconnect_and_new_chat</code></td>
+            </tr>
+            <tr>
+              <td>Speech error</td>
+              <td>Play</td>
+              <td>Next click may retry.</td>
+              <td>Small inline error state near the action rail and live region announcement.</td>
+              <td><code>speech_error_is_visible_and_announced</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Copy state behavior</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>State</th>
+              <th>Icon</th>
+              <th>Click behavior</th>
+              <th>Named tests</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>idle</code></td>
+              <td>Copy</td>
+              <td>Write normalized visible message text to <code>navigator.clipboard.writeText</code>.</td>
+              <td><code>copy_action_writes_message_text_to_clipboard</code></td>
+            </tr>
+            <tr>
+              <td><code>copied</code></td>
+              <td>Copy</td>
+              <td>Show darker success state for 1500ms, then return idle.</td>
+              <td><code>copy_action_shows_copied_state_then_resets</code></td>
+            </tr>
+            <tr>
+              <td><code>failed</code></td>
+              <td>Copy</td>
+              <td>Show failed state for 1500ms and announce failure.</td>
+              <td><code>copy_action_handles_clipboard_failure</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="ui-mock">
+        <h2>UI Mock</h2>
+        <p>
+          These mocks force the action buttons to be visible so the icon choices can be reviewed. The implementation still
+          uses hover, focus-within, copied, failed, loading, playing, and paused states to reveal the rail.
+        </p>
+
+        <div class="mock-grid">
+          <div class="mock-panel">
+            <h3>Transcript bubble actions</h3>
+            <div class="mock-chat" aria-label="Transcript action mock">
+              <div class="mock-chip">Session started</div>
+              <div class="mock-message-row">
+                <div class="mock-bubble">
+                  <ul>
+                    <li>Dirigentes cercanos a Mauricio Macri pidieron la renuncia de Manuel Adorni.</li>
+                    <li>En el PRO creen que el caso tapa buenos resultados economicos del Gobierno.</li>
+                    <li>Macri volvera al pais y encabezara un acto en Mar del Plata.</li>
+                  </ul>
+                </div>
+                <div class="mock-action-rail" aria-label="Bubble actions">
+                  <button type="button" class="mock-action-button focused" aria-label="Read message aloud" title="Read message aloud">
+                    <span class="mock-icon mock-icon-play" aria-hidden="true"></span>
+                  </button>
+                  <button type="button" class="mock-action-button" aria-label="Copy message text" title="Copy message text">
+                    <span class="mock-icon mock-icon-copy" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
+              <div class="mock-message-row">
+                <div class="mock-bubble">
+                  Speech is active on this bubble. The read-aloud control changes from Play to Pause and uses the active
+                  color. Copy keeps the same position below it.
+                </div>
+                <div class="mock-action-rail" aria-label="Active bubble actions">
+                  <button type="button" class="mock-action-button active" aria-label="Pause message audio" title="Pause message audio">
+                    <span class="mock-icon mock-icon-pause" aria-hidden="true"></span>
+                  </button>
+                  <button type="button" class="mock-action-button copied" aria-label="Copied message text" title="Copied message text">
+                    <span class="mock-icon mock-icon-copy" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mock-panel">
+            <h3>Settings: Speech</h3>
+            <div class="mock-settings" aria-label="Speech settings mock">
+              <div class="mock-status">OpenAI key saved, ending in 7d42</div>
+              <label class="mock-setting-row">
+                <span>OpenAI API key</span>
+                <span class="mock-key-row">
+                  <input type="password" placeholder="sk-..." aria-label="OpenAI API key" />
+                  <button type="button" class="mock-small-button">Save</button>
+                  <button type="button" class="mock-small-button">Test</button>
+                  <button type="button" class="mock-small-button">Remove</button>
+                </span>
+              </label>
+              <p class="mock-help">
+                Stored by the local Sidra bridge in the OS secret store. Not saved in chrome.storage.
+              </p>
+              <label class="mock-setting-row">
+                <span>Enable read aloud</span>
+                <input type="checkbox" checked aria-label="Enable read aloud" />
+              </label>
+              <label class="mock-setting-row">
+                <span>Voice</span>
+                <select aria-label="Voice">
+                  <option>marin</option>
+                  <option>cedar</option>
+                  <option>nova</option>
+                  <option>fable</option>
+                </select>
+              </label>
+              <label class="mock-setting-row">
+                <span>Speed: 1.00x</span>
+                <input type="range" min="0.75" max="1.5" step="0.05" value="1" aria-label="Speech speed" />
+              </label>
+              <label class="mock-setting-row">
+                <span>Reading style</span>
+                <textarea rows="3">Read naturally and clearly. Preserve the text language. Use a calm conversational tone.</textarea>
+              </label>
+              <label class="mock-setting-row">
+                <span>Maximum characters per bubble</span>
+                <input type="number" value="12000" min="500" max="50000" aria-label="Maximum characters per bubble" />
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <h2>Architecture</h2>
+
+        <h3>Ownership decision</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Concern</th>
+              <th>Owner</th>
+              <th>Decision</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>OpenAI API key and HTTP call</td>
+              <td><code>apps/bridge</code></td>
+              <td>The extension may hold the key only as transient form input during Save or Test. The bridge owns persistence and all OpenAI HTTP calls.</td>
+            </tr>
+            <tr>
+              <td>Speech secret storage</td>
+              <td><code>apps/bridge/src/speech-credential-store.ts</code></td>
+              <td>Store settings-managed keys in the OS secret store. On macOS use Keychain service <code>com.sidra.openai</code>, account <code>default</code>.</td>
+            </tr>
+            <tr>
+              <td>Speech message contract</td>
+              <td><code>packages/protocol</code></td>
+              <td>Add protocol v3 speech commands and bridge events with runtime validation.</td>
+            </tr>
+            <tr>
+              <td>Speech request lifecycle and cancellation</td>
+              <td><code>apps/bridge/src/speech-synthesis-manager.ts</code></td>
+              <td>Separate from <code>BridgeSessionManager</code>. It is not a Codex provider session.</td>
+            </tr>
+            <tr>
+              <td>Audio playback state</td>
+              <td><code>apps/extension/src/transcript-speech-controller.ts</code></td>
+              <td>Extension-side application boundary. React renders a snapshot and sends intents.</td>
+            </tr>
+            <tr>
+              <td>Bubble action rail</td>
+              <td><code>apps/extension/src/transcript-view.tsx</code></td>
+              <td>View-only controls. It receives state and callbacks; it does not own bridge protocol details.</td>
+            </tr>
+            <tr>
+              <td>Copy to clipboard</td>
+              <td><code>apps/extension</code></td>
+              <td>Use a small clipboard gateway or hook so tests do not depend on global browser state.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Runtime flow</h3>
+        <ol>
+          <li>User hovers or tabs into a transcript message row.</li>
+          <li>The action rail becomes visible. Buttons remain in the DOM before hover.</li>
+          <li>User clicks Play.</li>
+          <li><code>TranscriptSpeechController</code> normalizes the bubble text, validates settings, stops any active bubble, and posts <code>speech.synthesize</code> through <code>BridgeConnection</code>.</li>
+          <li><code>createBridge</code> validates the message through <code>parseExtensionToBridge</code> and dispatches to <code>SpeechSynthesisManager</code>.</li>
+          <li><code>SpeechSynthesisManager</code> asks <code>SpeechCredentialStore</code> for the API key. Keychain wins over environment fallback.</li>
+          <li><code>SpeechSynthesisManager</code> splits text into 4096-character-or-smaller segments and streams each segment through the OpenAI Speech API.</li>
+          <li>The bridge emits <code>speech.started</code>, ordered <code>speech.chunk</code> messages, and <code>speech.done</code>. Chunk messages must be small enough to stay far below the native messaging hard payload limit.</li>
+          <li>The extension validates bridge events through <code>parseBridgeToExtension</code>, appends audio chunks to the playback gateway, and starts playback after the first playable chunk.</li>
+          <li>Pause pauses local audio. Resume continues buffered audio. Cancel during loading posts <code>speech.cancel</code>.</li>
+        </ol>
+
+        <h3>Text normalization</h3>
+        <ul>
+          <li>Add <code>apps/extension/src/transcript-message-text.ts</code>.</li>
+          <li>It returns normalized plain text for speech and copy.</li>
+          <li>User messages return <code>entry.text.trim()</code>.</li>
+          <li>Quick-action user messages are excluded from V1 action rails even though they have stored prompt text.</li>
+          <li>Assistant messages strip common Markdown syntax, preserve paragraph and list breaks, preserve code block text, remove image syntax, and turn Markdown links into visible link text.</li>
+          <li>Do not use rendered HTML as the source of truth. Use a pure helper with tests.</li>
+        </ul>
+
+        <h3>Stable message ids</h3>
+        <p>
+          Add stable ids to assistant turns. The action rail and speech state must not depend on array indexes.
+          <code>BridgeSessionCoordinator</code> already creates ids for user prompts. It must also allocate one assistant
+          turn id for each sent turn before the first assistant delta can create the assistant entry.
+        </p>
+      </section>
+
+      <section id="settings">
+        <h2>Settings</h2>
+
+        <h3>Settings shape</h3>
+        <pre><code>import type { SpeechVoice } from "@sidra/protocol";
+
+export type TranscriptSpeechVoice = SpeechVoice;
+
+export type TranscriptSpeechSettings = {
+  enabled: boolean;
+  voice: TranscriptSpeechVoice;
+  speed: number;
+  instructions: string;
+  maxCharactersPerBubble: number;
+};
+
+export type SidraSettings = {
+  readableContentLimitCharacters: number;
+  domContentLimitCharacters: number;
+  promptFontSizePx: number;
+  responseFontSizePx: number;
+  quickActions: QuickActionsSettings;
+  transcriptSpeech: TranscriptSpeechSettings;
+};</code></pre>
+
+        <pre><code>export type SpeechCredentialStatus =
+  | { configured: false; source: "none" }
+  | { configured: true; source: "keychain" | "environment"; redactedKey: string };</code></pre>
+
+        <p>
+          The canonical voice allowlist belongs to <code>packages/protocol</code>. The extension settings type can import
+          that type, but the protocol package must not import extension code.
+        </p>
+        <p>
+          <code>SidraSettings</code> is safe to persist in <code>chrome.storage.local</code>. The API key is not part of
+          that object. The options page asks the bridge for <code>SpeechCredentialStatus</code> and sends key mutations to
+          the bridge over Native Messaging.
+        </p>
+
+        <h3>Defaults and limits</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Setting</th>
+              <th>Default</th>
+              <th>Limits</th>
+              <th>UI control</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>OpenAI API key</td>
+              <td>No key</td>
+              <td>Non-empty string accepted only through explicit Save or Test. Never persisted in Chrome storage.</td>
+              <td>Password input with Save, Test, and Remove buttons. Stored by the bridge in the OS secret store.</td>
+            </tr>
+            <tr>
+              <td><code>enabled</code></td>
+              <td><code>true</code></td>
+              <td>Boolean</td>
+              <td>Checkbox: <code>Enable read aloud</code></td>
+            </tr>
+            <tr>
+              <td><code>voice</code></td>
+              <td><code>marin</code></td>
+              <td>Built-in OpenAI Speech voices only</td>
+              <td>Select. Put <code>marin</code> and <code>cedar</code> first.</td>
+            </tr>
+            <tr>
+              <td><code>speed</code></td>
+              <td><code>1</code></td>
+              <td>UI: 0.75 to 1.5, step 0.05. Protocol clamp: 0.25 to 4.0.</td>
+              <td>Range input with visible numeric value.</td>
+            </tr>
+            <tr>
+              <td><code>instructions</code></td>
+              <td><code>Read naturally and clearly. Preserve the text language. Use a calm conversational tone.</code></td>
+              <td>0 to 600 characters after trim.</td>
+              <td>Textarea.</td>
+            </tr>
+            <tr>
+              <td><code>maxCharactersPerBubble</code></td>
+              <td><code>12000</code></td>
+              <td>500 to 50000. This is a local cost and safety cap, not the API request size.</td>
+              <td>Number input.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Settings page requirements</h3>
+        <ul>
+          <li>Add a <code>Speech</code> section after <code>Display</code> and before <code>Quick actions</code>.</li>
+          <li>Reuse the existing one-save-button flow.</li>
+          <li>Add a dirty ref for transcript speech settings.</li>
+          <li>Add <code>saveTranscriptSpeechSettings</code> to <code>SettingsStore</code>.</li>
+          <li>Add API key controls inside the Speech section, but save, test, and remove the key immediately through the bridge, not through the settings store Save button.</li>
+          <li>Show credential status from the bridge: not configured, environment key configured, or Keychain key configured with a redacted suffix.</li>
+          <li>Validate invalid number and text drafts with visible error text, <code>aria-invalid</code>, and <code>aria-describedby</code>.</li>
+          <li>Do not save invalid drafts.</li>
+          <li>Clear the API key input after Save, Test, Remove, page unmount, and bridge disconnect.</li>
+          <li>Use this concise helper text: <code>Stored by the local Sidra bridge in the OS secret store. Not saved in chrome.storage.</code></li>
+        </ul>
+      </section>
+
+      <section id="protocol">
+        <h2>Protocol Contract</h2>
+
+        <h3>Versioning</h3>
+        <p>
+          Bump <code>PROTOCOL_VERSION</code> from 2 to 3. Update all protocol tests, bridge tests, heartbeat messages,
+          and extension fake transports in the same phase. Do not support mixed v2/v3 in V1.
+        </p>
+
+        <h3>Extension to bridge</h3>
+        <pre><code>export type SpeechVoice =
+  | "marin"
+  | "cedar"
+  | "alloy"
+  | "ash"
+  | "ballad"
+  | "coral"
+  | "echo"
+  | "fable"
+  | "nova"
+  | "onyx"
+  | "sage"
+  | "shimmer"
+  | "verse";
+
+export type SpeechRequestOptions = {
+  model: "gpt-4o-mini-tts";
+  voice: SpeechVoice;
+  speed: number;
+  instructions?: string;
+  responseFormat: "mp3";
+};
+
+export type ExtensionToBridge =
+  | ExistingV3Messages
+  | {
+      type: "speech.synthesize";
+      version: 3;
+      clientSessionId: string;
+      requestId: string;
+      entryId: string;
+      text: string;
+      options: SpeechRequestOptions;
+    }
+  | {
+      type: "speech.cancel";
+      version: 3;
+      clientSessionId: string;
+      requestId: string;
+    }
+  | {
+      type: "speech.credentials.status";
+      version: 3;
+      requestId: string;
+    }
+  | {
+      type: "speech.credentials.save";
+      version: 3;
+      requestId: string;
+      apiKey: string;
+    }
+  | {
+      type: "speech.credentials.test";
+      version: 3;
+      requestId: string;
+      apiKey?: string;
+    }
+  | {
+      type: "speech.credentials.remove";
+      version: 3;
+      requestId: string;
+    };</code></pre>
+
+        <h3>Bridge to extension</h3>
+        <pre><code>export type SpeechCredentialStatus =
+  | { configured: false; source: "none" }
+  | { configured: true; source: "keychain" | "environment"; redactedKey: string };
+
+export type SpeechErrorCode =
+  | "openai_api_key_missing"
+  | "speech_request_not_found"
+  | "speech_text_empty"
+  | "speech_text_too_long"
+  | "speech_voice_invalid"
+  | "speech_cancelled"
+  | "speech_provider_error"
+  | "speech_network_error"
+  | "speech_internal_error"
+  | "speech_credentials_save_failed"
+  | "speech_credentials_test_failed"
+  | "speech_credentials_remove_failed";
+
+export type BridgeToExtension =
+  | ExistingV3Messages
+  | {
+      type: "speech.started";
+      version: 3;
+      clientSessionId: string;
+      requestId: string;
+      entryId: string;
+      mimeType: "audio/mpeg";
+    }
+  | {
+      type: "speech.chunk";
+      version: 3;
+      clientSessionId: string;
+      requestId: string;
+      entryId: string;
+      sequence: number;
+      base64Audio: string;
+    }
+  | {
+      type: "speech.done";
+      version: 3;
+      clientSessionId: string;
+      requestId: string;
+      entryId: string;
+    }
+  | {
+      type: "speech.error";
+      version: 3;
+      clientSessionId: string;
+      requestId: string;
+      entryId?: string;
+      code: SpeechErrorCode;
+      message: string;
+    }
+  | {
+      type: "speech.credentials.status";
+      version: 3;
+      requestId: string;
+      status: SpeechCredentialStatus;
+    }
+  | {
+      type: "speech.credentials.saved";
+      version: 3;
+      requestId: string;
+      status: SpeechCredentialStatus;
+    }
+  | {
+      type: "speech.credentials.tested";
+      version: 3;
+      requestId: string;
+      ok: true;
+      status: SpeechCredentialStatus;
+    }
+  | {
+      type: "speech.credentials.removed";
+      version: 3;
+      requestId: string;
+      status: SpeechCredentialStatus;
+    }
+  | {
+      type: "speech.credentials.error";
+      version: 3;
+      requestId: string;
+      code: SpeechErrorCode;
+      message: string;
+    };</code></pre>
+
+        <h3>Validation rules</h3>
+        <ul>
+          <li>Reject unknown fields on all new message variants.</li>
+          <li>Require non-empty <code>clientSessionId</code>, <code>requestId</code>, and <code>entryId</code> where applicable.</li>
+          <li>Require non-empty <code>apiKey</code> for <code>speech.credentials.save</code>.</li>
+          <li>Never include raw <code>apiKey</code> in any bridge-to-extension message.</li>
+          <li>Require <code>text.trim().length &gt; 0</code>.</li>
+          <li>Reject <code>text</code> over 50000 characters at protocol parse time.</li>
+          <li>Allow only model <code>gpt-4o-mini-tts</code> in V1.</li>
+          <li>Allow only response format <code>mp3</code> in V1.</li>
+          <li>Validate voice against the built-in allowlist.</li>
+          <li>Validate speed from 0.25 to 4.0.</li>
+          <li>Validate <code>instructions</code> length at 4096 characters in protocol, even though the settings UI caps at 600.</li>
+          <li>Validate <code>speech.chunk.base64Audio</code> as non-empty base64 text and keep each chunk message below 128 KiB serialized.</li>
+        </ul>
+      </section>
+
+      <section id="ui">
+        <h2>UI and Accessibility</h2>
+
+        <h3>Action rail layout</h3>
+        <ul>
+          <li>Add a <code>TranscriptMessageFrame</code> wrapper around actionable message bubbles.</li>
+          <li>The wrapper reserves a 32px right-side action rail so the bubble never shifts when controls appear.</li>
+          <li>The rail is top-aligned with the message bubble and stacks two 28px square icon buttons with a 6px gap.</li>
+          <li>The rail sits to the right of the bubble, matching the screenshot direction.</li>
+          <li>Reduce the effective message max width so the rail never overlaps the scrollbar or composer.</li>
+          <li>On very narrow widths, keep the rail inside the row but preserve at least 24px target size and 4px spacing.</li>
+        </ul>
+
+        <h3>Visual states</h3>
+        <ul>
+          <li>Default rail opacity: 0.</li>
+          <li>Row hover, row focus-within, copied state, failed state, loading state, playing state, and paused state opacity: 1.</li>
+          <li>The action rail sets <code>aria-live="off"</code>. Speech and copy status announcements use a separate small live region so the chat transcript live region does not announce every icon state change.</li>
+          <li>Idle button color should match the muted status-card color family: border <code>#d8e1dd</code>, text <code>#62716d</code>, background <code>#ffffff</code> with low opacity.</li>
+          <li>Hover and focus-visible darken to <code>#52615d</code> text and <code>#eef3f1</code> background.</li>
+          <li>Active speech uses darker teal-neutral styling: text <code>#075e56</code>, border <code>#83b8ae</code>, background <code>#eef8f5</code>.</li>
+          <li>Failure uses the existing warm error family from setup/error states.</li>
+          <li>No layout property changes on hover, active, copied, failed, loading, playing, or paused.</li>
+        </ul>
+
+        <h3>Accessible names</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Control state</th>
+              <th><code>aria-label</code> and <code>title</code></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Speech idle</td>
+              <td><code>Read message aloud</code></td>
+            </tr>
+            <tr>
+              <td>Speech loading</td>
+              <td><code>Cancel message audio</code></td>
+            </tr>
+            <tr>
+              <td>Speech playing</td>
+              <td><code>Pause message audio</code></td>
+            </tr>
+            <tr>
+              <td>Speech paused</td>
+              <td><code>Resume message audio</code></td>
+            </tr>
+            <tr>
+              <td>Copy idle</td>
+              <td><code>Copy message text</code></td>
+            </tr>
+            <tr>
+              <td>Copy copied</td>
+              <td><code>Copied message text</code></td>
+            </tr>
+            <tr>
+              <td>Copy failed</td>
+              <td><code>Copy failed</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Icon requirements</h3>
+        <ul>
+          <li>Add <code>play</code>, <code>pause</code>, and <code>copy</code> to <code>SidraIcon</code> using lucide-react.</li>
+          <li>Do not add hand-written SVGs.</li>
+          <li>Icons are <code>aria-hidden="true"</code>. The button supplies the accessible name.</li>
+        </ul>
+      </section>
+
+      <section id="implementation-plan">
+        <h2>Implementation Plan</h2>
+
+        <h3>Phase 1: Protocol and bridge Speech API path</h3>
+        <ul class="todo-list">
+          <li><input type="checkbox" checked disabled /> Add failing protocol tests: <code>protocol_accepts_speech_synthesize_and_cancel</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing protocol tests: <code>protocol_accepts_speech_credential_messages</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing protocol tests: <code>protocol_rejects_invalid_speech_messages</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing protocol tests: <code>protocol_accepts_speech_bridge_events</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing protocol tests: <code>protocol_never_accepts_raw_key_in_bridge_responses</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing bridge tests: <code>bridge_routes_speech_synthesize_to_speech_manager</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing bridge tests: <code>bridge_speech_missing_key_returns_speech_error</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing bridge tests: <code>bridge_saves_tests_and_removes_speech_credentials</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing bridge tests: <code>speech_credentials_use_keychain_before_environment_fallback</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing bridge tests: <code>speech_manager_chunks_text_at_api_limit</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing bridge tests: <code>speech_manager_streams_ordered_audio_chunks</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing bridge tests: <code>speech_cancel_aborts_active_request</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing bridge tests: <code>speech_manager_cancels_all_requests_on_connection_close</code>.</li>
+          <li><input type="checkbox" checked disabled /> Bump <code>PROTOCOL_VERSION</code> to 3 and update existing v2 tests/messages.</li>
+          <li><input type="checkbox" checked disabled /> Add speech protocol types and runtime parsers in <code>packages/protocol</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add <code>apps/bridge/src/speech-credential-store.ts</code> with a fakeable secret-store gateway.</li>
+          <li><input type="checkbox" checked disabled /> Add <code>apps/bridge/src/speech-synthesis-manager.ts</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add <code>OpenAISpeechGateway</code> using bridge-side <code>fetch</code>.</li>
+          <li><input type="checkbox" checked disabled /> Read the Keychain key first, then <code>SIDRA_OPENAI_API_KEY</code>, then <code>OPENAI_API_KEY</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add bridge dispatch for <code>speech.synthesize</code> and <code>speech.cancel</code>.</li>
+          <li><input type="checkbox" checked disabled /> Ensure <code>closeConnection</code> cancels active speech requests as well as provider sessions.</li>
+        </ul>
+
+        <h3>Phase 1 success criteria</h3>
+        <ul>
+          <li>All named Phase 1 tests fail before implementation and pass after implementation.</li>
+          <li>Audio chunk bridge messages stay below 128 KiB serialized.</li>
+          <li>Bridge tests prove prompt, page text, and speech text are not logged or echoed in unrelated errors.</li>
+          <li>Bridge tests prove raw API keys are never emitted back to the extension or written to logs.</li>
+          <li><code>BridgeSessionManager</code> remains Codex-provider-only.</li>
+          <li>A missing speech API key does not prevent <code>bridge.ready</code> when Codex setup succeeds.</li>
+        </ul>
+
+        <h3>Phase 2: Settings model and options page</h3>
+        <ul class="todo-list">
+          <li><input type="checkbox" checked disabled /> Add failing settings tests: <code>settings_defaults_include_transcript_speech</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing settings tests: <code>settings_parse_invalid_transcript_speech_values_to_defaults</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing settings tests: <code>save_transcript_speech_preserves_other_settings</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing options tests: <code>options_page_renders_speech_settings</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing options tests: <code>options_page_renders_speech_credential_status_and_key_controls</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing options tests: <code>options_page_saves_tests_and_removes_api_key_through_bridge</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing options tests: <code>options_page_clears_api_key_input_after_secret_actions</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing options tests: <code>options_page_validates_speech_settings_before_save</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing options tests: <code>options_page_saves_speech_settings_with_existing_save_flow</code>.</li>
+          <li><input type="checkbox" checked disabled /> Extend <code>SidraSettings</code>, defaults, clone, parse, equality, and storage tests.</li>
+          <li><input type="checkbox" checked disabled /> Add <code>saveTranscriptSpeechSettings</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add the options-page Speech section.</li>
+        </ul>
+
+        <h3>Phase 2 success criteria</h3>
+        <ul>
+          <li>Invalid speech settings never enter the store snapshot.</li>
+          <li>The settings page save button stays disabled while any speech draft is invalid.</li>
+          <li>No raw API key is persisted in Chrome storage or retained after secret actions complete.</li>
+        </ul>
+
+        <h3>Phase 3: Extension speech controller and playback gateway</h3>
+        <ul class="todo-list">
+          <li><input type="checkbox" checked disabled /> Add failing controller tests: <code>speech_idle_click_posts_synthesize_request</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing controller tests: <code>speech_controller_ignores_stale_chunks</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing controller tests: <code>speech_controller_plays_after_first_chunk</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing controller tests: <code>speech_playing_click_pauses_audio</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing controller tests: <code>speech_paused_click_resumes_audio</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing controller tests: <code>speech_loading_click_cancels_request</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing controller tests: <code>starting_another_bubble_stops_previous_audio</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing controller tests: <code>speech_stops_on_bridge_disconnect_and_new_chat</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing controller tests: <code>disabling_speech_setting_stops_active_playback</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add <code>TranscriptSpeechController</code> with a fakeable playback gateway.</li>
+          <li><input type="checkbox" checked disabled /> Add <code>MediaSourceSpeechPlaybackGateway</code> for MP3 chunks.</li>
+          <li><input type="checkbox" checked disabled /> Wire controller snapshot and commands through <code>SidePanelController</code>.</li>
+        </ul>
+
+        <h3>Phase 3 success criteria</h3>
+        <ul>
+          <li>React components do not post protocol messages directly.</li>
+          <li>Only one message can own speech playback at a time.</li>
+          <li>Late chunks from canceled or superseded requests are ignored.</li>
+          <li>Playback cleanup runs on bridge disconnect, New Chat, and controller shutdown.</li>
+          <li>Disabling read aloud in settings stops active playback. Other setting changes affect the next request only.</li>
+        </ul>
+
+        <h3>Phase 4: Transcript action rail UI and copy behavior</h3>
+        <ul class="todo-list">
+          <li><input type="checkbox" checked disabled /> Add failing transcript tests: <code>transcript_actions_render_for_plain_user_message</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing transcript tests: <code>transcript_actions_render_for_complete_assistant_response</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing transcript tests: <code>quick_action_user_messages_do_not_render_transcript_actions</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing transcript tests: <code>streaming_assistant_speech_is_disabled_copy_is_enabled</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing transcript tests: <code>non_message_entries_do_not_render_transcript_actions</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing transcript tests: <code>copy_action_writes_message_text_to_clipboard</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing transcript tests: <code>copy_action_shows_copied_state_then_resets</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing transcript tests: <code>copy_action_handles_clipboard_failure</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add failing style tests for rail visibility, focus-visible, target size, and active state selectors.</li>
+          <li><input type="checkbox" checked disabled /> Add <code>play</code>, <code>pause</code>, and <code>copy</code> icons to <code>SidraIcon</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add <code>TranscriptMessageFrame</code> and <code>TranscriptBubbleActions</code>.</li>
+          <li><input type="checkbox" checked disabled /> Add copy status logic with a fakeable clipboard gateway.</li>
+          <li><input type="checkbox" checked disabled /> Add CSS for the reserved action rail and subtle hover/focus/active states.</li>
+        </ul>
+
+        <h3>Phase 4 success criteria</h3>
+        <ul>
+          <li>Buttons are reachable by keyboard even when visually subtle.</li>
+          <li>Buttons have correct accessible names in every state.</li>
+          <li>Hover, focus-visible, active, copied, failed, disabled, and busy states are visible.</li>
+          <li>The rail does not move the bubble when controls appear.</li>
+          <li>Text selection inside the bubble is not blocked by the rail.</li>
+        </ul>
+
+        <h3>Phase 5: Manual verification</h3>
+        <ul class="todo-list">
+          <li><input type="checkbox" disabled /> Read <code>docs/MANUAL-E2E-RUNBOOK.md</code> before launching the extension manually.</li>
+          <li><input type="checkbox" disabled /> Configure a real API key through the settings page. Also verify <code>SIDRA_OPENAI_API_KEY</code> or <code>OPENAI_API_KEY</code> works as fallback.</li>
+          <li><input type="checkbox" disabled /> Verify Spanish article-summary playback quality with <code>marin</code>.</li>
+          <li><input type="checkbox" disabled /> Verify English article-summary playback quality with <code>marin</code> and <code>cedar</code>.</li>
+          <li><input type="checkbox" disabled /> Verify hover, focus-visible, active, pause, resume, copy, copied, failed, disabled, and settings invalid states.</li>
+          <li><input type="checkbox" disabled /> Record first-audio latency from click to audible playback for a short bubble and a long bubble.</li>
+          <li><input type="checkbox" disabled /> Verify no OpenAI key appears in <code>chrome.storage.local</code> or extension snapshots.</li>
+        </ul>
+      </section>
+
+      <section id="verification">
+        <h2>Verification</h2>
+
+        <h3>Automated commands</h3>
+        <pre><code>pnpm --filter @sidra/protocol test
+pnpm --filter @sidra/bridge test
+pnpm --filter @sidra/extension test
+pnpm check</code></pre>
+
+        <h3>Manual evidence placeholders</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Evidence</th>
+              <th>Result</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Spanish bubble playback</td>
+              <td>Pending</td>
+              <td>Use the user's Spanish article-summary sample.</td>
+            </tr>
+            <tr>
+              <td>English bubble playback</td>
+              <td>Pending</td>
+              <td>Use the user's English article-summary sample.</td>
+            </tr>
+            <tr>
+              <td>Click-to-first-audio latency</td>
+              <td>Pending</td>
+              <td>Record short and long bubble measurements.</td>
+            </tr>
+            <tr>
+              <td>Keyboard accessibility</td>
+              <td>Pending</td>
+              <td>Tab to rail, activate with Space and Enter, confirm visible focus.</td>
+            </tr>
+            <tr>
+              <td>Settings page validation</td>
+              <td>Pending</td>
+              <td>Invalid speed, instructions too long, max character bounds.</td>
+            </tr>
+            <tr>
+              <td>API key storage</td>
+              <td>Pending</td>
+              <td>Save, test, remove, then verify raw key is absent from chrome.storage and extension snapshots.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="review-checklist">
+        <h2>Review Checklist</h2>
+        <ul class="todo-list">
+          <li><input type="checkbox" disabled /> No raw API key is stored in extension settings, chrome.storage, local storage, logs, snapshots, or plain config files.</li>
+          <li><input type="checkbox" disabled /> Settings-managed API keys are stored by the bridge in the OS secret store.</li>
+          <li><input type="checkbox" disabled /> The extension clears transient API key form state after save, test, remove, unmount, and bridge disconnect.</li>
+          <li><input type="checkbox" disabled /> Speech API calls happen only inside the bridge process.</li>
+          <li><input type="checkbox" disabled /> Protocol runtime validation covers every new message shape.</li>
+          <li><input type="checkbox" disabled /> Protocol v3 update is complete across tests, heartbeats, bridge runtime, and fake transports.</li>
+          <li><input type="checkbox" disabled /> Long text is chunked at 4096 characters or less before calling OpenAI.</li>
+          <li><input type="checkbox" disabled /> Audio chunk messages cannot exceed the native messaging hard payload limit.</li>
+          <li><input type="checkbox" disabled /> Action rail is keyboard accessible and not hover-only.</li>
+          <li><input type="checkbox" disabled /> Play, Pause, and Copy use lucide icons through <code>SidraIcon</code>.</li>
+          <li><input type="checkbox" disabled /> Copy and speech use normalized visible message text.</li>
+          <li><input type="checkbox" disabled /> No controls render for non-message transcript entries.</li>
+          <li><input type="checkbox" disabled /> Manual extension verification follows <code>docs/MANUAL-E2E-RUNBOOK.md</code>.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

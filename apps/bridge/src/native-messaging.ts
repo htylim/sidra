@@ -1,5 +1,6 @@
 import { createBridge } from "./index.js";
 import type { AgentProvider } from "./session-manager.js";
+import type { BridgeSpeechManager } from "./speech-synthesis-manager.js";
 import { PROTOCOL_VERSION } from "@sidra/protocol";
 import { BRIDGE_HARD_PAYLOAD_BYTE_LIMIT, exceedsPayloadByteLimit, payloadTooLargeError } from "./payload-limit.js";
 
@@ -11,6 +12,7 @@ type NativeMessagingBridge = {
 type RunNativeMessagingBridgeOptions = {
   bridge?: NativeMessagingBridge;
   provider?: AgentProvider;
+  speech?: BridgeSpeechManager;
   hardPayloadByteLimit?: number;
   heartbeatTimeoutMs?: number;
 };
@@ -28,7 +30,8 @@ export function runNativeMessagingBridge(
       options.provider,
       {
         hardPayloadByteLimit,
-        heartbeatTimeoutMs: options.heartbeatTimeoutMs
+        heartbeatTimeoutMs: options.heartbeatTimeoutMs,
+        speech: options.speech
       }
     );
   let buffer = Buffer.alloc(0);

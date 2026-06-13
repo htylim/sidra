@@ -84,7 +84,7 @@ describe("bridge runtime composition", () => {
 
     await runBridgeFromEnvironment(input, output, { SIDRA_CODEX_WORKSPACE_ROOT: "/tmp/sidra-workspace" }, { startCodexAppServer });
 
-    input.write(encodeNativeMessage({ type: "session.start", version: 2, clientSessionId: "page-1", providerId: "codex" }));
+    input.write(encodeNativeMessage({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex" }));
     await waitForRequest(appServer.client.requests, "thread/start");
     expect(appServer.client.requests.find((request) => request.method === "thread/start")?.params).toMatchObject({
       cwd: "/tmp/sidra-workspace"
@@ -118,7 +118,7 @@ describe("bridge runtime composition", () => {
     );
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" }
+      { type: "bridge.error", version: 3, message: "Codex setup failed.", code: "codex_setup_failed" }
     ]);
   });
 
@@ -139,7 +139,7 @@ describe("bridge runtime composition", () => {
     );
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" }
+      { type: "bridge.error", version: 3, message: "Codex setup failed.", code: "codex_setup_failed" }
     ]);
   });
 
@@ -151,7 +151,7 @@ describe("bridge runtime composition", () => {
     await runBridgeFromEnvironment(input, output, {}, { startCodexAppServer: vi.fn() });
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" }
+      { type: "bridge.error", version: 3, message: "Codex setup failed.", code: "codex_setup_failed" }
     ]);
   });
 
@@ -168,21 +168,23 @@ describe("bridge runtime composition", () => {
       { startCodexAppServer: vi.fn(async () => appServer) }
     );
 
-    await expect(messages).resolves.toEqual([{ type: "bridge.ready", version: 2 }]);
+    await expect(messages).resolves.toEqual([{ type: "bridge.ready", version: 3 }]);
   });
 
   it("runBridgeFromEnvironment_keeps_native_connection_alive_after_provider_setup_error", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
-    const messages = collectNativeMessages(output, 2);
+    const messages = collectNativeMessages(output, 1);
 
     await runBridgeFromEnvironment(input, output, {}, { startCodexAppServer: vi.fn() });
-    input.write(encodeNativeMessage({ type: "heartbeat", version: 2 }));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" },
-      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" }
+      { type: "bridge.error", version: 3, message: "Codex setup failed.", code: "codex_setup_failed" }
     ]);
+
+    input.write(encodeNativeMessage({ type: "heartbeat", version: 3 }));
+
+    await expect(collectNativeMessagesUntilIdle(output, 20)).resolves.toEqual([]);
   });
 
   it("runBridgeFromEnvironment_does_not_emit_bridge_ready_after_provider_setup_error", async () => {
@@ -192,7 +194,7 @@ describe("bridge runtime composition", () => {
     await runBridgeFromEnvironment(input, output, {}, { startCodexAppServer: vi.fn() });
 
     const messages = await collectNativeMessagesUntilIdle(output, 20);
-    expect(messages).not.toContainEqual({ type: "bridge.ready", version: 2 });
+    expect(messages).not.toContainEqual({ type: "bridge.ready", version: 3 });
   });
 
   it("runBridgeFromEnvironment_rejects_chat_commands_after_provider_setup_error_without_provider_unavailable_fallback", async () => {
@@ -201,11 +203,11 @@ describe("bridge runtime composition", () => {
     const messages = collectNativeMessages(output, 2);
 
     await runBridgeFromEnvironment(input, output, {}, { startCodexAppServer: vi.fn() });
-    input.write(encodeNativeMessage({ type: "session.start", version: 2, clientSessionId: "page-1", providerId: "codex" }));
+    input.write(encodeNativeMessage({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex" }));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" },
-      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" }
+      { type: "bridge.error", version: 3, message: "Codex setup failed.", code: "codex_setup_failed" },
+      { type: "bridge.error", version: 3, message: "Codex setup failed.", code: "codex_setup_failed" }
     ]);
   });
 
@@ -215,11 +217,43 @@ describe("bridge runtime composition", () => {
     const messages = collectNativeMessages(output, 2);
 
     await runBridgeFromEnvironment(input, output, {}, { startCodexAppServer: vi.fn() });
-    input.write(encodeNativeMessage({ type: "session.delete", version: 2, clientSessionId: "page-1" }));
+    input.write(encodeNativeMessage({ type: "session.delete", version: 3, clientSessionId: "page-1" }));
 
     await expect(messages).resolves.toEqual([
-      { type: "bridge.error", version: 2, message: "Codex setup failed.", code: "codex_setup_failed" },
-      { type: "bridge.error", version: 2, message: "Unknown command", code: "invalid_message" }
+      { type: "bridge.error", version: 3, message: "Codex setup failed.", code: "codex_setup_failed" },
+      { type: "bridge.error", version: 3, message: "Unknown command", code: "invalid_message" }
+    ]);
+  });
+
+  it("runBridgeFromEnvironment_routes_speech_credentials_after_provider_setup_error", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages = collectNativeMessages(output, 2);
+
+    await runBridgeFromEnvironment(
+      input,
+      output,
+      {},
+      {
+        startCodexAppServer: vi.fn(),
+        createSpeechManager: ({ emit }) => ({
+          async synthesize() {},
+          async cancel() {},
+          async getCredentialStatus() {
+            emit({ type: "speech.credentials.status", version: 3, configured: false });
+          },
+          async saveCredentials() {},
+          async testCredentials() {},
+          async removeCredentials() {},
+          async cancelAll() {}
+        })
+      }
+    );
+    input.write(encodeNativeMessage({ type: "speech.credentials.status", version: 3 }));
+
+    await expect(messages).resolves.toEqual([
+      { type: "bridge.error", version: 3, message: "Codex setup failed.", code: "codex_setup_failed" },
+      { type: "speech.credentials.status", version: 3, configured: false }
     ]);
   });
 });

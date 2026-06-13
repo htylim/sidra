@@ -18,6 +18,7 @@ import {
   DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
   DEFAULT_PROMPT_FONT_SIZE_PX,
   DEFAULT_RESPONSE_FONT_SIZE_PX,
+  DEFAULT_TRANSCRIPT_SPEECH_SETTINGS,
   type QuickActionsSettings,
   type SidraSettings,
   type SettingsStore
@@ -63,6 +64,7 @@ type HarnessOptions = {
   captureService?: FakeCaptureService;
   captureGateway?: CaptureGateway;
   settingsStore?: Pick<SettingsStore, "start" | "getSnapshot" | "whenReady" | "subscribe">;
+  createSpeechRequestId?: () => string;
   openOptionsPage?: () => void;
 };
 
@@ -157,6 +159,7 @@ function createHarnessWithOptions(options: HarnessOptions = {}) {
     captureService: options.captureService,
     captureGateway: options.captureGateway,
     settingsStore: options.settingsStore,
+    createSpeechRequestId: options.createSpeechRequestId,
     openOptionsPage: options.openOptionsPage
   });
 
@@ -346,7 +349,8 @@ class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" |
       domContentLimitCharacters: this.domContentLimitCharacters,
       promptFontSizePx: this.promptFontSizePx,
       responseFontSizePx: this.responseFontSizePx,
-      quickActions: this.quickActions
+      quickActions: this.quickActions,
+      transcriptSpeech: DEFAULT_TRANSCRIPT_SPEECH_SETTINGS
     };
   }
 
@@ -393,20 +397,20 @@ function unsupportedPageIdentity(url: string): PageIdentity {
 function sessionStarted(clientSessionId = "client-1"): BridgeToExtension {
   return {
     type: "session.started",
-    version: 2,
+    version: 3,
     clientSessionId,
     bridgeSessionId: "bridge-1"
   };
 }
 
 function bridgeReady(): BridgeToExtension {
-  return { type: "bridge.ready", version: 2 };
+  return { type: "bridge.ready", version: 3 };
 }
 
 function agentTextDelta(clientSessionId: string, text: string): BridgeToExtension {
   return {
     type: "agent.event",
-    version: 2,
+    version: 3,
     clientSessionId,
     event: { type: "assistant.text.delta", text }
   };
@@ -415,7 +419,7 @@ function agentTextDelta(clientSessionId: string, text: string): BridgeToExtensio
 function permissionRequest(clientSessionId = "client-1", requestId = "permission-1"): BridgeToExtension {
   return {
     type: "permission.request",
-    version: 2,
+    version: 3,
     clientSessionId,
     request: {
       requestId,
@@ -428,7 +432,7 @@ function permissionRequest(clientSessionId = "client-1", requestId = "permission
 function agentDone(clientSessionId = "client-1"): BridgeToExtension {
   return {
     type: "agent.event",
-    version: 2,
+    version: 3,
     clientSessionId,
     event: { type: "assistant.done" }
   };
@@ -437,7 +441,7 @@ function agentDone(clientSessionId = "client-1"): BridgeToExtension {
 function assistantCancelled(clientSessionId = "client-1"): BridgeToExtension {
   return {
     type: "agent.event",
-    version: 2,
+    version: 3,
     clientSessionId,
     event: { type: "assistant.cancelled" }
   };
@@ -501,7 +505,7 @@ describe("SidePanelController", () => {
   it("does not send prompts while bridge reports a blocking error", () => {
     const { controller, ports } = createHarness();
 
-    ports[0].emitMessage({ type: "bridge.error", version: 2, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 3, message: "bridge failed" });
 
     expect(controller.sendPrompt("hello")).toBe(false);
     expect(ports[0].postedMessages).toEqual([]);
@@ -511,7 +515,7 @@ describe("SidePanelController", () => {
   it("clears the blocking bridge error after retry succeeds", () => {
     const { controller, ports } = createHarness();
 
-    ports[0].emitMessage({ type: "bridge.error", version: 2, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 3, message: "bridge failed" });
     controller.retryBridge();
     ports[1].emitMessage(bridgeReady());
 
@@ -530,7 +534,7 @@ describe("SidePanelController", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage(permissionRequest("client-1", "permission-1"));
     controller.respondToPermission("permission-1", "allow_for_session");
-    ports[0].emitMessage({ type: "bridge.error", version: 2, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 3, message: "bridge failed" });
 
     controller.retryBridge();
     ports[1].emitMessage(bridgeReady());
@@ -540,7 +544,7 @@ describe("SidePanelController", () => {
 
     expect(ports[1].postedMessages).not.toContainEqual({
       type: "permission.respond",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       requestId: "permission-2",
       decision: "allow_for_session"
@@ -552,7 +556,7 @@ describe("SidePanelController", () => {
 
     ports[0].emitMessage(bridgeReady());
     expect(controller.sendPrompt("unsent")).toBe(true);
-    ports[0].emitMessage({ type: "bridge.error", version: 2, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 3, message: "bridge failed" });
 
     expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
 
@@ -562,7 +566,7 @@ describe("SidePanelController", () => {
     expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
     expect(controller.sendPrompt("after retry")).toBe(true);
     expect(ports[1].postedMessages).toEqual([
-      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" }
     ]);
   });
 
@@ -583,7 +587,7 @@ describe("SidePanelController", () => {
 
     expect(controller.sendPrompt("second")).toBe(true);
     expect(ports[1].postedMessages).toEqual([
-      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" }
     ]);
   });
 
@@ -741,7 +745,7 @@ describe("SidePanelController", () => {
     expect(controller.sendPrompt("hello")).toBe(true);
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" }
     ]);
     expect(controller.getSnapshot().activeSession).toMatchObject({
       pendingPromptCount: 1,
@@ -752,8 +756,8 @@ describe("SidePanelController", () => {
     ports[0].emitMessage(sessionStarted());
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "hello" }
+      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "hello" }
     ]);
   });
 
@@ -766,14 +770,14 @@ describe("SidePanelController", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       event: { type: "assistant.done" }
     });
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" }
+      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first" }
     ]);
   });
 
@@ -821,7 +825,7 @@ describe("SidePanelController", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.cancel",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1"
     });
   });
@@ -873,7 +877,7 @@ describe("SidePanelController", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "permission.respond",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       requestId: "permission-1",
       decision: "allow_once"
@@ -903,7 +907,7 @@ describe("SidePanelController", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "permission.respond",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       requestId: "permission-2",
       decision: "allow_for_session"
@@ -940,7 +944,7 @@ describe("SidePanelController", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.start",
-      version: 2,
+      version: 3,
       clientSessionId: "client-2",
       providerId: "codex"
     });
@@ -958,14 +962,14 @@ describe("SidePanelController", () => {
     controller.sendPrompt("second");
 
     expect(ports[1].postedMessages).toEqual([
-      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" }
     ]);
 
     ports[1].emitMessage(sessionStarted());
 
     expect(ports[1].postedMessages).toEqual([
-      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "second" }
+      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "second" }
     ]);
   });
 
@@ -977,7 +981,7 @@ describe("SidePanelController", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       event: { type: "assistant.text.delta", text: "Hi" }
     });
@@ -1024,7 +1028,7 @@ describe("SidePanelController", () => {
 
     ports[0].emitMessage(bridgeReady());
     controller.sendPrompt("hello");
-    ports[0].emitMessage({ type: "bridge.error", version: 2, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 3, message: "bridge failed" });
 
     expect(controller.getSnapshot().bridge).toEqual({
       connected: true,
@@ -1040,7 +1044,7 @@ describe("SidePanelController", () => {
 
     ports[0].emitMessage({
       type: "bridge.error",
-      version: 2,
+      version: 3,
       message: "Payload is too large.",
       code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
     });
@@ -1073,8 +1077,8 @@ describe("SidePanelController newChat", () => {
       transcript: []
     });
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.reset", version: 2, clientSessionId: "client-1" }
+      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.reset", version: 3, clientSessionId: "client-1" }
     ]);
   });
 
@@ -1088,7 +1092,7 @@ describe("SidePanelController newChat", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.reset",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1"
     });
   });
@@ -1105,7 +1109,7 @@ describe("SidePanelController newChat", () => {
   it("keeps bridge connection state when clearing local session state", () => {
     const { controller, ports } = createHarness();
 
-    ports[0].emitMessage({ type: "bridge.ready", version: 2 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 3 });
     controller.sendPrompt("first");
     controller.newChat();
 
@@ -1128,18 +1132,18 @@ describe("SidePanelController newChat", () => {
     controller.sendPrompt("after reset");
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" },
-      { type: "session.reset", version: 2, clientSessionId: "client-1" }
+      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.reset", version: 3, clientSessionId: "client-1" }
     ]);
 
     ports[0].emitMessage(sessionStarted());
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" },
-      { type: "session.reset", version: 2, clientSessionId: "client-1" },
-      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "after reset" }
+      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.reset", version: 3, clientSessionId: "client-1" },
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "after reset" }
     ]);
   });
 
@@ -1203,7 +1207,7 @@ describe("SidePanelController newChat", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       event: { type: "assistant.done" }
     });
@@ -1212,16 +1216,16 @@ describe("SidePanelController newChat", () => {
     controller.sendPrompt("after reset");
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 2, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 2, clientSessionId: "client-1", prompt: "first" },
-      { type: "session.reset", version: 2, clientSessionId: "client-1" }
+      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.reset", version: 3, clientSessionId: "client-1" }
     ]);
 
     ports[0].emitMessage(sessionStarted());
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       prompt: "after reset"
     });
@@ -1264,7 +1268,7 @@ describe("SidePanelController newChat", () => {
     );
     expect(ports[0].postedMessages).not.toContainEqual({
       type: "session.reset",
-      version: 2,
+      version: 3,
       clientSessionId: "client-a"
     });
   });
@@ -1327,6 +1331,65 @@ describe("SidePanelController newChat", () => {
     expect(controller.getSnapshot().activeSession.transcript).toEqual([
       expect.objectContaining({ kind: "status", tone: "error", text: "reset failed" })
     ]);
+  });
+});
+
+describe("SidePanelController transcript speech", () => {
+  it("toggleSpeechForTranscriptEntry_posts_speech_synthesize_message", async () => {
+    const { controller, ports } = createHarnessWithOptions({ createSpeechRequestId: () => "speech-1" });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    expect(controller.toggleSpeechForTranscriptEntry("entry-1", "  Read this bubble.  ")).toBe(true);
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "speech.synthesize",
+      version: 3,
+      requestId: "speech-1",
+      text: "Read this bubble.",
+      options: {
+        model: "gpt-4o-mini-tts",
+        voice: "marin",
+        format: "mp3",
+        speed: 1,
+        instructions: DEFAULT_TRANSCRIPT_SPEECH_SETTINGS.instructions
+      }
+    });
+    expect(controller.getSnapshot().speech).toMatchObject({ activeEntryId: "entry-1", status: "loading" });
+  });
+
+  it("newChat_stops_active_speech_request", () => {
+    const { controller, ports } = createHarnessWithOptions({ createSpeechRequestId: () => "speech-1" });
+    ports[0].emitMessage(bridgeReady());
+    controller.toggleSpeechForTranscriptEntry("entry-1", "Read this bubble.");
+
+    controller.newChat();
+
+    expect(ports[0].postedMessages).toContainEqual({ type: "speech.cancel", version: 3, requestId: "speech-1" });
+    expect(controller.getSnapshot().speech).toMatchObject({ activeEntryId: undefined, status: "idle" });
+  });
+
+  it("bridge_disconnect_stops_active_speech_request", () => {
+    const { controller, ports } = createHarnessWithOptions({ createSpeechRequestId: () => "speech-1" });
+    ports[0].emitMessage(bridgeReady());
+    controller.toggleSpeechForTranscriptEntry("entry-1", "Read this bubble.");
+
+    ports[0].disconnect();
+
+    expect(ports).toHaveLength(1);
+    expect(ports[0].postedMessages).not.toContainEqual({ type: "speech.cancel", version: 3, requestId: "speech-1" });
+    expect(controller.getSnapshot().speech).toMatchObject({ activeEntryId: undefined, status: "idle" });
+  });
+
+  it("active_page_change_stops_active_speech_request", () => {
+    const { controller, ports, activePage } = createHarnessWithOptions({ createSpeechRequestId: () => "speech-1" });
+    ports[0].emitMessage(bridgeReady());
+    controller.toggleSpeechForTranscriptEntry("entry-1", "Read this bubble.");
+
+    activePage.emit(pageIdentity("https://example.com/other"));
+
+    expect(ports[0].postedMessages).toContainEqual({ type: "speech.cancel", version: 3, requestId: "speech-1" });
+    expect(controller.getSnapshot().speech).toMatchObject({ activeEntryId: undefined, status: "idle" });
   });
 });
 
@@ -1440,7 +1503,7 @@ describe("SidePanelController URL sessions", () => {
     controller.sendPrompt("hello");
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.start",
-      version: 2,
+      version: 3,
       clientSessionId: "client-a",
       providerId: "codex"
     });
@@ -1486,7 +1549,7 @@ describe("SidePanelController URL sessions", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.start",
-      version: 2,
+      version: 3,
       clientSessionId: "client-b",
       providerId: "codex"
     });
@@ -1562,12 +1625,12 @@ describe("SidePanelController URL sessions", () => {
     controller.newChat();
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.reset",
-      version: 2,
+      version: 3,
       clientSessionId: "client-b"
     });
     expect(ports[0].postedMessages).not.toContainEqual({
       type: "session.reset",
-      version: 2,
+      version: 3,
       clientSessionId: "client-a"
     });
   });
@@ -1648,7 +1711,7 @@ describe("SidePanelController Capture + Send", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       prompt: "summarize",
       pageContext: captureService.nextResult.status === "captured" ? captureService.nextResult.pageContext : undefined
@@ -1697,7 +1760,7 @@ describe("SidePanelController Capture + Send", () => {
     expect(captureService.buildCalls).toEqual([{ document, mode: "full_dom" }]);
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       prompt: "summarize",
       pageContext
@@ -1767,7 +1830,7 @@ describe("SidePanelController Capture + Send", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       event: { type: "assistant.done" }
     });
@@ -1862,13 +1925,13 @@ describe("SidePanelController Capture + Send", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.start",
-      version: 2,
+      version: 3,
       clientSessionId: "client-captured",
       providerId: "codex"
     });
     expect(ports[0].postedMessages).not.toContainEqual({
       type: "session.start",
-      version: 2,
+      version: 3,
       clientSessionId: "client-other",
       providerId: "codex"
     });
@@ -1997,7 +2060,7 @@ describe("SidePanelController Capture + Send", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       event: { type: "assistant.done" }
     });
@@ -2117,7 +2180,7 @@ describe("SidePanelController Capture + Send", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       prompt: "plain"
     });
@@ -2153,7 +2216,7 @@ describe("SidePanelController send mode", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       event: { type: "assistant.done" }
     });
@@ -2163,7 +2226,7 @@ describe("SidePanelController send mode", () => {
     expect(captureService.captureCalls).toBe(1);
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       prompt: "follow up"
     });
@@ -2178,7 +2241,7 @@ describe("SidePanelController send mode", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       event: { type: "assistant.done" }
     });
@@ -2209,7 +2272,7 @@ describe("SidePanelController send mode", () => {
     expect(captureService.captureCalls).toBe(0);
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 2,
+      version: 3,
       clientSessionId: "client-1",
       prompt: "plain first"
     });

@@ -185,7 +185,7 @@ export class BridgeConnection {
     this.heartbeatTimer = setInterval(() => {
       if (this.port !== port) return;
       try {
-        port.postMessage({ type: "heartbeat", version: 2 } satisfies ExtensionToBridge);
+        port.postMessage({ type: "heartbeat", version: 3 } satisfies ExtensionToBridge);
       } catch (error) {
         const message = errorMessage(error, "Bridge heartbeat failed");
         if (this.port === port) this.port = null;

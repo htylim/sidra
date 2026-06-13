@@ -106,7 +106,7 @@ export class BridgeSessionCoordinator {
   private suppressNextNoInFlightAfterCancelTerminal = false;
   // New Chat sends `session.reset`, whose success also arrives as `session.started`.
   private suppressNextSessionStartedStatus = false;
-  // Reset can race already-posted startup messages because protocol v2 has no request id.
+  // Reset can race already-posted startup messages because protocol v3 has no request id.
   private startupResultsToIgnore = 0;
   // Reset can also race a terminal result from an old in-flight turn.
   private terminalTurnErrorsToIgnore = 0;
@@ -169,7 +169,7 @@ export class BridgeSessionCoordinator {
       this.setSnapshot({ ...this.snapshot, starting: true, lastError: undefined });
       const result = this.transport.post({
         type: "session.start",
-        version: 2,
+        version: 3,
         clientSessionId: this.clientSessionId,
         providerId: this.providerId
       });
@@ -199,7 +199,7 @@ export class BridgeSessionCoordinator {
 
     const result = this.transport.post({
       type: "session.cancel",
-      version: 2,
+      version: 3,
       clientSessionId: this.clientSessionId
     });
     if (!result.ok) {
@@ -225,7 +225,7 @@ export class BridgeSessionCoordinator {
 
     const result = this.transport.post({
       type: "permission.respond",
-      version: 2,
+      version: 3,
       clientSessionId: this.clientSessionId,
       requestId,
       decision
@@ -275,7 +275,7 @@ export class BridgeSessionCoordinator {
 
     const result = this.transport.post({
       type: "session.reset",
-      version: 2,
+      version: 3,
       clientSessionId: this.clientSessionId
     });
 
@@ -489,7 +489,7 @@ export class BridgeSessionCoordinator {
   private createSessionSendMessage(submission: PreparedPromptSubmission): ExtensionToBridge {
     return {
       type: "session.send",
-      version: 2,
+      version: 3,
       clientSessionId: this.snapshot.clientSessionId,
       prompt: submission.prompt,
       ...(submission.pageContext ? { pageContext: submission.pageContext } : {})
