@@ -181,6 +181,20 @@ Run this checklist for Chrome, Brave, or Helium after build and install:
 - If Codex setup fails, confirm the side panel surfaces a blocking setup error. `bridge.ready` is not expected when setup fails.
 - Send a prompt only after the bridge and Codex provider are ready.
 
+Tab-scoped side panel smoke:
+
+- Use Chromium 114+.
+- Open Sidra on tab A. Navigate inside tab A and confirm Sidra stays visible.
+- Switch to a fresh tab B and confirm Sidra is hidden.
+- Switch back to tab A and confirm Sidra is visible.
+- Open Sidra on tab B. Switch between A and B and confirm both tabs keep their own Sidra visibility.
+- Close Sidra on tab A. Confirm tab B still shows Sidra and tab A stays hidden.
+- Create a tab with Cmd+T and confirm Sidra starts hidden.
+- From a tab with Sidra open, Cmd-click a page link or use Open Link in New Tab.
+  Confirm the child tab starts hidden.
+- With two browser windows open, focus each window and confirm Sidra can open in
+  that window's active tab.
+
 Report:
 
 - browser name and version
@@ -189,6 +203,7 @@ Report:
 - bridge executable path
 - whether Codex App Server authenticated
 - observed side panel status text
+- whether tab-scoped visibility passed
 
 Known local smoke status on 2026-05-30:
 

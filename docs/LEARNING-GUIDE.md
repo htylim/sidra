@@ -120,8 +120,9 @@ React should not need to know that "session.start" must happen before "session.s
 Read:
 
 - `apps/extension/src/bridge/connection.ts`
+- `apps/extension/src/background.ts`
+- `apps/extension/src/side-panel-tab-visibility.ts`
 - `apps/extension/public/manifest.json`
-- `apps/extension/public/background.js`
 
 What to notice:
 
@@ -129,6 +130,7 @@ What to notice:
 - The wrapper exposes `post`, `retry`, `disconnect`, and subscriptions.
 - Raw incoming messages are parsed before other code sees them.
 - The manifest grants the extension capabilities.
+- `SidePanelTabVisibilityController` configures tab-specific side panel availability from the background service worker.
 
 Beginner Chrome extension ideas:
 

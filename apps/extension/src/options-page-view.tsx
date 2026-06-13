@@ -9,7 +9,11 @@ import {
 
 type OptionsSettingsStore = Pick<
   SettingsStore,
-  "getSnapshot" | "whenReady" | "subscribe" | "saveQuickActions" | "saveTranscriptFontSizesPx"
+  | "getSnapshot"
+  | "whenReady"
+  | "subscribe"
+  | "saveQuickActions"
+  | "saveTranscriptFontSizesPx"
 >;
 type QuickActionFieldName = "label" | "prompt";
 type TouchedQuickActionFields = Record<string, Partial<Record<QuickActionFieldName, boolean>>>;

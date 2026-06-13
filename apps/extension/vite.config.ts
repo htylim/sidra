@@ -13,7 +13,12 @@ export default defineConfig({
     rollupOptions: {
       input: {
         sidePanel: fileURLToPath(new URL("side-panel.html", import.meta.url)),
-        options: fileURLToPath(new URL("options.html", import.meta.url))
+        options: fileURLToPath(new URL("options.html", import.meta.url)),
+        background: fileURLToPath(new URL("src/background.ts", import.meta.url))
+      },
+      output: {
+        entryFileNames: (chunkInfo) =>
+          chunkInfo.name === "background" ? "background.js" : "assets/[name]-[hash].js"
       }
     }
   }

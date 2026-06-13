@@ -1,6 +1,7 @@
 declare namespace chrome {
   namespace tabs {
     type Tab = {
+      active?: boolean;
       id?: number;
       windowId?: number;
       url?: string;
@@ -11,6 +12,7 @@ declare namespace chrome {
     type QueryInfo = {
       active?: boolean;
       currentWindow?: boolean;
+      windowId?: number;
     };
 
     type TabActiveInfo = {
@@ -35,6 +37,26 @@ declare namespace chrome {
       addListener(listener: (tabId: number, changeInfo: TabChangeInfo, tab: Tab) => void): void;
       removeListener(listener: (tabId: number, changeInfo: TabChangeInfo, tab: Tab) => void): void;
     };
+
+    const onReplaced: {
+      addListener(listener: (addedTabId: number, removedTabId: number) => void): void;
+      removeListener(listener: (addedTabId: number, removedTabId: number) => void): void;
+    };
+  }
+
+  namespace sidePanel {
+    type PanelBehavior = {
+      openPanelOnActionClick: boolean;
+    };
+
+    type Options = {
+      tabId?: number;
+      path?: string;
+      enabled?: boolean;
+    };
+
+    function setPanelBehavior(behavior: PanelBehavior): Promise<void>;
+    function setOptions(options: Options): Promise<void>;
   }
 
   namespace runtime {

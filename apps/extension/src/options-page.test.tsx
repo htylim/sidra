@@ -473,7 +473,11 @@ describe("OptionsPage quick actions", () => {
 });
 
 class FakeSettingsStore
-  implements Pick<SettingsStore, "getSnapshot" | "whenReady" | "subscribe" | "saveQuickActions" | "saveTranscriptFontSizesPx">
+  implements
+    Pick<
+      SettingsStore,
+      "getSnapshot" | "whenReady" | "subscribe" | "saveQuickActions" | "saveTranscriptFontSizesPx"
+    >
 {
   readonly saveCalls: QuickActionsSettings[] = [];
   readonly transcriptFontSizeSaveCalls: Array<{ promptFontSizePx: number; responseFontSizePx: number }> = [];

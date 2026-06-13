@@ -47,7 +47,7 @@ Supported Chromium browsers for the macOS installer:
 - Brave
 - Helium
 
-The extension targets Chromium Manifest V3 and the Chromium `sidePanel` API. Browsers without `sidePanel` support are out of scope.
+The extension targets Chromium Manifest V3 and the Chromium `sidePanel` API. Browsers without `sidePanel` support are out of scope. Sidra requires Chromium 114+ for the side panel API.
 
 Helium Native Messaging paths and `sidePanel` compatibility need verification before implementation.
 
@@ -100,6 +100,8 @@ The side panel has:
 Settings live in a separate dedicated extension settings/options page, not inside the side panel. The gear icon opens that page.
 
 Settings include quick actions, prompt text size, and response text size. Prompt text size defaults to `15px`. Response text size defaults to `17px`. Settings changes apply live to the side panel via `chrome.storage.onChanged`.
+
+Sidra side panel visibility is tab-scoped. Opening Sidra in one tab does not make Sidra visible in unrelated tabs. Navigating inside the same tab keeps that tab's Sidra visibility. This visibility state is browser tab state, not URL session state.
 
 The visual style should be neutral Sidra branding. The Leo AI screenshot is a conceptual reference only, not a design to copy.
 

@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Spec 020: Tab-Specific Side Panel Visibility</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17202a;
+        --muted: #5d6975;
+        --line: #d9e0e7;
+        --soft: #f6f8fa;
+        --accent: #087c71;
+        --warn: #8a5a00;
+        --bad: #9f1d20;
+        --good: #116b35;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: #ffffff;
+        font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 32px 24px 56px;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        line-height: 1.2;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 34px;
+      }
+
+      h2 {
+        margin-top: 36px;
+        padding-top: 12px;
+        border-top: 1px solid var(--line);
+        font-size: 24px;
+      }
+
+      h3 {
+        margin-top: 26px;
+        font-size: 19px;
+      }
+
+      h4 {
+        margin: 20px 0 8px;
+        font-size: 16px;
+      }
+
+      p {
+        margin: 8px 0 12px;
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      code {
+        border-radius: 4px;
+        padding: 1px 4px;
+        background: var(--soft);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.92em;
+      }
+
+      pre {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px 16px;
+        background: #fbfcfd;
+      }
+
+      pre code {
+        padding: 0;
+        background: transparent;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 12px 0 20px;
+      }
+
+      th,
+      td {
+        vertical-align: top;
+        border: 1px solid var(--line);
+        padding: 9px 10px;
+        text-align: left;
+      }
+
+      th {
+        background: var(--soft);
+      }
+
+      ul,
+      ol {
+        padding-left: 22px;
+      }
+
+      li {
+        margin: 5px 0;
+      }
+
+      .lede {
+        max-width: 880px;
+        color: var(--muted);
+        font-size: 17px;
+      }
+
+      .status-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+        margin: 20px 0;
+      }
+
+      .status-card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+        background: var(--soft);
+      }
+
+      .label {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .possible {
+        color: var(--good);
+        background: #e9f7ef;
+      }
+
+      .risk {
+        color: var(--warn);
+        background: #fff4d8;
+      }
+
+      .blocked {
+        color: var(--bad);
+        background: #fde8e8;
+      }
+
+      nav {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px 18px;
+        background: #fbfcfd;
+      }
+
+      nav ol {
+        columns: 2;
+        margin: 0;
+      }
+
+      details {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        margin: 14px 0;
+        padding: 12px 14px;
+        background: #ffffff;
+      }
+
+      summary {
+        cursor: pointer;
+        font-weight: 700;
+      }
+
+      .phase {
+        border-left: 4px solid var(--accent);
+        padding-left: 16px;
+      }
+
+      .checklist {
+        list-style: none;
+        padding-left: 0;
+      }
+
+      .checklist li::before {
+        content: "[ ] ";
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .callout {
+        border-left: 4px solid var(--warn);
+        padding: 10px 14px;
+        background: #fffaf0;
+      }
+
+      .decision {
+        border-left: 4px solid var(--accent);
+        padding: 10px 14px;
+        background: #edf8f6;
+      }
+
+      @media (max-width: 760px) {
+        nav ol {
+          columns: 1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Spec 020: Tab-Specific Side Panel Visibility</h1>
+        <p class="lede">
+          Change Sidra side panel visibility from global window state to tab-specific state.
+        </p>
+      </header>
+
+      <section class="status-grid" aria-label="Spec summary">
+        <div class="status-card">
+          <strong>Status</strong>
+          <p><span class="label possible">Feasible</span></p>
+          <p>Supported for current Sidra browser targets.</p>
+        </div>
+        <div class="status-card">
+          <strong>Primary owner</strong>
+          <p><code>apps/extension</code> background-side browser state.</p>
+        </div>
+        <div class="status-card">
+          <strong>Runtime target</strong>
+          <p>Current Sidra Chromium manual target.</p>
+        </div>
+        <div class="status-card">
+          <strong>Spec format</strong>
+          <p>HTML with anchors, tables, details, and phase checklists.</p>
+        </div>
+      </section>
+
+      <nav aria-label="Table of contents">
+        <ol>
+          <li><a href="#feasibility">Feasibility</a></li>
+          <li><a href="#overview">Overview</a></li>
+          <li><a href="#current-state">Current State</a></li>
+          <li><a href="#desired-state">Desired State</a></li>
+          <li><a href="#behavior-matrix">Behavior Matrix</a></li>
+          <li><a href="#not-doing">What We Are Not Doing</a></li>
+          <li><a href="#approach">Implementation Approach</a></li>
+          <li><a href="#phase-1">Phase 1</a></li>
+          <li><a href="#phase-2">Phase 2</a></li>
+          <li><a href="#testing">Testing Strategy</a></li>
+          <li><a href="#risks">Risks</a></li>
+          <li><a href="#references">References</a></li>
+        </ol>
+      </nav>
+
+      <section id="feasibility">
+        <h2>Feasibility</h2>
+        <p class="decision">
+          This change is possible for Sidra's current supported browser set.
+          The base behavior uses tab-specific <code>chrome.sidePanel.setOptions({ tabId, ... })</code>.
+          Sidra configures tab-specific side panel availability, then lets Chromium's native toolbar
+          side panel toggle own the per-tab open and close lifecycle.
+        </p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Requirement</th>
+              <th>API support</th>
+              <th>Conclusion</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Hide Sidra when switching to a tab where Sidra was not opened.</td>
+              <td>Chrome documents tab-specific side panel options and automatic restore for tabs where the panel was previously open.</td>
+              <td>Possible.</td>
+            </tr>
+            <tr>
+              <td>Show Sidra again when returning to a tab where it was opened.</td>
+              <td>Chrome documents automatic restore when returning to a tab where the panel was previously open.</td>
+              <td>Possible.</td>
+            </tr>
+            <tr>
+              <td>Turn Sidra off for only the current tab.</td>
+              <td>Chrome owns the toolbar side panel toggle once the current tab has tab-specific options.</td>
+              <td>Possible on current target browsers.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>Hard boundary:</strong>
+          Sidra does not try to synthesize browser side panel open state.
+          The manifest targets Chromium 114+ because Sidra only relies on the base Side Panel API.
+          Current project runbook already lists Chrome 148, Brave, and Helium Chromium 148 as known-good local targets.
+        </div>
+      </section>
+
+      <section id="overview">
+        <h2>Overview</h2>
+        <p>
+          Sidra currently behaves as a global side panel. Once visible, it remains visible as the user moves across tabs.
+          This plan changes only the visibility/open state. Chat sessions, URL session state, capture behavior, bridge state,
+          transcript state, provider sessions, and page identity behavior remain unchanged.
+        </p>
+        <p>
+          The new owner is a background-side <code>SidePanelTabVisibilityController</code>.
+          It enables Sidra's side panel for active browser tabs and lets Chromium keep the actual per-tab open state.
+          URL state stays in <code>UrlSessionStore</code>; it does not own side panel visibility.
+        </p>
+      </section>
+
+      <section id="current-state">
+        <h2>Current State</h2>
+        <ul>
+          <li><code>apps/extension/public/background.js:1</code> only sets <code>openPanelOnActionClick: true</code>.</li>
+          <li><code>apps/extension/public/manifest.json:9</code> declares a global <code>side_panel.default_path</code>.</li>
+          <li><code>apps/extension/public/manifest.json:16</code> declares the toolbar action that users click to open Sidra.</li>
+          <li><code>apps/extension/src/active-page.ts:31</code> tracks active tab ID only to refresh page identity, not visibility state.</li>
+          <li><code>apps/extension/src/side-panel-controller.ts:109</code> owns side panel application commands and URL-session selection, not browser chrome visibility.</li>
+          <li><code>apps/extension/src/settings-store.ts:1</code> stores settings in one <code>SidraSettings</code> object under <code>sidra.settings.v1</code>.</li>
+          <li><code>apps/extension/src/options-page-view.tsx:243</code> already renders checkbox-style settings toggles.</li>
+          <li><code>docs/ARCHITECTURE.md:9</code> says <code>apps/extension</code> owns side panel rendering, active page tracking, settings, and browser-side app state.</li>
+        </ul>
+      </section>
+
+      <section id="desired-state">
+        <h2>Desired State</h2>
+        <ul>
+          <li>Opening Sidra on tab A enables and opens Sidra only for tab A.</li>
+          <li>Navigation inside tab A keeps Sidra visible because the tab ID does not change.</li>
+          <li>Switching to tab B hides Sidra unless tab B was opened earlier.</li>
+          <li>Returning to tab A shows Sidra again while tab A remains open.</li>
+          <li>Closing Sidra on tab A closes only tab A. Tab B keeps its own state.</li>
+          <li>Tabs created through Cmd+T, browser new-tab UI, extension pages, or link-opened child tabs start closed until Sidra is opened in that tab.</li>
+        </ul>
+      </section>
+
+      <section id="behavior-matrix">
+        <h2>Behavior Matrix</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Scenario</th>
+              <th>Expected result</th>
+              <th>Named test coverage</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>B1</td>
+              <td>Action click on closed tab A.</td>
+              <td>Tab A already has tab-specific Sidra options; Chromium opens tab A's panel through the native toolbar toggle.</td>
+              <td><code>enables_the_current_active_tab_on_start</code>, manual check</td>
+            </tr>
+            <tr>
+              <td>B2</td>
+              <td>Navigate inside open tab A.</td>
+              <td>Do not change visibility state.</td>
+              <td><code>does_not_scope_visibility_to_url_updates</code></td>
+            </tr>
+            <tr>
+              <td>B3</td>
+              <td>Switch from open tab A to unopened tab B.</td>
+              <td>Sidra is hidden because Chromium has not opened Sidra in tab B.</td>
+              <td><code>enables_each_activated_tab_without_tracking_urls</code>, manual check</td>
+            </tr>
+            <tr>
+              <td>B4</td>
+              <td>Switch back from tab B to open tab A.</td>
+              <td>Chrome restores the open tab-specific panel.</td>
+              <td><code>keeps_tab_a_enabled_when_tab_b_is_unopened</code>, manual check <code>manual_tab_switch_restores_only_open_tabs</code></td>
+            </tr>
+            <tr>
+              <td>B5</td>
+              <td>Action click or panel close on open tab A.</td>
+              <td>Chromium closes tab A's tab-specific panel only.</td>
+              <td>Manual check</td>
+            </tr>
+            <tr>
+              <td>B6</td>
+              <td>Tab B is open while tab A is closed.</td>
+              <td>Tab B remains open; tab A remains closed.</td>
+              <td><code>closing_one_tab_preserves_other_open_tabs</code></td>
+            </tr>
+            <tr>
+              <td>B7</td>
+              <td>Cmd+T, browser new tab, or link-opened child tab.</td>
+              <td>Child tab starts closed until Sidra is opened in that tab.</td>
+              <td>Manual check <code>manual_new_tabs_start_closed</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="not-doing">
+        <h2>What We Are Not Doing</h2>
+        <ul>
+          <li>No change to URL session scoping, transcript storage, draft prompt behavior, or provider session mapping.</li>
+          <li>No content capture on tab switch, tab creation, side panel open, or passive background activity.</li>
+          <li>No URL-specific visibility. Visibility is keyed by browser tab ID only.</li>
+          <li>No bridge protocol changes.</li>
+          <li>No opener-tab inheritance. Native browser open-link-in-new-tab actions do not provide the extension user activation required by <code>chrome.sidePanel.open</code>.</li>
+          <li>No persistence of side panel open state across browser restarts.</li>
+          <li>No custom mirror of Chromium's internal side panel open state.</li>
+        </ul>
+      </section>
+
+      <section id="approach">
+        <h2>Implementation Approach</h2>
+        <ol>
+          <li>Remove the global default side panel path from the manifest.</li>
+          <li>Build a TypeScript background entry point so browser chrome behavior is testable.</li>
+          <li>Add a <code>SidePanelTabVisibilityController</code> behind a small Chrome gateway.</li>
+          <li>Use <code>chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })</code> so Chromium owns toolbar open and close.</li>
+          <li>Use <code>chrome.sidePanel.setOptions({ tabId, path, enabled: true })</code> for the current active tab and each later activated or replaced tab.</li>
+        </ol>
+
+        <details>
+          <summary>Recommended state model</summary>
+          <pre><code class="language-ts">type SidePanelAvailability = "enabled-for-tab";</code></pre>
+          <p>
+            Chromium owns whether the tab-specific side panel is currently open.
+            Sidra only ensures the active tab has Sidra's side panel path available before the user clicks the toolbar action.
+          </p>
+        </details>
+      </section>
+
+      <section id="phase-1" class="phase">
+        <h2>Phase 1: Tab-Specific Visibility Owner</h2>
+        <p>
+          Add the background-side owner and switch toolbar action behavior from global side panel opening to tab-specific opening and closing.
+        </p>
+
+        <h3>Why This Phase Can Be Validated Independently</h3>
+        <p>
+          It proves the base global-to-tab-specific behavior without settings changes.
+          The extension can open and close Sidra per tab, and unopened tabs are not enabled.
+        </p>
+
+        <h3>Changes Required</h3>
+        <h4>1. Tests (RED)</h4>
+        <p><strong>File:</strong> <code>apps/extension/src/side-panel-tab-visibility.test.ts</code></p>
+        <pre><code class="language-ts">// Group: toolbar action and tab visibility
+it("configures_the_toolbar_action_to_use_chrome_native_side_panel_toggle", async () =&gt; {});
+it("enables_the_current_active_tab_on_start", async () =&gt; {});
+it("enables_each_activated_tab_without_tracking_urls", async () =&gt; {});
+it("enables_the_added_tab_after_tab_replacement", async () =&gt; {});
+it("ignores_tabs_without_usable_ids", async () =&gt; {});
+it("does_not_register_duplicate_listeners_when_started_twice", async () =&gt; {});
+it("stops_listening_to_tab_lifecycle_events", async () =&gt; {});</code></pre>
+
+        <p><strong>File:</strong> <code>apps/extension/src/manifest.test.ts</code></p>
+        <pre><code class="language-ts">// Group: side panel manifest scope
+it("does_not_declare_a_global_side_panel_default_path", () =&gt; {});
+it("keeps_side_panel_permission_and_toolbar_action", () =&gt; {});
+it("declares_background_service_worker_for_visibility_controller", () =&gt; {});</code></pre>
+
+        <p><strong>File:</strong> <code>apps/extension/src/background-entrypoint.test.ts</code></p>
+        <pre><code class="language-ts">// Group: background composition
+it("starts_the_tab_visibility_controller_from_the_background_entrypoint", async () =&gt; {});</code></pre>
+
+        <h4>2. Implementation (GREEN)</h4>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li><code>apps/extension/src/side-panel-tab-visibility.ts</code></li>
+          <li><code>apps/extension/src/background.ts</code></li>
+          <li><code>apps/extension/src/chrome.d.ts</code></li>
+          <li><code>apps/extension/src/manifest.test.ts</code></li>
+          <li><code>apps/extension/vite.config.ts</code></li>
+          <li><code>apps/extension/public/manifest.json</code></li>
+          <li>Delete <code>apps/extension/public/background.js</code> after the TypeScript background entry emits <code>dist/background.js</code>.</li>
+        </ul>
+
+        <p><strong>Implementation notes:</strong></p>
+        <ul>
+          <li>Add a gateway type for <code>chrome.sidePanel</code> and lifecycle tab events.</li>
+          <li>Set <code>openPanelOnActionClick</code> to <code>true</code>. Chromium handles the action click.</li>
+          <li>Remove global <code>side_panel.default_path</code> from the manifest. Keep the <code>sidePanel</code> permission and toolbar <code>action</code>.</li>
+          <li>Configure Vite to build <code>src/background.ts</code> to a stable root-level <code>background.js</code>.</li>
+          <li>On start: enable Sidra's tab-specific side panel path for the current active tab.</li>
+          <li>On <code>tabs.onActivated</code>: enable Sidra's tab-specific side panel path for that tab.</li>
+          <li>On <code>tabs.onReplaced</code>: enable Sidra's tab-specific side panel path for the added tab.</li>
+        </ul>
+
+        <h3>Success Criteria</h3>
+        <h4>Automated Verification</h4>
+        <ul class="checklist">
+          <li>Phase 1 tests fail before implementation: <code>pnpm --filter @sidra/extension test -- side-panel-tab-visibility.test.ts manifest.test.ts background-entrypoint.test.ts</code></li>
+          <li>Phase 1 tests pass after implementation: <code>pnpm --filter @sidra/extension test -- side-panel-tab-visibility.test.ts manifest.test.ts background-entrypoint.test.ts</code></li>
+          <li>Extension type check passes: <code>pnpm --filter @sidra/extension check</code></li>
+          <li>Extension build emits <code>apps/extension/dist/background.js</code>: <code>pnpm --filter @sidra/extension build</code></li>
+        </ul>
+
+        <h4>Manual Verification</h4>
+        <ul class="checklist">
+          <li>Load the built extension and open Sidra on tab A.</li>
+          <li>Navigate within tab A and confirm Sidra remains visible.</li>
+          <li>Switch to a fresh tab B and confirm Sidra is hidden.</li>
+          <li>Return to tab A and confirm Sidra is visible.</li>
+          <li>Name this browser check <code>manual_tab_switch_restores_only_open_tabs</code> in the implementation report.</li>
+          <li>Close Sidra on tab A and confirm tab B state is unchanged.</li>
+        </ul>
+      </section>
+
+      <section id="phase-2" class="phase">
+        <h2>Phase 2: Durable Docs And Manual E2E Checklist</h2>
+        <p>
+          Update durable docs for the new owner and add manual verification steps for tab-specific side panel behavior.
+        </p>
+
+        <h3>Why This Phase Can Be Validated Independently</h3>
+        <p>
+          It does not change runtime behavior. It makes the new ownership boundary and browser-version constraint visible to future work.
+        </p>
+
+        <h3>Changes Required</h3>
+        <h4>1. Tests</h4>
+        <p>
+          TDD does not apply to prose-only documentation. Verification is a targeted source/doc check.
+        </p>
+
+        <h4>2. Implementation</h4>
+        <p><strong>Files:</strong></p>
+        <ul>
+          <li><code>docs/ARCHITECTURE.md</code></li>
+          <li><code>docs/MANUAL-E2E-RUNBOOK.md</code></li>
+          <li>Optional, only if browser support wording already exists there: <code>docs/prd-v1.md</code></li>
+        </ul>
+
+        <p><strong>Implementation notes:</strong></p>
+        <ul>
+          <li>Add <code>SidePanelTabVisibilityController</code> to the <code>apps/extension</code> ownership list.</li>
+          <li>State that side panel visibility is tab-scoped browser state, not URL session state.</li>
+          <li>State that Chromium owns the actual per-tab open and close state.</li>
+          <li>Add manual smoke steps for A/B tab switching, tab close, link-opened child tabs, and Cmd+T no-inheritance.</li>
+        </ul>
+
+        <h3>Success Criteria</h3>
+        <h4>Automated Verification</h4>
+        <ul class="checklist">
+          <li>Docs contain the new owner and browser-version constraint: <code>rg -n "SidePanelTabVisibilityController|Chromium 114|tab-scoped" docs</code></li>
+          <li>Full extension tests pass: <code>pnpm --filter @sidra/extension test</code></li>
+          <li>Full extension check passes: <code>pnpm --filter @sidra/extension check</code></li>
+          <li>Full repo check passes when practical: <code>pnpm check</code></li>
+        </ul>
+
+        <h4>Manual Verification</h4>
+        <ul class="checklist">
+          <li>Read <code>docs/MANUAL-E2E-RUNBOOK.md</code> before manual extension verification.</li>
+          <li>Run the final manual checklist from Phase 1 in a known-good browser.</li>
+          <li>Record browser name, version, extension ID, and whether tab-scoped visibility passed.</li>
+        </ul>
+      </section>
+
+      <section id="testing">
+        <h2>Testing Strategy</h2>
+        <h3>Unit Tests</h3>
+        <ul>
+          <li>Use a fake side panel gateway to assert exact <code>setPanelBehavior</code> and <code>setOptions</code> calls.</li>
+          <li>Use a fake tab event gateway for active-tab reads, tab activation, and tab replacement.</li>
+        </ul>
+
+        <h3>Integration Tests</h3>
+        <ul>
+          <li>Use existing options-page React tests for settings behavior.</li>
+          <li>Use manifest and background entrypoint tests to protect the non-global side panel setup.</li>
+          <li>Use manual browser verification for actual Chrome side panel show/hide behavior.</li>
+        </ul>
+
+        <h3>Final Commands</h3>
+        <pre><code class="language-sh">pnpm --filter @sidra/extension test
+pnpm --filter @sidra/extension check
+pnpm --filter @sidra/extension build
+pnpm check</code></pre>
+      </section>
+
+      <section id="risks">
+        <h2>Risks</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Risk</th>
+              <th>Mitigation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Service worker suspension loses in-memory tab state.</td>
+              <td>Do not mirror open state in memory. Let Chromium own the native tab-specific side panel state.</td>
+            </tr>
+            <tr>
+              <td>Old global side panel behavior survives through manifest default path.</td>
+              <td>Remove global <code>side_panel.default_path</code>; use tab-specific options plus native toolbar toggle.</td>
+            </tr>
+            <tr>
+              <td>Action-click handling races with Chromium user activation.</td>
+              <td>Do not call <code>chrome.sidePanel.open()</code> from the controller. Use Chromium's native toolbar side panel toggle.</td>
+            </tr>
+            <tr>
+              <td>New TypeScript background entry emits an unstable filename.</td>
+              <td>Configure Rollup entry output so the service worker remains <code>background.js</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="references">
+        <h2>References</h2>
+        <ul>
+          <li><code>docs/ARCHITECTURE.md:9</code> to <code>docs/ARCHITECTURE.md:25</code> define extension ownership boundaries.</li>
+          <li><code>docs/ARCHITECTURE.md:85</code> to <code>docs/ARCHITECTURE.md:95</code> define extension-side deep modules.</li>
+          <li><code>docs/MANUAL-E2E-RUNBOOK.md:193</code> to <code>docs/MANUAL-E2E-RUNBOOK.md:201</code> list current known-good Chrome, Brave, and Helium browser smoke status.</li>
+          <li><a href="https://developer.chrome.com/docs/extensions/reference/api/sidePanel">Chrome sidePanel API</a>.</li>
+          <li><a href="https://developer.chrome.com/docs/extensions/reference/api/tabs">Chrome tabs API</a>.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

@@ -7,7 +7,8 @@ This document records project-level decisions that should guide future implement
 Use this map to decide where behavior belongs. It is not a file catalog.
 
 - `apps/extension`: Browser extension UI and browser-side application state.
-  - Owns side panel rendering, options-page rendering, active page tracking, URL Session mapping, Draft Prompt state, capture orchestration, settings, quick-action configuration, and bridge-facing application commands.
+  - Owns side panel rendering, tab-scoped side panel visibility, options-page rendering, active page tracking, URL Session mapping, Draft Prompt state, capture orchestration, settings, quick-action configuration, and bridge-facing application commands.
+  - Side panel visibility is tab-scoped browser state. `SidePanelTabVisibilityController` configures tab-specific side panel availability and lets Chromium own toolbar open/close state. It must not use URL Session state.
   - Must not own provider lifecycle, low-level bridge protocol sequencing, or raw Native Messaging IO.
 - `apps/extension/src/bridge`: Extension-side bridge boundary.
   - Owns Chrome Native Messaging connection state, bridge readiness, reconnect/disconnect behavior, and session-start coordination before prompts are sent.
@@ -93,6 +94,7 @@ Decision:
   - `SidePanelController`: application commands, active-page selection, bridge availability composition, quick-action command routing, and derived UI snapshots.
   - `CaptureService`: active-tab capture, extraction, size decisions, and page-context construction.
   - `SettingsStore`: persisted extension settings, quick-action validation, quick-action writes, and live settings updates.
+  - `SidePanelTabVisibilityController`: tab-specific `chrome.sidePanel` availability, native toolbar side panel toggle configuration, and tab activation/replacement handling. It must not own URL session mapping or page capture.
 - The bridge must manage provider sessions behind a session manager. A raw message switch must not accumulate provider lifecycle, cancellation, reset, close, heartbeat, or permission logic.
 - Bridge modules should separate at least these responsibilities before related behavior expands:
   - `NativeMessagingTransport`: frame parsing/writing and process IO only.
