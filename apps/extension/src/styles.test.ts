@@ -114,7 +114,7 @@ describe("extension UI interaction state CSS", () => {
   it("keeps_non_prompt_transcript_ui_at_fixed_supporting_font_size", () => {
     expectRule(".status-card", ["font-size: 13px"]);
     expectRule(".permission-card", ["font-size: 13px"]);
-    expectRule(".turn-status", ["font-size: 13px"]);
+    expectRule(".waiting-indicator", ["font-size: 13px"]);
     expectRule(".activity-disclosure summary", ["font-size: 13px"]);
     expectRule(".activity-section-title", ["font-size: 13px"]);
     expectRule(".activity-reasoning", ["font-size: 13px"]);
@@ -123,5 +123,48 @@ describe("extension UI interaction state CSS", () => {
     expectRule(".permission-card h3", ["font-size: 13px"]);
     expectRule(".permission-scope", ["font-size: 13px"]);
     expectRule(".permission-command", ["font-size: 13px"]);
+  });
+
+  it("styles_waiting_indicator_as_inline_assistant_progress", () => {
+    expectRule(".waiting-indicator", [
+      "display: inline-flex",
+      "align-items: baseline",
+      "gap: 4px",
+      "width: fit-content",
+      "max-width: min(88%, 100%)",
+      "font-size: 13px"
+    ]);
+    expectRule(".waiting-dots", [
+      "display: inline-flex",
+      "align-items: flex-end",
+      "gap: 3px",
+      "width: 20px",
+      "height: 0.9em",
+      "flex: 0 0 auto",
+      "transform: translateY(1px)"
+    ]);
+  });
+
+  it("keeps_waiting_indicator_unboxed_on_the_transcript_background", () => {
+    expectRule(".waiting-indicator", ["display: inline-flex", "color: #62716d"]);
+
+    const waitingIndicatorRule = stylesheet.match(/\.waiting-indicator\s*{(?<body>[^}]+)}/m);
+    const body = waitingIndicatorRule?.groups?.body ?? "";
+    expect(body).not.toContain("border:");
+    expect(body).not.toContain("background:");
+    expect(body).not.toContain("padding:");
+  });
+
+  it("defines_waiting_dot_animation_and_reduced_motion_fallback", () => {
+    expect(stylesheet).toContain("@keyframes sidra-waiting-dot");
+    expectRule(".waiting-dot", ["animation: sidra-waiting-dot 1.2s ease-in-out infinite"]);
+    expectRule(".waiting-dot:nth-child(2)", ["animation-delay: 0.15s"]);
+    expectRule(".waiting-dot:nth-child(3)", ["animation-delay: 0.3s"]);
+    expect(stylesheet).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(stylesheet).toMatch(/@media\s+\(prefers-reduced-motion:\s*reduce\)\s*{\s*\.waiting-dot\s*{[^}]*animation:\s*none;[^}]*transform:\s*none;/m);
+  });
+
+  it("keeps_waiting_indicator_supporting_text_at_fixed_font_size", () => {
+    expectRule(".waiting-indicator", ["font-size: 13px"]);
   });
 });

@@ -5,7 +5,10 @@ import { CurrentPageCard } from "./current-page-card";
 import { SidraIcon } from "./sidra-icon";
 import type { SidePanelSnapshot } from "./side-panel-controller";
 import type { SendMode } from "./url-session-store";
-import { TranscriptView } from "./transcript-view";
+import { TranscriptView, type TranscriptWaitingState } from "./transcript-view";
+
+type ChatWorkState = "idle" | "queued_startup_prompt" | "turn_running" | "cancel_requested";
+type ChatWaitingState = TranscriptWaitingState;
 
 export function SidePanelView(props: {
   snapshot: SidePanelSnapshot;
@@ -25,10 +28,14 @@ export function SidePanelView(props: {
   const bridgeBlocked = props.snapshot.bridge.availability.status !== "ready";
   const pageUnsupported = props.snapshot.activePage.status === "unsupported";
   const chatUnavailable = !props.snapshot.bridge.canUseChat || pageUnsupported;
-  const turnRunning = props.snapshot.activeSession.turnInFlight;
-  const promptEntryDisabled =
-    chatUnavailable || turnRunning || props.snapshot.activeSession.pendingPromptCount > 0;
-  const cancelDisabled = !props.snapshot.activeSession.canCancelTurn;
+  const chatWorkState = getChatWorkState(props.snapshot.activeSession);
+  const showCancelButton =
+    chatWorkState === "turn_running" || chatWorkState === "cancel_requested";
+  const promptEntryDisabled = chatUnavailable || chatWorkState !== "idle";
+  const cancelDisabled = chatWorkState !== "turn_running";
+  const waitingState = chatUnavailable
+    ? { kind: "idle" } satisfies ChatWaitingState
+    : getTranscriptWaitingState(props.snapshot.activeSession, chatWorkState);
   const draftPrompt = props.snapshot.activeSession.draftPrompt;
   const sendFullDom = props.snapshot.activeSession.captureMode === "full_dom";
   const sendMode = props.snapshot.activeSession.sendMode;
@@ -133,6 +140,7 @@ export function SidePanelView(props: {
             entries={props.snapshot.activeSession.transcript}
             promptFontSizePx={props.snapshot.display.promptFontSizePx}
             responseFontSizePx={props.snapshot.display.responseFontSizePx}
+            waitingState={waitingState}
             onRespondToPermission={props.onRespondToPermission}
           />
         )}
@@ -164,7 +172,7 @@ export function SidePanelView(props: {
             />
             <span>Send DOM</span>
           </label>
-          {turnRunning ? (
+          {showCancelButton ? (
             <button
               type="button"
               className="send-button cancel-button"
@@ -224,6 +232,29 @@ export function SidePanelView(props: {
       </footer>
     </main>
   );
+}
+
+function getChatWorkState(session: SidePanelSnapshot["activeSession"]): ChatWorkState {
+  if (session.pendingPromptCount > 0) return "queued_startup_prompt";
+  if (!session.turnInFlight) return "idle";
+  if (!session.canCancelTurn) return "cancel_requested";
+  return "turn_running";
+}
+
+function getTranscriptWaitingState(
+  session: SidePanelSnapshot["activeSession"],
+  chatWorkState: ChatWorkState
+): ChatWaitingState {
+  if (hasPendingPermissionRequest(session.transcript)) return { kind: "idle" };
+  if (chatWorkState === "queued_startup_prompt" || chatWorkState === "turn_running") {
+    return { kind: "waiting_for_response", label: "Waiting" };
+  }
+  if (chatWorkState === "cancel_requested") return { kind: "cancelling", label: "Cancelling" };
+  return { kind: "idle" };
+}
+
+function hasPendingPermissionRequest(sessionTranscript: SidePanelSnapshot["activeSession"]["transcript"]): boolean {
+  return sessionTranscript.some((entry) => entry.kind === "permission_request" && entry.status === "pending");
 }
 
 function getPageCardDisplay(snapshot: SidePanelSnapshot): { title: string; statusLabel: string; favIconUrl?: string } {

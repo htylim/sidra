@@ -13,10 +13,16 @@ import type {
 } from "./transcript";
 import { hasVisibleActivity } from "./transcript";
 
+export type TranscriptWaitingState =
+  | { kind: "idle" }
+  | { kind: "waiting_for_response"; label: "Waiting" }
+  | { kind: "cancelling"; label: "Cancelling" };
+
 export function TranscriptView(props: {
   entries: TranscriptEntry[];
   promptFontSizePx: number;
   responseFontSizePx: number;
+  waitingState: TranscriptWaitingState;
   onRespondToPermission(requestId: string, decision: PermissionDecision): void;
 }) {
   const transcriptStyle = {
@@ -33,6 +39,27 @@ export function TranscriptView(props: {
           onRespondToPermission={props.onRespondToPermission}
         />
       ))}
+      <WaitingIndicator waitingState={props.waitingState} />
+    </div>
+  );
+}
+
+function WaitingIndicator(props: { waitingState: TranscriptWaitingState }) {
+  if (props.waitingState.kind === "idle") return null;
+
+  return (
+    <div
+      className={`waiting-indicator ${props.waitingState.kind}`}
+      role="status"
+      aria-live="polite"
+      aria-label={props.waitingState.label}
+    >
+      <span>{props.waitingState.label}</span>
+      <span className="waiting-dots" aria-hidden="true">
+        <span className="waiting-dot" />
+        <span className="waiting-dot" />
+        <span className="waiting-dot" />
+      </span>
     </div>
   );
 }
@@ -89,15 +116,14 @@ function QuickActionUserMessage(props: { entry: UserMessageEntry }) {
 
 function AssistantTurn(props: { entry: AssistantTurnEntry }) {
   const hasActivity = hasVisibleActivity(props.entry.activity);
-  const hasResponseBody = props.entry.markdown.trim() || props.entry.status === "streaming";
+  const hasResponseBody = props.entry.markdown.trim().length > 0;
 
   return (
     <div className={`assistant-turn ${props.entry.status}`}>
       {hasActivity ? <ActivityDisclosure activity={props.entry.activity} /> : null}
       {hasResponseBody ? (
         <article className="message assistant assistant-response">
-          {props.entry.markdown.trim() ? <AssistantMarkdown markdown={props.entry.markdown} /> : null}
-          {props.entry.status === "streaming" ? <div className="turn-status">Streaming</div> : null}
+          <AssistantMarkdown markdown={props.entry.markdown} />
         </article>
       ) : null}
     </div>
