@@ -1,0 +1,1029 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Spec 021: Chat Waiting Indicator</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17201f;
+        --muted: #62716d;
+        --line: #d8e1dd;
+        --soft: #f6f8f7;
+        --accent: #087c71;
+        --accent-soft: #eef8f5;
+        --warn: #8a5a00;
+        --warn-soft: #fff7dd;
+        --bad: #8f2d16;
+        --bad-soft: #fff7ed;
+        --good: #126b44;
+        --good-soft: #e8f7ef;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: #ffffff;
+        font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      header,
+      main {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        line-height: 1.2;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 34px;
+      }
+
+      h2 {
+        margin-top: 34px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+        font-size: 24px;
+      }
+
+      h3 {
+        margin-top: 24px;
+        font-size: 18px;
+      }
+
+      h4 {
+        margin: 18px 0 8px;
+        font-size: 16px;
+      }
+
+      p {
+        margin: 8px 0 12px;
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      code {
+        border-radius: 4px;
+        padding: 1px 4px;
+        background: var(--soft);
+        font-size: 0.92em;
+      }
+
+      pre {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px 14px;
+        background: #fbfcfd;
+      }
+
+      pre code {
+        padding: 0;
+        background: transparent;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 12px 0 18px;
+      }
+
+      th,
+      td {
+        vertical-align: top;
+        border: 1px solid var(--line);
+        padding: 8px 10px;
+        text-align: left;
+      }
+
+      th {
+        background: var(--soft);
+      }
+
+      ul,
+      ol {
+        padding-left: 22px;
+      }
+
+      li {
+        margin: 5px 0;
+      }
+
+      nav {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px 18px;
+        background: #fbfcfd;
+      }
+
+      nav ol {
+        columns: 2;
+        margin: 0;
+      }
+
+      details {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        margin: 14px 0;
+        padding: 12px 14px;
+        background: #ffffff;
+      }
+
+      summary {
+        cursor: pointer;
+        font-weight: 700;
+      }
+
+      .lede {
+        max-width: 880px;
+        color: var(--muted);
+        font-size: 17px;
+      }
+
+      .status-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+        margin: 18px 0 20px;
+      }
+
+      .status-card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+        background: var(--soft);
+      }
+
+      .label {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .possible {
+        color: var(--good);
+        background: var(--good-soft);
+      }
+
+      .risk {
+        color: var(--warn);
+        background: var(--warn-soft);
+      }
+
+      .decision,
+      .callout {
+        border-left: 4px solid var(--accent);
+        padding: 10px 14px;
+        background: #edf8f6;
+      }
+
+      .callout.warning {
+        border-left-color: var(--warn);
+        background: var(--warn-soft);
+      }
+
+      .callout.bad {
+        border-left-color: var(--bad);
+        background: var(--bad-soft);
+      }
+
+      .phase {
+        border-left: 4px solid var(--accent);
+        padding-left: 16px;
+      }
+
+      .checklist {
+        list-style: none;
+        padding-left: 0;
+      }
+
+      .checklist label {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+      }
+
+      .evidence {
+        display: block;
+        margin-left: 26px;
+        color: var(--muted);
+      }
+
+      .svg-wrap {
+        overflow-x: auto;
+      }
+
+      svg {
+        max-width: 100%;
+        height: auto;
+      }
+
+      @media (max-width: 760px) {
+        nav ol {
+          columns: 1;
+        }
+      }
+
+      @media print {
+        nav {
+          display: none;
+        }
+
+        body {
+          color: #000000;
+          background: #ffffff;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p class="label possible">Implementation Plan</p>
+      <h1>Spec 021: Chat Waiting Indicator</h1>
+      <p class="lede">
+        Add an animated, accessible waiting indicator to Sidra's side panel whenever the active URL session is waiting for the bridge or provider turn to finish.
+        The indicator must use the same lifecycle source as the existing Send and Cancel controls.
+      </p>
+    </header>
+
+    <main>
+      <section class="status-grid" aria-label="Spec summary">
+        <div class="status-card">
+          <strong>Status</strong>
+          <p><span class="label possible">Ready for implementation</span></p>
+          <p>No protocol change is required.</p>
+        </div>
+        <div class="status-card">
+          <strong>Primary owner</strong>
+          <p><code>apps/extension</code> side-panel rendering.</p>
+        </div>
+        <div class="status-card">
+          <strong>Lifecycle source</strong>
+          <p><code>pendingPromptCount</code>, <code>turnInFlight</code>, and <code>canCancelTurn</code>.</p>
+        </div>
+        <div class="status-card">
+          <strong>Out of scope</strong>
+          <p>Bridge protocol, provider state, persisted transcript entries.</p>
+        </div>
+      </section>
+
+      <nav aria-label="Table of contents">
+        <ol>
+          <li><a href="#overview">Overview</a></li>
+          <li><a href="#research">UX Research</a></li>
+          <li><a href="#current-state">Current State</a></li>
+          <li><a href="#desired-state">Desired State</a></li>
+          <li><a href="#behavior-matrix">Behavior Matrix</a></li>
+          <li><a href="#not-doing">What We Are Not Doing</a></li>
+          <li><a href="#approach">Implementation Approach</a></li>
+          <li><a href="#visual-map">Lifecycle Map</a></li>
+          <li><a href="#phase-1">Phase 1</a></li>
+          <li><a href="#phase-2">Phase 2</a></li>
+          <li><a href="#phase-3">Phase 3</a></li>
+          <li><a href="#testing">Testing Strategy</a></li>
+          <li><a href="#risks">Risks</a></li>
+          <li><a href="#references">References</a></li>
+        </ol>
+      </nav>
+
+      <section id="overview">
+        <h2>Overview</h2>
+        <p>
+          When a user sends a prompt, Sidra currently disables prompt controls and eventually swaps the Send button to Cancel.
+          The transcript may show only <code>Session started</code> until the first provider event arrives.
+          This creates a silent wait state during startup, follow-up prompts, provider work, and cancel acknowledgement.
+        </p>
+        <p>
+          The implementation should render a small assistant-side waiting row with short copy and animated dots.
+          It should appear while the active session is blocked from sending because a prompt is queued or a turn is running and Sidra is waiting on the bridge or provider.
+          It should disappear when the lifecycle returns to the same idle state that enables writing and sending again.
+          It should not appear when a permission card is waiting for user action.
+        </p>
+      </section>
+
+      <section id="research">
+        <h2>UX Research</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Useful guidance</th>
+              <th>Decision for Sidra</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><a href="https://www.nngroup.com/articles/response-times-3-important-limits/">NN/g response time limits</a></td>
+              <td>Feedback matters after about one second. For unknown duration, a spinner, dots, or similar running feedback is acceptable.</td>
+              <td>Use an indeterminate indicator. Do not fake percent progress because the bridge cannot know completion percent.</td>
+            </tr>
+            <tr>
+              <td><a href="https://carbondesignsystem.com/components/loading/usage/">Carbon loading component</a></td>
+              <td>Loading indicators show that a request is being processed. Small inline indicators work for localized loading near the triggering action.</td>
+              <td>Use one small inline indicator in the chat transcript, not a full-panel overlay.</td>
+            </tr>
+            <tr>
+              <td><a href="https://www.w3.org/TR/wai-aria-1.2/#status">WAI-ARIA status role</a></td>
+              <td><code>role="status"</code> is advisory, polite live-region feedback and should not take focus.</td>
+              <td>Expose the waiting row as a polite status. Do not move focus.</td>
+            </tr>
+            <tr>
+              <td><a href="https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html">WCAG pause, stop, hide guidance</a></td>
+              <td>Moving or blinking content can distract users and screen readers. Avoid persistent distracting motion.</td>
+              <td>Animate only small dots, avoid flashing, and provide a <code>prefers-reduced-motion</code> fallback.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p class="decision">
+          Recommended pattern: an assistant-side inline status row with text plus an animated dot trio.
+          Copy: <code>Waiting for response</code> during queued and running states, and <code>Cancelling</code> after cancel is requested.
+        </p>
+      </section>
+
+      <section id="current-state">
+        <h2>Current State Analysis</h2>
+        <ul>
+          <li><code>docs/ARCHITECTURE.md:9</code> says <code>apps/extension</code> owns side panel rendering and browser-side application state.</li>
+          <li><code>docs/ARCHITECTURE.md:13</code> says <code>apps/extension/src/bridge</code> owns bridge readiness and session-start coordination.</li>
+          <li><code>docs/ARCHITECTURE.md:41</code> through <code>docs/ARCHITECTURE.md:44</code> require React to call application commands and render derived state, while protocol sequencing stays outside the view.</li>
+          <li><code>apps/extension/src/bridge/session-coordinator.ts:42</code> through <code>apps/extension/src/bridge/session-coordinator.ts:50</code> already expose <code>starting</code>, <code>turnInFlight</code>, <code>canCancelTurn</code>, and <code>pendingPromptCount</code>.</li>
+          <li><code>apps/extension/src/bridge/session-coordinator.ts:137</code> through <code>apps/extension/src/bridge/session-coordinator.ts:195</code> queue the first prompt while waiting for <code>session.started</code>.</li>
+          <li><code>apps/extension/src/bridge/session-coordinator.ts:197</code> through <code>apps/extension/src/bridge/session-coordinator.ts:218</code> keep a running turn active after cancel posts until a terminal bridge event arrives.</li>
+          <li><code>apps/extension/src/side-panel-controller.ts:24</code> through <code>apps/extension/src/side-panel-controller.ts:51</code> surface the active session lifecycle fields to the view.</li>
+          <li><code>apps/extension/src/side-panel-view.tsx:28</code> through <code>apps/extension/src/side-panel-view.tsx:31</code> already derive prompt disabling and Cancel availability from the same fields.</li>
+          <li><code>apps/extension/src/side-panel-view.tsx:167</code> through <code>apps/extension/src/side-panel-view.tsx:222</code> swap Send for Cancel only when <code>turnInFlight</code> is true.</li>
+          <li><code>apps/extension/src/transcript-view.tsx:90</code> through <code>apps/extension/src/transcript-view.tsx:101</code> show a static <code>Streaming</code> label only after an assistant turn entry exists.</li>
+          <li><code>apps/extension/src/styles.css:553</code> through <code>apps/extension/src/styles.css:557</code> style the current static <code>.turn-status</code>.</li>
+        </ul>
+      </section>
+
+      <section id="desired-state">
+        <h2>Desired State</h2>
+        <ul>
+          <li>After sending a prompt, a visible waiting indicator appears in the transcript area before the first bridge or provider response is visible.</li>
+          <li>The same indicator appears for follow-up prompts and quick actions.</li>
+          <li>The indicator remains visible while Sidra is waiting for the active bridge turn to finish.</li>
+          <li>After Cancel is clicked, the indicator changes to <code>Cancelling</code> until the terminal bridge event clears the running turn.</li>
+          <li>When a permission request is pending, the permission card is the visible blocking state and the waiting indicator is hidden.</li>
+          <li>The indicator disappears when the active session can accept typing and sending again.</li>
+          <li>The indicator is not stored as a transcript entry and does not appear in completed transcript history.</li>
+          <li>The indicator is accessible through a polite status region and does not steal focus.</li>
+          <li>Animation respects <code>prefers-reduced-motion: reduce</code>.</li>
+        </ul>
+      </section>
+
+      <section id="behavior-matrix">
+        <h2>Behavior Matrix</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Lifecycle state</th>
+              <th>Indicator</th>
+              <th>Send or Cancel state</th>
+              <th>Named test coverage</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>W1</td>
+              <td><code>pendingPromptCount = 0</code>, <code>turnInFlight = false</code></td>
+              <td>None.</td>
+              <td>Send is available when chat is usable.</td>
+              <td><code>does_not_render_waiting_indicator_when_session_is_idle</code></td>
+            </tr>
+            <tr>
+              <td>W2</td>
+              <td><code>pendingPromptCount &gt; 0</code>, <code>turnInFlight = false</code></td>
+              <td><code>Waiting for response</code> with animated dots.</td>
+              <td>Prompt controls disabled. Cancel hidden because provider turn is not cancellable yet.</td>
+              <td><code>renders_waiting_indicator_for_queued_startup_prompt</code></td>
+            </tr>
+            <tr>
+              <td>W3</td>
+              <td><code>turnInFlight = true</code>, <code>canCancelTurn = true</code>, no assistant output yet</td>
+              <td><code>Waiting for response</code> with animated dots.</td>
+              <td>Prompt controls disabled. Cancel enabled.</td>
+              <td><code>renders_waiting_indicator_and_cancel_for_running_turn_before_output</code></td>
+            </tr>
+            <tr>
+              <td>W4</td>
+              <td><code>turnInFlight = true</code> and assistant text or activity is streaming</td>
+              <td>One trailing waiting indicator remains after the visible assistant content.</td>
+              <td>Cancel follows <code>canCancelTurn</code>.</td>
+              <td><code>keeps_single_waiting_indicator_while_assistant_content_streams</code></td>
+            </tr>
+            <tr>
+              <td>W5</td>
+              <td><code>turnInFlight = true</code>, <code>canCancelTurn = false</code></td>
+              <td><code>Cancelling</code> with animated dots.</td>
+              <td>Cancel shown disabled until the bridge reports terminal state.</td>
+              <td><code>renders_cancelling_indicator_after_cancel_is_requested</code></td>
+            </tr>
+            <tr>
+              <td>W6</td>
+              <td>Terminal <code>assistant.done</code>, <code>assistant.cancelled</code>, terminal error, or bridge disconnect clears the active turn</td>
+              <td>None.</td>
+              <td>Prompt controls return to their normal state when chat is usable.</td>
+              <td><code>removes_waiting_indicator_after_terminal_turn_state</code></td>
+            </tr>
+            <tr>
+              <td>W7</td>
+              <td>Bridge setup blocked or active page unsupported</td>
+              <td>None. Existing setup or unsupported panel remains the visible state.</td>
+              <td>Prompt controls disabled by existing logic.</td>
+              <td><code>does_not_render_waiting_indicator_in_blocked_chat_states</code></td>
+            </tr>
+            <tr>
+              <td>W8</td>
+              <td><code>turnInFlight = true</code> and the transcript has a pending <code>permission_request</code></td>
+              <td>None. The permission card is the visible user-action state.</td>
+              <td>Prompt controls disabled. Cancel follows <code>canCancelTurn</code>.</td>
+              <td><code>does_not_render_waiting_indicator_while_permission_request_needs_user_action</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="not-doing">
+        <h2>What We Are Not Doing</h2>
+        <ul>
+          <li>No bridge protocol changes.</li>
+          <li>No Native Messaging bridge changes.</li>
+          <li>No provider-specific progress events.</li>
+          <li>No fake progress bar or percent complete.</li>
+          <li>No persistent transcript entry for <code>Waiting for response</code> or <code>Cancelling</code>.</li>
+          <li>No full-panel overlay that blocks reading prior transcript content.</li>
+          <li>No new user preference for loading style.</li>
+        </ul>
+      </section>
+
+      <section id="approach">
+        <h2>Implementation Approach</h2>
+        <ol>
+          <li>Keep lifecycle ownership in <code>BridgeSessionCoordinator</code>, <code>UrlSessionStore</code>, and <code>SidePanelController</code>.</li>
+          <li>Add a small view-level work-state helper in <code>apps/extension/src/side-panel-view.tsx</code>.</li>
+          <li>Use that helper for prompt disabling, Send or Cancel rendering, and waiting indicator state so those affordances cannot drift.</li>
+          <li>Pass the derived waiting state to <code>TranscriptView</code>.</li>
+          <li>Render one ephemeral waiting row after transcript entries while the derived state is active.</li>
+          <li>Replace the static <code>Streaming</code> text with the new waiting indicator so there is only one visible progress affordance.</li>
+          <li>Style the indicator as an assistant-side inline row with a fixed-width dot group and reduced-motion fallback.</li>
+        </ol>
+
+        <details>
+          <summary>Recommended TypeScript shape</summary>
+          <pre><code class="language-ts">type ChatWorkState =
+  | { kind: "idle" }
+  | { kind: "queued_startup" }
+  | { kind: "running" }
+  | { kind: "cancelling" };
+
+type ChatWaitingState =
+  | { kind: "idle" }
+  | { kind: "waiting_for_response"; label: "Waiting for response" }
+  | { kind: "cancelling"; label: "Cancelling" };
+
+function deriveChatWorkState(activeSession: SidePanelSnapshot["activeSession"]): ChatWorkState {
+  if (activeSession.pendingPromptCount &gt; 0) return { kind: "queued_startup" };
+  if (activeSession.turnInFlight &amp;&amp; !activeSession.canCancelTurn) {
+    return { kind: "cancelling" };
+  }
+
+  if (activeSession.turnInFlight) return { kind: "running" };
+  return { kind: "idle" };
+}
+
+function deriveChatWaitingState(activeSession: SidePanelSnapshot["activeSession"]): ChatWaitingState {
+  if (hasPendingPermissionRequest(activeSession.transcript)) return { kind: "idle" };
+
+  const workState = deriveChatWorkState(activeSession);
+  if (workState.kind === "queued_startup" || workState.kind === "running") {
+    return { kind: "waiting_for_response", label: "Waiting for response" };
+  }
+  if (workState.kind === "cancelling") return { kind: "cancelling", label: "Cancelling" };
+  return { kind: "idle" };
+}
+
+function hasPendingPermissionRequest(transcript: SidePanelSnapshot["activeSession"]["transcript"]): boolean {
+  return transcript.some((entry) =&gt; entry.kind === "permission_request" &amp;&amp; entry.status === "pending");
+}</code></pre>
+          <p>
+            The work-state helper intentionally uses the same fields that already disable prompt entry and select the Send or Cancel button.
+            Prompt disabling should be computed from <code>chatUnavailable || workState.kind !== "idle"</code>, and Cancel should be enabled only for <code>workState.kind === "running"</code>.
+            It must not inspect bridge messages directly.
+          </p>
+        </details>
+      </section>
+
+      <section id="visual-map" aria-labelledby="visual-map-title">
+        <h2 id="visual-map-title">Lifecycle Map</h2>
+        <figure>
+          <div class="svg-wrap">
+            <svg role="img" aria-labelledby="diagram-title diagram-desc" viewBox="0 0 840 230">
+              <title id="diagram-title">Waiting indicator lifecycle</title>
+              <desc id="diagram-desc">
+                A prompt moves from idle to queued startup, then to running turn, then to terminal idle.
+                Cancel changes the running label to cancelling until the terminal bridge event arrives.
+              </desc>
+              <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+                </marker>
+              </defs>
+              <rect x="20" y="64" width="145" height="66" rx="8" fill="#f6f8f7" stroke="currentColor"></rect>
+              <text x="92" y="91" text-anchor="middle" font-size="14">Idle</text>
+              <text x="92" y="113" text-anchor="middle" font-size="12">No indicator</text>
+
+              <line x1="170" y1="97" x2="260" y2="97" stroke="currentColor" marker-end="url(#arrow)"></line>
+              <text x="215" y="82" text-anchor="middle" font-size="12">Send</text>
+
+              <rect x="270" y="64" width="160" height="66" rx="8" fill="#eef8f5" stroke="currentColor"></rect>
+              <text x="350" y="91" text-anchor="middle" font-size="14">Queued startup</text>
+              <text x="350" y="113" text-anchor="middle" font-size="12">Waiting for response</text>
+
+              <line x1="435" y1="97" x2="525" y2="97" stroke="currentColor" marker-end="url(#arrow)"></line>
+              <text x="480" y="82" text-anchor="middle" font-size="12">session.started</text>
+
+              <rect x="535" y="64" width="160" height="66" rx="8" fill="#eef8f5" stroke="currentColor"></rect>
+              <text x="615" y="91" text-anchor="middle" font-size="14">Running turn</text>
+              <text x="615" y="113" text-anchor="middle" font-size="12">Waiting for response</text>
+
+              <path d="M 615 132 C 615 176, 705 176, 705 132" stroke="currentColor" fill="none" marker-end="url(#arrow)"></path>
+              <text x="690" y="166" text-anchor="middle" font-size="12">Cancel</text>
+
+              <rect x="710" y="64" width="110" height="66" rx="8" fill="#fff7dd" stroke="currentColor"></rect>
+              <text x="765" y="91" text-anchor="middle" font-size="14">Cancelling</text>
+              <text x="765" y="113" text-anchor="middle" font-size="12">Cancelling</text>
+
+              <path d="M 620 62 C 620 25, 92 25, 92 60" stroke="currentColor" fill="none" marker-end="url(#arrow)"></path>
+              <text x="360" y="20" text-anchor="middle" font-size="12">assistant.done, error, cancelled, or disconnect</text>
+              <path d="M 765 62 C 765 8, 92 8, 92 60" stroke="currentColor" fill="none" marker-end="url(#arrow)"></path>
+            </svg>
+          </div>
+          <figcaption>
+            The indicator is a derived view of active-session runtime state.
+            It starts when sending becomes blocked by queued or running work and ends when terminal bridge events clear that state.
+          </figcaption>
+        </figure>
+      </section>
+
+      <article id="phase-1" class="phase">
+        <h2>Phase 1: Derived Waiting State And Semantic Rendering</h2>
+        <label><input type="checkbox" disabled> Phase complete</label>
+
+        <h3>Overview</h3>
+        <p>
+          Add the view-level waiting state helper and render one accessible waiting indicator in the transcript area.
+          This phase proves lifecycle synchronization before visual animation is added.
+        </p>
+
+        <h3>Why This Phase Can Be Validated Independently</h3>
+        <p>
+          The indicator will appear and disappear according to active-session lifecycle state even with simple static styling.
+          Tests can prove all behavior matrix rows without depending on animation timing.
+        </p>
+
+        <h3>Changes Required</h3>
+        <aside class="callout">
+          <p><strong>TDD ordering:</strong> Add or update the tests below first. Confirm they fail before implementation. Then update the view code.</p>
+        </aside>
+
+        <h4>1. Tests (RED)</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Test name</th>
+              <th>What it proves</th>
+              <th>Matrix row</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+              <td><code>renders_waiting_indicator_for_queued_startup_prompt</code></td>
+              <td>A queued startup prompt shows <code>Waiting for response</code>, disables send, and does not show Cancel.</td>
+              <td>W2</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+              <td><code>renders_waiting_indicator_and_cancel_for_running_turn_before_output</code></td>
+              <td>A running turn with no assistant output shows the indicator and enabled Cancel.</td>
+              <td>W3</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+              <td><code>keeps_single_waiting_indicator_while_assistant_content_streams</code></td>
+              <td>Streaming assistant content has one progress indicator, not both the new indicator and old <code>Streaming</code> text.</td>
+              <td>W4</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+              <td><code>renders_cancelling_indicator_after_cancel_is_requested</code></td>
+              <td>Cancel-requested state shows <code>Cancelling</code> and disabled Cancel.</td>
+              <td>W5</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+              <td><code>removes_waiting_indicator_after_terminal_turn_state</code></td>
+              <td>Completed, failed, and cancelled terminal snapshots do not show waiting UI.</td>
+              <td>W6</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+              <td><code>does_not_render_waiting_indicator_when_session_is_idle</code></td>
+              <td>Idle ready chat keeps the empty state or transcript without progress UI.</td>
+              <td>W1</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+              <td><code>does_not_render_waiting_indicator_in_blocked_chat_states</code></td>
+              <td>Bridge setup and unsupported-page states do not show the waiting row.</td>
+              <td>W7</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+              <td><code>does_not_render_waiting_indicator_while_permission_request_needs_user_action</code></td>
+              <td>A pending permission card suppresses the waiting row because user action is required.</td>
+              <td>W8</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+              <td><code>waiting_indicator_is_a_polite_status_region_without_focus_movement</code></td>
+              <td>The visible progress row has <code>role="status"</code>, a stable accessible label, and does not move document focus.</td>
+              <td>W2, W3, W5</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h4>2. Implementation (GREEN)</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Change</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>apps/extension/src/side-panel-view.tsx</code></td>
+              <td>Add named <code>ChatWorkState</code> and <code>ChatWaitingState</code> types plus helper functions that use <code>activeSession.pendingPromptCount</code>, <code>activeSession.turnInFlight</code>, <code>activeSession.canCancelTurn</code>, and pending permission entries.</td>
+              <td>The side panel view already derives prompt disabled state and Send or Cancel display from this snapshot. One helper keeps the indicator synced with those controls.</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/side-panel-view.tsx</code></td>
+              <td>Use <code>ChatWorkState</code> for prompt disabling and Cancel availability, then pass the derived waiting state into <code>TranscriptView</code> only when chat is usable and not showing setup or unsupported panels.</td>
+              <td>Blocked chat states already have their own visible status panels.</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/transcript-view.tsx</code></td>
+              <td>Add a <code>WaitingIndicator</code> component rendered after transcript entries when waiting state is active.</td>
+              <td>The indicator belongs beside transcript content but must remain ephemeral.</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/transcript-view.tsx</code></td>
+              <td>Remove or replace the static <code>Streaming</code> turn-status text so the new waiting row is the single progress affordance.</td>
+              <td>Multiple simultaneous loading indicators add noise and conflict with the behavior matrix.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Success Criteria</h3>
+        <h4>Automated Verification</h4>
+        <ul class="checklist">
+          <li>
+            <label><input type="checkbox" checked disabled> Phase 1 tests fail before implementation: <code>pnpm --filter @sidra/extension test -- side-panel-view.test.tsx -t "waiting_indicator|cancelling_indicator|terminal_turn_state|blocked_chat_states|permission_request_needs_user_action"</code></label>
+            <span class="evidence">Actual: failed before implementation with 5 missing waiting/cancelling status indicators.</span>
+          </li>
+          <li>
+            <label><input type="checkbox" checked disabled> Phase 1 tests pass after implementation: <code>pnpm --filter @sidra/extension test -- side-panel-view.test.tsx -t "waiting_indicator|cancelling_indicator|terminal_turn_state|blocked_chat_states|permission_request_needs_user_action"</code></label>
+            <span class="evidence">Actual: passed, 18 files and 629 tests.</span>
+          </li>
+          <li>
+            <label><input type="checkbox" checked disabled> Existing cancel and send lifecycle view tests still pass: <code>pnpm --filter @sidra/extension test -- side-panel-view.test.tsx -t "Capture \\+ Send|send mode UI|rich transcript rendering"</code></label>
+            <span class="evidence">Actual: passed, 18 files and 629 tests.</span>
+          </li>
+        </ul>
+
+        <h4>Manual Verification</h4>
+        <ul class="checklist">
+          <li><label><input type="checkbox" disabled> In a development build, send a prompt and confirm the waiting row appears immediately after the user message.</label></li>
+          <li><label><input type="checkbox" disabled> Confirm the waiting row disappears after the response is final and the composer accepts input again.</label></li>
+          <li><label><input type="checkbox" disabled> Confirm clicking Cancel changes the visible label to <code>Cancelling</code> until cancellation is acknowledged.</label></li>
+        </ul>
+      </article>
+
+      <article id="phase-2" class="phase">
+        <h2>Phase 2: Animation, Styling, And Reduced Motion</h2>
+        <label><input type="checkbox" disabled> Phase complete</label>
+
+        <h3>Overview</h3>
+        <p>
+          Add the animated dot affordance and final visual styling. Keep it compact, stable, and readable in the narrow side panel.
+        </p>
+
+        <h3>Why This Phase Can Be Validated Independently</h3>
+        <p>
+          Phase 1 already proves lifecycle correctness. This phase proves the indicator is visually animated and accessible without changing behavior.
+        </p>
+
+        <h3>Changes Required</h3>
+        <aside class="callout">
+          <p><strong>TDD ordering:</strong> Add CSS and DOM shape tests first. Confirm they fail before adding styles.</p>
+        </aside>
+
+        <h4>1. Tests (RED)</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Test name</th>
+              <th>What it proves</th>
+              <th>Behavior covered</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+              <td><code>waiting_indicator_renders_decorative_dots_hidden_from_accessibility_tree</code></td>
+              <td>The visible dots are <code>aria-hidden</code> and the status text remains the accessible name.</td>
+              <td>Accessible animation</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/styles.test.ts</code></td>
+              <td><code>styles_waiting_indicator_as_inline_assistant_progress</code></td>
+              <td>Styles define an assistant-side progress row with fixed layout and no overlay.</td>
+              <td>Inline placement</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/styles.test.ts</code></td>
+              <td><code>defines_waiting_dot_animation_and_reduced_motion_fallback</code></td>
+              <td>CSS includes dot animation keyframes and disables animation under <code>prefers-reduced-motion: reduce</code>.</td>
+              <td>Animation and reduced motion</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/styles.test.ts</code></td>
+              <td><code>keeps_waiting_indicator_supporting_text_at_fixed_font_size</code></td>
+              <td>The progress copy stays at supporting UI size, not response body size.</td>
+              <td>Compact side-panel design</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h4>2. Implementation (GREEN)</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Change</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>apps/extension/src/transcript-view.tsx</code></td>
+              <td>Render text plus a fixed three-dot group. Example DOM: <code>&lt;div class="waiting-indicator" role="status"&gt;&lt;span&gt;Waiting for response&lt;/span&gt;&lt;span aria-hidden="true" class="waiting-dots"&gt;...&lt;/span&gt;&lt;/div&gt;</code>.</td>
+              <td>Visible text gives clear status. Decorative dots provide motion without affecting screen readers.</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/styles.css</code></td>
+              <td>Add <code>.waiting-indicator</code>, <code>.waiting-dots</code>, <code>.waiting-dot</code>, <code>@keyframes sidra-waiting-dot</code>, and a reduced-motion media query.</td>
+              <td>Animation belongs in CSS and should not depend on timers in React tests.</td>
+            </tr>
+            <tr>
+              <td><code>apps/extension/src/styles.css</code></td>
+              <td>Keep the indicator assistant-aligned, no wider than the current assistant/status cards, and avoid layout shift with fixed dot width.</td>
+              <td>The side panel is narrow and transcript content must stay readable while waiting.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Success Criteria</h3>
+        <h4>Automated Verification</h4>
+        <ul class="checklist">
+          <li>
+            <label><input type="checkbox" checked disabled> Phase 2 tests fail before implementation: <code>pnpm --filter @sidra/extension test -- side-panel-view.test.tsx styles.test.ts -t "waiting_indicator|waiting_dot|reduced_motion"</code></label>
+            <span class="evidence">Actual: failed before implementation with 5 missing dot/CSS/reduced-motion assertions.</span>
+          </li>
+          <li>
+            <label><input type="checkbox" checked disabled> Phase 2 tests pass after implementation: <code>pnpm --filter @sidra/extension test -- side-panel-view.test.tsx styles.test.ts -t "waiting_indicator|waiting_dot|reduced_motion"</code></label>
+            <span class="evidence">Actual: passed, 18 files and 633 tests.</span>
+          </li>
+          <li>
+            <label><input type="checkbox" checked disabled> Extension type check passes: <code>pnpm --filter @sidra/extension check</code></label>
+            <span class="evidence">Actual: passed.</span>
+          </li>
+        </ul>
+
+        <h4>Manual Verification</h4>
+        <ul class="checklist">
+          <li><label><input type="checkbox" disabled> The waiting row animates while a prompt is pending or running.</label></li>
+          <li><label><input type="checkbox" disabled> With reduced motion enabled at OS or browser level, the indicator remains readable without dot motion.</label></li>
+          <li><label><input type="checkbox" disabled> The indicator does not cover prior transcript content or the composer.</label></li>
+        </ul>
+      </article>
+
+      <article id="phase-3" class="phase">
+        <h2>Phase 3: Final Regression, Docs Check, And Manual Extension Smoke</h2>
+        <label><input type="checkbox" disabled> Phase complete</label>
+
+        <h3>Overview</h3>
+        <p>
+          Run final extension checks, verify the real side-panel lifecycle, and update durable docs only if they describe chat progress behavior.
+        </p>
+
+        <h3>Why This Phase Can Be Validated Independently</h3>
+        <p>
+          It verifies the complete feature after the behavior and styling phases are green.
+          TDD does not apply to documentation review and manual extension smoke checks.
+        </p>
+
+        <h3>Changes Required</h3>
+        <h4>1. Tests and Checks</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>Check</th>
+              <th>Command or action</th>
+              <th>What it proves</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Full extension unit suite</td>
+              <td><code>pnpm --filter @sidra/extension test</code></td>
+              <td>No side-panel, transcript, controller, or CSS regression.</td>
+            </tr>
+            <tr>
+              <td>Workspace check</td>
+              <td><code>pnpm check</code></td>
+              <td>Type checking passes across packages.</td>
+            </tr>
+            <tr>
+              <td>Durable docs search</td>
+              <td><code>rg -n "Streaming|Waiting for response|Cancel state|progress indicator|agent activity" README.md docs apps/extension/src -g '!docs/specs/**' -g '!docs/issues/**' -g '!*.test.ts' -g '!*.test.tsx'</code></td>
+              <td>Find any durable docs or product copy that must be updated to match the new progress behavior.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h4>2. Implementation</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Change</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>README.md</code> or durable files under <code>docs/</code></td>
+              <td>Update only if the docs search finds current-state product behavior that now needs to mention the waiting indicator.</td>
+              <td>Project docs must stay current, but planning artifacts do not need updates.</td>
+            </tr>
+            <tr>
+              <td><code>docs/MANUAL-E2E-RUNBOOK.md</code></td>
+              <td>Read before any real unpacked-extension or local bridge smoke run. Update only if the runbook currently gives stale expected UI behavior.</td>
+              <td>The runbook owns manual extension E2E procedure.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Success Criteria</h3>
+        <h4>Automated Verification</h4>
+        <ul class="checklist">
+          <li>
+            <label><input type="checkbox" checked disabled> Full extension suite passes: <code>pnpm --filter @sidra/extension test</code></label>
+            <span class="evidence">Actual: passed, 18 files and 633 tests.</span>
+          </li>
+          <li>
+            <label><input type="checkbox" checked disabled> Workspace check passes: <code>pnpm check</code></label>
+            <span class="evidence">Actual: passed.</span>
+          </li>
+          <li>
+            <label><input type="checkbox" checked disabled> Durable docs search completed and any stale current-state docs were updated.</label>
+            <span class="evidence">Actual: completed. Matches were general goals, SDK/event docs, or new source labels. No durable doc update needed.</span>
+          </li>
+        </ul>
+
+        <h4>Manual Verification</h4>
+        <ul class="checklist">
+          <li><label><input type="checkbox" disabled> Read <code>docs/MANUAL-E2E-RUNBOOK.md</code> before launching a manual extension E2E.</label></li>
+          <li><label><input type="checkbox" disabled> In Brave or the current supported manual browser, send a first prompt and see <code>Waiting for response</code> immediately.</label></li>
+          <li><label><input type="checkbox" disabled> Send a follow-up prompt and see the same waiting behavior.</label></li>
+          <li><label><input type="checkbox" disabled> Cancel a slow prompt and see <code>Cancelling</code> until Sidra returns to editable composer state.</label></li>
+          <li><label><input type="checkbox" disabled> Confirm no stale waiting text remains after final response, cancellation, provider error, or bridge disconnect.</label></li>
+        </ul>
+      </article>
+
+      <section id="testing">
+        <h2>Testing Strategy</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Layer</th>
+              <th>What to test</th>
+              <th>Key edge cases</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>View behavior</td>
+              <td>Indicator visibility, labels, role, Cancel coexistence, and absence in idle or blocked states.</td>
+              <td>Queued startup, no-output running turn, streaming content, cancel requested, pending permission request, terminal states.</td>
+            </tr>
+            <tr>
+              <td>CSS</td>
+              <td>Inline layout, animation, fixed dot group, and reduced-motion fallback.</td>
+              <td>No overlay, no layout shift, supporting font size.</td>
+            </tr>
+            <tr>
+              <td>Controller and coordinator</td>
+              <td>Rely on existing lifecycle tests unless implementation changes snapshot fields.</td>
+              <td>If any snapshot field changes, add tests at <code>side-panel-controller.test.ts</code> or <code>bridge/session-coordinator.test.ts</code>.</td>
+            </tr>
+            <tr>
+              <td>Manual</td>
+              <td>Real side-panel wait, follow-up prompt, cancel, final response removal.</td>
+              <td>Slow bridge startup, slow provider response, cancellation race.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="risks">
+        <h2>Risks</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Risk</th>
+              <th>Mitigation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Indicator lingers after final response.</td>
+              <td>Do not store it in transcript. Derive it from <code>pendingPromptCount</code> and <code>turnInFlight</code>.</td>
+            </tr>
+            <tr>
+              <td>Duplicate progress affordances create noise.</td>
+              <td>Replace the static <code>Streaming</code> text. Keep exactly one waiting indicator.</td>
+            </tr>
+            <tr>
+              <td>Cancel-requested state looks idle because Cancel is disabled.</td>
+              <td>Show <code>Cancelling</code> while <code>turnInFlight</code> is true and <code>canCancelTurn</code> is false.</td>
+            </tr>
+            <tr>
+              <td>Animation distracts or violates user motion preferences.</td>
+              <td>Use small dot motion only and disable animation with <code>prefers-reduced-motion: reduce</code>.</td>
+            </tr>
+            <tr>
+              <td>View learns too much about bridge protocol sequencing.</td>
+              <td>Use only active-session snapshot fields. Do not inspect protocol messages or bridge event types in React.</td>
+            </tr>
+            <tr>
+              <td>Waiting UI appears while the app needs user permission input.</td>
+              <td>Suppress the waiting indicator when the transcript contains a pending <code>permission_request</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="references">
+        <h2>References</h2>
+        <ul>
+          <li><code>docs/ENGINEERING-GUIDELINES.md:7</code> through <code>docs/ENGINEERING-GUIDELINES.md:15</code> require ownership, lifecycle, and state modeling clarity.</li>
+          <li><code>docs/ENGINEERING-GUIDELINES.md:39</code> through <code>docs/ENGINEERING-GUIDELINES.md:47</code> require behavior tests at the owning boundary.</li>
+          <li><code>docs/ARCHITECTURE.md:9</code> through <code>docs/ARCHITECTURE.md:15</code> define extension and bridge/session ownership.</li>
+          <li><code>docs/ARCHITECTURE.md:86</code> through <code>docs/ARCHITECTURE.md:95</code> keep the side panel view as derived UI over application commands.</li>
+          <li><code>docs/issues/issue-002.md:17</code> through <code>docs/issues/issue-002.md:20</code> establish bridge-ready gating and setup blocking behavior.</li>
+          <li><code>docs/issues/issue-013.md:24</code> through <code>docs/issues/issue-013.md:27</code> describe streaming, error, permission, and cancellation expectations.</li>
+          <li><a href="https://www.nngroup.com/articles/response-times-3-important-limits/">NN/g: Response Times: The 3 Important Limits</a></li>
+          <li><a href="https://carbondesignsystem.com/components/loading/usage/">Carbon Design System: Loading usage</a></li>
+          <li><a href="https://www.w3.org/TR/wai-aria-1.2/#status">WAI-ARIA 1.2: status role</a></li>
+          <li><a href="https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html">WCAG 2.2: Pause, Stop, Hide</a></li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

@@ -751,6 +751,192 @@ describe("SidePanelView URL sessions", () => {
 });
 
 describe("SidePanelView Capture + Send", () => {
+  it("renders_waiting_indicator_for_queued_startup_prompt", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ kind: "user_message", role: "user", text: "Summarize this page" }],
+        pendingPromptCount: 1,
+        turnInFlight: false,
+        canCancelTurn: false
+      })
+    );
+
+    expect(screen.getByRole("status", { name: "Waiting" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Capture + Send" })).toHaveProperty("disabled", true);
+  });
+
+  it("renders_waiting_indicator_and_cancel_for_running_turn_before_output", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ kind: "user_message", role: "user", text: "Summarize this page" }],
+        turnInFlight: true,
+        canCancelTurn: true
+      })
+    );
+
+    expect(screen.getByRole("status", { name: "Waiting" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveProperty("disabled", false);
+  });
+
+  it("keeps_single_waiting_indicator_while_assistant_content_streams", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          { kind: "user_message", role: "user", text: "Summarize this page" },
+          {
+            kind: "assistant_turn",
+            role: "assistant",
+            markdown: "Partial answer",
+            text: "Partial answer",
+            activity: { reasoningSummary: "", tools: [] },
+            status: "streaming"
+          }
+        ],
+        turnInFlight: true,
+        canCancelTurn: true
+      })
+    );
+
+    expect(screen.getAllByRole("status", { name: "Waiting" })).toHaveLength(1);
+    expect(screen.queryByText("Streaming")).toBeNull();
+  });
+
+  it("renders_cancelling_indicator_after_cancel_is_requested", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ kind: "user_message", role: "user", text: "Summarize this page" }],
+        turnInFlight: true,
+        canCancelTurn: false
+      })
+    );
+
+    expect(screen.getByRole("status", { name: "Cancelling" })).not.toBeNull();
+    expect(screen.queryByRole("status", { name: "Waiting" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveProperty("disabled", true);
+  });
+
+  it("removes_waiting_indicator_after_terminal_turn_state", () => {
+    for (const status of ["complete", "failed", "cancelled"] as const) {
+      renderInteractiveSnapshot(
+        snapshotForPage({
+          transcript: [
+            { kind: "user_message", role: "user", text: "Summarize this page" },
+            {
+              kind: "assistant_turn",
+              role: "assistant",
+              markdown: status === "complete" ? "Done" : "",
+              text: status === "complete" ? "Done" : "",
+              activity: { reasoningSummary: "", tools: [] },
+              status
+            }
+          ],
+          turnInFlight: false,
+          canCancelTurn: false
+        })
+      );
+
+      expect(screen.queryByRole("status", { name: "Waiting" })).toBeNull();
+      expect(screen.queryByRole("status", { name: "Cancelling" })).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("does_not_render_waiting_indicator_when_session_is_idle", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ kind: "user_message", role: "user", text: "Previous prompt" }]
+      })
+    );
+
+    expect(screen.queryByRole("status", { name: "Waiting" })).toBeNull();
+    expect(screen.queryByRole("status", { name: "Cancelling" })).toBeNull();
+  });
+
+  it("does_not_render_waiting_indicator_in_blocked_chat_states", () => {
+    const queuedSnapshot = snapshotForPage({
+      transcript: [{ kind: "user_message", role: "user", text: "Queued prompt" }],
+      pendingPromptCount: 1
+    });
+
+    renderInteractiveSnapshot({ ...queuedSnapshot, bridge: checkingBridge });
+
+    expect(screen.queryByRole("status", { name: "Waiting" })).toBeNull();
+    expect(screen.queryByRole("status", { name: "Cancelling" })).toBeNull();
+    cleanup();
+
+    renderInteractiveSnapshot({
+      ...snapshotForUnsupportedPage(),
+      activeSession: {
+        ...snapshotForUnsupportedPage().activeSession,
+        transcript: [{ kind: "user_message", role: "user", text: "Queued prompt" }],
+        pendingPromptCount: 1
+      }
+    });
+
+    expect(screen.queryByRole("status", { name: "Waiting" })).toBeNull();
+    expect(screen.queryByRole("status", { name: "Cancelling" })).toBeNull();
+  });
+
+  it("does_not_render_waiting_indicator_while_permission_request_needs_user_action", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "permission_request",
+            role: "permission",
+            requestId: "permission-1",
+            permissionKey: "shell:ls",
+            title: "Run command",
+            status: "pending"
+          }
+        ],
+        turnInFlight: true,
+        canCancelTurn: true
+      })
+    );
+
+    expect(screen.getByText("Run command")).not.toBeNull();
+    expect(screen.queryByRole("status", { name: "Waiting" })).toBeNull();
+    expect(screen.queryByRole("status", { name: "Cancelling" })).toBeNull();
+  });
+
+  it("waiting_indicator_is_a_polite_status_region_without_focus_movement", () => {
+    const focusedButton = document.createElement("button");
+    document.body.appendChild(focusedButton);
+    focusedButton.focus();
+
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ kind: "user_message", role: "user", text: "Summarize this page" }],
+        turnInFlight: true,
+        canCancelTurn: true
+      })
+    );
+
+    const waitingIndicator = screen.getByRole("status", { name: "Waiting" });
+    expect(waitingIndicator.getAttribute("aria-live")).toBe("polite");
+    expect(document.activeElement).toBe(focusedButton);
+  });
+
+  it("waiting_indicator_renders_decorative_dots_hidden_from_accessibility_tree", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [{ kind: "user_message", role: "user", text: "Summarize this page" }],
+        turnInFlight: true,
+        canCancelTurn: true
+      })
+    );
+
+    const waitingIndicator = screen.getByRole("status", { name: "Waiting" });
+    const dotGroup = waitingIndicator.querySelector(".waiting-dots");
+    const dots = waitingIndicator.querySelectorAll(".waiting-dot");
+
+    expect(dotGroup?.getAttribute("aria-hidden")).toBe("true");
+    expect(dots).toHaveLength(3);
+    expect(screen.getByRole("status", { name: "Waiting" })).toBe(waitingIndicator);
+  });
+
   it("renders_cancel_button_while_turn_is_in_flight", () => {
     renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: true }));
 
