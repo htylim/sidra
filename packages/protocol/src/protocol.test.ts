@@ -861,7 +861,7 @@ describe("bridge-to-extension protocol validation", () => {
   });
 
   it("accepts_known_bridge_error_codes", () => {
-    for (const code of ["invalid_message", "internal_error", "payload_too_large"]) {
+    for (const code of ["invalid_message", "internal_error", "payload_too_large", "heartbeat_timeout"]) {
       expect(parseBridgeToExtension({ type: "bridge.error", version: 3, message: "failed", code })).toMatchObject({
         ok: true
       });

@@ -3,6 +3,7 @@ import type { SpeechVoice } from "@sidra/protocol";
 export type SidraSettings = {
   readableContentLimitCharacters: number;
   domContentLimitCharacters: number;
+  accentColor: string;
   promptFontSizePx: number;
   responseFontSizePx: number;
   quickActions: QuickActionsSettings;
@@ -51,6 +52,7 @@ export const MAX_READABLE_CONTENT_LIMIT_CHARACTERS = 500_000;
 export const DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS = 300_000;
 export const MIN_DOM_CONTENT_LIMIT_CHARACTERS = 1_000;
 export const MAX_DOM_CONTENT_LIMIT_CHARACTERS = 750_000;
+export const DEFAULT_ACCENT_COLOR = "#087c71";
 export const DEFAULT_PROMPT_FONT_SIZE_PX = 15;
 export const DEFAULT_RESPONSE_FONT_SIZE_PX = 17;
 export const MIN_TRANSCRIPT_FONT_SIZE_PX = 12;
@@ -178,6 +180,16 @@ export class SettingsStore {
     this.setSnapshot(nextSnapshot);
   }
 
+  async saveAccentColor(nextAccentColor: string): Promise<void> {
+    const currentSnapshot = this.getSnapshot();
+    const nextSnapshot = {
+      ...currentSnapshot,
+      accentColor: normalizeAccentColor(nextAccentColor) ?? currentSnapshot.accentColor
+    };
+    await this.storage.set({ [SIDRA_SETTINGS_STORAGE_KEY]: cloneSettings(nextSnapshot) });
+    this.setSnapshot(nextSnapshot);
+  }
+
   async saveTranscriptSpeechSettings(nextTranscriptSpeech: TranscriptSpeechSettings): Promise<void> {
     const nextSnapshot = {
       ...this.getSnapshot(),
@@ -212,6 +224,7 @@ export class SettingsStore {
     if (
       nextSnapshot.readableContentLimitCharacters === this.snapshot.readableContentLimitCharacters &&
       nextSnapshot.domContentLimitCharacters === this.snapshot.domContentLimitCharacters &&
+      nextSnapshot.accentColor === this.snapshot.accentColor &&
       nextSnapshot.promptFontSizePx === this.snapshot.promptFontSizePx &&
       nextSnapshot.responseFontSizePx === this.snapshot.responseFontSizePx &&
       quickActionsMatch(nextSnapshot.quickActions, this.snapshot.quickActions) &&
@@ -249,6 +262,7 @@ function parseStoredSettings(value: unknown): SidraSettings {
 
   const readableContentLimitCharacters = value.readableContentLimitCharacters;
   const domContentLimitCharacters = value.domContentLimitCharacters;
+  const accentColor = value.accentColor;
   const promptFontSizePx = value.promptFontSizePx;
   const responseFontSizePx = value.responseFontSizePx;
   const legacyTranscriptFontSizePx = value.transcriptFontSizePx;
@@ -264,6 +278,7 @@ function parseStoredSettings(value: unknown): SidraSettings {
     domContentLimitCharacters: isValidDomContentLimit(domContentLimitCharacters)
       ? domContentLimitCharacters
       : defaults.domContentLimitCharacters,
+    accentColor: normalizeAccentColor(accentColor) ?? defaults.accentColor,
     promptFontSizePx: isValidTranscriptFontSize(promptFontSizePx)
       ? promptFontSizePx
       : legacyTranscriptFontSize ?? defaults.promptFontSizePx,
@@ -279,6 +294,7 @@ function defaultSidraSettings(): SidraSettings {
   return {
     readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
     domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+    accentColor: DEFAULT_ACCENT_COLOR,
     promptFontSizePx: DEFAULT_PROMPT_FONT_SIZE_PX,
     responseFontSizePx: DEFAULT_RESPONSE_FONT_SIZE_PX,
     quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
@@ -290,6 +306,7 @@ function cloneSettings(settings: SidraSettings): SidraSettings {
   return {
     readableContentLimitCharacters: settings.readableContentLimitCharacters,
     domContentLimitCharacters: settings.domContentLimitCharacters,
+    accentColor: settings.accentColor,
     promptFontSizePx: settings.promptFontSizePx,
     responseFontSizePx: settings.responseFontSizePx,
     quickActions: cloneQuickActionsSettings(settings.quickActions),
@@ -430,6 +447,13 @@ function isValidTranscriptFontSize(value: unknown): value is number {
     value >= MIN_TRANSCRIPT_FONT_SIZE_PX &&
     value <= MAX_TRANSCRIPT_FONT_SIZE_PX
   );
+}
+
+function normalizeAccentColor(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(trimmed)) return undefined;
+  return trimmed.toLowerCase();
 }
 
 function isTranscriptSpeechVoice(value: unknown): value is TranscriptSpeechVoice {

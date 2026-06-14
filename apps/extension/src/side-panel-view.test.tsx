@@ -28,6 +28,7 @@ type SnapshotOptions = {
   canCancelTurn?: boolean;
   promptFontSizePx?: number;
   responseFontSizePx?: number;
+  accentColor?: string;
 };
 
 function assistantTurnWithToolActivity(
@@ -94,6 +95,7 @@ function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
   return {
     bridge: readyBridge,
     display: {
+      accentColor: options.accentColor ?? "#087c71",
       promptFontSizePx: options.promptFontSizePx ?? 15,
       responseFontSizePx: options.responseFontSizePx ?? 17
     },

@@ -23,17 +23,26 @@ describe("extension UI interaction state CSS", () => {
   it("defines_enabled_button_cursor_hover_focus_visible_and_active_states", () => {
     expectRule("button:not(:disabled)", ["cursor: pointer"]);
     expectRule(".toolbar-button:not(:disabled):hover", ["border-color:", "background:"]);
-    expectRule(".quick-action-button:not(:disabled):hover", ["border-color: #075e56", "background: #075e56"]);
-    expectRule(".send-button:not(:disabled):hover", ["border-color: #075e56", "background: #075e56"]);
-    expectRule(".retry-button:not(:disabled):hover", ["border-color: #075e56", "background: #075e56"]);
+    expectRule(".quick-action-button:not(:disabled):hover", [
+      "border-color: var(--sidra-accent-hover)",
+      "background: var(--sidra-accent-hover)"
+    ]);
+    expectRule(".send-button:not(:disabled):hover", [
+      "border-color: var(--sidra-accent-hover)",
+      "background: var(--sidra-accent-hover)"
+    ]);
+    expectRule(".retry-button:not(:disabled):hover", [
+      "border-color: var(--sidra-accent-hover)",
+      "background: var(--sidra-accent-hover)"
+    ]);
     expectRule(".secondary-button:not(:disabled):hover", ["border-color:", "background:"]);
     expectRule(".code-copy-button:not(:disabled):hover", ["border-color:", "background:"]);
     expectRule(".permission-actions button:not(:disabled):hover", ["border-color:", "background:"]);
     expectRule(".permission-actions button:first-child:not(:disabled):hover", [
-      "border-color: #075e56",
-      "background: #075e56"
+      "border-color: var(--sidra-accent-hover)",
+      "background: var(--sidra-accent-hover)"
     ]);
-    expectRule(".code-copy-button[data-status=\"copied\"]:not(:disabled):hover", ["border-color: #7dd3c7"]);
+    expectRule(".code-copy-button[data-status=\"copied\"]:not(:disabled):hover", ["border-color: var(--sidra-accent-border)"]);
     expectRule(".code-copy-button[data-status=\"failed\"]:not(:disabled):hover", ["border-color: #f8b4a0"]);
     expectRule("button:not(:disabled):focus-visible", ["outline:", "outline-offset:"]);
     expectRule("button:not(:disabled):active", ["box-shadow:"]);
@@ -88,7 +97,7 @@ describe("extension UI interaction state CSS", () => {
       "color: #62716d",
       "font-size: 12px"
     ]);
-    expectRule(".composer-dom-toggle input", ["width: 14px", "height: 14px", "accent-color: #087c71"]);
+    expectRule(".composer-dom-toggle input", ["width: 14px", "height: 14px", "accent-color: var(--sidra-accent)"]);
   });
 
   it("does_not_keep_prompt_options_button_styles_after_inline_send_dom_replaces_it", () => {
@@ -121,13 +130,39 @@ describe("extension UI interaction state CSS", () => {
       ["opacity: 1", "pointer-events: auto"]
     );
     expectRule(".transcript-action-button:not(:disabled):hover,\n.transcript-action-button:not(:disabled):focus-visible", [
-      "background: #eef3f1",
-      "color: #52615d"
+      "border-color: var(--sidra-accent-border)",
+      "background: var(--sidra-accent-soft)",
+      "color: var(--sidra-accent-hover)"
     ]);
     expectRule(".transcript-action-button[data-speech-state=\"active\"],\n.transcript-action-button[data-copy-state=\"copied\"]", [
-      "border-color: #83b8ae",
-      "background: #eef8f5",
-      "color: #075e56"
+      "border-color: var(--sidra-accent-border)",
+      "background: var(--sidra-accent-soft)",
+      "color: var(--sidra-accent-hover)"
+    ]);
+  });
+
+  it("defines_accent_color_variables_for_themeable_green_ui", () => {
+    expectRule(":root", ["--sidra-accent: #087c71"]);
+    expectRule(":root,\n.panel,\n.options-page", [
+      "--sidra-accent-hover:",
+      "--sidra-accent-soft:",
+      "--sidra-accent-border:",
+      "--sidra-accent-focus:"
+    ]);
+    expectRule(".brand-mark", ["background: var(--sidra-accent)"]);
+    expectRule(".empty-icon", ["color: var(--sidra-accent)", "background: var(--sidra-accent-soft)"]);
+    expectRule(".quick-action-button,\n.send-button,\n.send-mode-menu-button", [
+      "border: 1px solid var(--sidra-accent)",
+      "background: var(--sidra-accent)"
+    ]);
+    expectRule(".composer textarea:not(:disabled):hover", ["border-color: var(--sidra-accent-border)"]);
+    expectRule(".send-mode-menu-item[aria-pressed=\"true\"]", [
+      "background: var(--sidra-accent-soft)",
+      "color: var(--sidra-accent-hover)"
+    ]);
+    expectRule(".send-mode-menu-item:not(:disabled):hover", [
+      "background: var(--sidra-accent-soft)",
+      "color: var(--sidra-accent-hover)"
     ]);
   });
 

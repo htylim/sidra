@@ -179,7 +179,12 @@ export type SessionErrorCode =
   | "permission_response_invalid"
   | "unknown_error";
 
-export type BridgeErrorCode = "invalid_message" | "internal_error" | "payload_too_large" | "codex_setup_failed";
+export type BridgeErrorCode =
+  | "invalid_message"
+  | "internal_error"
+  | "payload_too_large"
+  | "codex_setup_failed"
+  | "heartbeat_timeout";
 
 export type BridgeToExtension =
   | {
@@ -879,7 +884,8 @@ function isBridgeErrorCode(value: unknown): value is BridgeErrorCode {
     value === "invalid_message" ||
     value === "internal_error" ||
     value === "payload_too_large" ||
-    value === "codex_setup_failed"
+    value === "codex_setup_failed" ||
+    value === "heartbeat_timeout"
   );
 }
 

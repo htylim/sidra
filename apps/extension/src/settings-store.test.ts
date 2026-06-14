@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_QUICK_ACTIONS_SETTINGS,
   DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT,
+  DEFAULT_ACCENT_COLOR,
   DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
   DEFAULT_PROMPT_FONT_SIZE_PX,
   DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
@@ -23,6 +24,9 @@ import {
 const DEFAULT_FONT_SIZE_FIELDS = {
   promptFontSizePx: DEFAULT_PROMPT_FONT_SIZE_PX,
   responseFontSizePx: DEFAULT_RESPONSE_FONT_SIZE_PX
+};
+const DEFAULT_ACCENT_FIELD = {
+  accentColor: DEFAULT_ACCENT_COLOR
 };
 const DEFAULT_TRANSCRIPT_SPEECH_FIELD = {
   transcriptSpeech: DEFAULT_TRANSCRIPT_SPEECH_SETTINGS
@@ -103,6 +107,7 @@ describe("SettingsStore", () => {
       domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
+      ...DEFAULT_ACCENT_FIELD,
       ...DEFAULT_FONT_SIZE_FIELDS,
       ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
@@ -121,6 +126,7 @@ describe("SettingsStore", () => {
       domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: 42_000,
+      ...DEFAULT_ACCENT_FIELD,
       ...DEFAULT_FONT_SIZE_FIELDS,
       ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
@@ -133,6 +139,38 @@ describe("SettingsStore", () => {
 
     expect(store.getSnapshot().promptFontSizePx).toBe(DEFAULT_PROMPT_FONT_SIZE_PX);
     expect(store.getSnapshot().responseFontSizePx).toBe(DEFAULT_RESPONSE_FONT_SIZE_PX);
+  });
+
+  it("loads_default_accent_color_when_storage_is_empty", async () => {
+    const store = new SettingsStore({ storage: new FakeSettingsStorage() });
+
+    await store.start();
+
+    expect(store.getSnapshot().accentColor).toBe(DEFAULT_ACCENT_COLOR);
+  });
+
+  it("loads_stored_accent_color_when_valid", async () => {
+    const store = new SettingsStore({
+      storage: new FakeSettingsStorage({
+        [SIDRA_SETTINGS_STORAGE_KEY]: { accentColor: "#2563eb" }
+      })
+    });
+
+    await store.start();
+
+    expect(store.getSnapshot().accentColor).toBe("#2563eb");
+  });
+
+  it("normalizes_stored_accent_color_to_lowercase", async () => {
+    const store = new SettingsStore({
+      storage: new FakeSettingsStorage({
+        [SIDRA_SETTINGS_STORAGE_KEY]: { accentColor: "#ABCDEF" }
+      })
+    });
+
+    await store.start();
+
+    expect(store.getSnapshot().accentColor).toBe("#abcdef");
   });
 
   it("loads_stored_transcript_font_sizes_when_valid", async () => {
@@ -182,6 +220,7 @@ describe("SettingsStore", () => {
       domContentLimitCharacters: 222_000,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
+      ...DEFAULT_ACCENT_FIELD,
       ...DEFAULT_FONT_SIZE_FIELDS,
       ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
@@ -264,6 +303,22 @@ describe("SettingsStore", () => {
     }
   });
 
+  it("ignores_invalid_accent_colors_and_keeps_default", async () => {
+    const invalidValues = [undefined, "087c71", "#123", "#12345g", 123];
+
+    for (const value of invalidValues) {
+      const store = new SettingsStore({
+        storage: new FakeSettingsStorage({
+          [SIDRA_SETTINGS_STORAGE_KEY]: { accentColor: value }
+        })
+      });
+
+      await store.start();
+
+      expect(store.getSnapshot().accentColor).toBe(DEFAULT_ACCENT_COLOR);
+    }
+  });
+
   it("keeps_valid_readable_limit_when_dom_limit_is_invalid", async () => {
     const store = new SettingsStore({
       storage: new FakeSettingsStorage({
@@ -280,6 +335,7 @@ describe("SettingsStore", () => {
       domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: 42_000,
+      ...DEFAULT_ACCENT_FIELD,
       ...DEFAULT_FONT_SIZE_FIELDS,
       ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
@@ -301,6 +357,7 @@ describe("SettingsStore", () => {
       domContentLimitCharacters: 222_000,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
+      ...DEFAULT_ACCENT_FIELD,
       ...DEFAULT_FONT_SIZE_FIELDS,
       ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
@@ -397,6 +454,28 @@ describe("SettingsStore", () => {
     expect(notificationCount).toBe(1);
   });
 
+  it("applies_live_accent_color_changes_from_local_storage", async () => {
+    const storage = new FakeSettingsStorage();
+    const store = new SettingsStore({ storage });
+    let notificationCount = 0;
+    store.subscribe(() => {
+      notificationCount += 1;
+    });
+    await store.start();
+
+    storage.emitChange(
+      {
+        [SIDRA_SETTINGS_STORAGE_KEY]: {
+          newValue: { accentColor: "#2563eb" }
+        }
+      },
+      "local"
+    );
+
+    expect(store.getSnapshot().accentColor).toBe("#2563eb");
+    expect(notificationCount).toBe(1);
+  });
+
   it("does_not_overwrite_live_setting_change_when_initial_storage_load_finishes_late", async () => {
     let resolveGet: ((value: Record<string, unknown>) => void) | undefined;
     const storage = new FakeSettingsStorage();
@@ -470,6 +549,7 @@ describe("SettingsStore", () => {
       readableContentLimitCharacters: 4_000,
       domContentLimitCharacters: 444_000,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
+      ...DEFAULT_ACCENT_FIELD,
       ...DEFAULT_FONT_SIZE_FIELDS,
       ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
@@ -652,6 +732,7 @@ describe("SettingsStore", () => {
         [SIDRA_SETTINGS_STORAGE_KEY]: {
           readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
           domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+          ...DEFAULT_ACCENT_FIELD,
           ...DEFAULT_FONT_SIZE_FIELDS,
           ...DEFAULT_TRANSCRIPT_SPEECH_FIELD,
           quickActions: {
@@ -719,8 +800,30 @@ describe("SettingsStore", () => {
         [SIDRA_SETTINGS_STORAGE_KEY]: {
           readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
           domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+          ...DEFAULT_ACCENT_FIELD,
           promptFontSizePx: 14,
           responseFontSizePx: 18,
+          quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
+          ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
+        }
+      }
+    ]);
+  });
+
+  it("writes_accent_color_to_storage", async () => {
+    const storage = new FakeSettingsStorage();
+    const store = new SettingsStore({ storage });
+    await store.start();
+
+    await store.saveAccentColor("#2563eb");
+
+    expect(storage.setCalls).toEqual([
+      {
+        [SIDRA_SETTINGS_STORAGE_KEY]: {
+          readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
+          domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+          accentColor: "#2563eb",
+          ...DEFAULT_FONT_SIZE_FIELDS,
           quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
           ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
         }

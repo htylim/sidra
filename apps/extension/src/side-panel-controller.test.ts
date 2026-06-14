@@ -15,6 +15,7 @@ import type { CaptureMode } from "./capture-mode";
 import {
   DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT,
   DEFAULT_QUICK_ACTIONS_SETTINGS,
+  DEFAULT_ACCENT_COLOR,
   DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
   DEFAULT_PROMPT_FONT_SIZE_PX,
   DEFAULT_RESPONSE_FONT_SIZE_PX,
@@ -314,6 +315,7 @@ class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" |
   private resolveReady: (() => void) | undefined;
   private readableContentLimitCharacters: number;
   private domContentLimitCharacters: number;
+  private accentColor = DEFAULT_ACCENT_COLOR;
   private promptFontSizePx = DEFAULT_PROMPT_FONT_SIZE_PX;
   private responseFontSizePx = DEFAULT_RESPONSE_FONT_SIZE_PX;
   private quickActions: QuickActionsSettings;
@@ -347,6 +349,7 @@ class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" |
     return {
       readableContentLimitCharacters: this.readableContentLimitCharacters,
       domContentLimitCharacters: this.domContentLimitCharacters,
+      accentColor: this.accentColor,
       promptFontSizePx: this.promptFontSizePx,
       responseFontSizePx: this.responseFontSizePx,
       quickActions: this.quickActions,
@@ -372,6 +375,11 @@ class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" |
   setTranscriptFontSizesPx(fontSizes: { promptFontSizePx: number; responseFontSizePx: number }): void {
     this.promptFontSizePx = fontSizes.promptFontSizePx;
     this.responseFontSizePx = fontSizes.responseFontSizePx;
+    this.emit();
+  }
+
+  setAccentColor(accentColor: string): void {
+    this.accentColor = accentColor;
     this.emit();
   }
 
@@ -2452,6 +2460,25 @@ describe("SidePanelController quick actions", () => {
 
     expect(controller.getSnapshot().display.promptFontSizePx).toBe(DEFAULT_PROMPT_FONT_SIZE_PX);
     expect(controller.getSnapshot().display.responseFontSizePx).toBe(DEFAULT_RESPONSE_FONT_SIZE_PX);
+  });
+
+  it("snapshot_exposes_default_accent_color", async () => {
+    const { controller, ports } = createHarness();
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    expect(controller.getSnapshot().display.accentColor).toBe(DEFAULT_ACCENT_COLOR);
+  });
+
+  it("updates_accent_color_when_settings_change_live", async () => {
+    const settingsStore = new FakeSettingsStore(1_000);
+    const { controller, ports } = createHarnessWithOptions({ settingsStore });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    settingsStore.setAccentColor("#2563eb");
+
+    expect(controller.getSnapshot().display.accentColor).toBe("#2563eb");
   });
 
   it("updates_transcript_font_sizes_when_settings_change_live", async () => {

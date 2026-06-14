@@ -80,6 +80,26 @@ describe("createBridge connection heartbeat cleanup", () => {
     vi.useRealTimers();
   });
 
+  it("heartbeat_timeout_emits_blocking_bridge_error_before_cleanup", async () => {
+    vi.useFakeTimers();
+    const emitted: BridgeToExtension[] = [];
+    const bridge = createBridge({ emit: (message) => emitted.push(message) }, createRecordingProvider(), {
+      heartbeatTimeoutMs: 30_000
+    });
+
+    await bridge.handleMessage({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex" });
+    vi.advanceTimersByTime(30_000);
+    await Promise.resolve();
+
+    expect(emitted).toContainEqual({
+      type: "bridge.error",
+      version: 3,
+      message: "Bridge heartbeat timed out. Retry to reconnect.",
+      code: "heartbeat_timeout"
+    });
+    vi.useRealTimers();
+  });
+
   it("message_after_heartbeat_timeout_reports_session_not_started", async () => {
     vi.useFakeTimers();
     const emitted: BridgeToExtension[] = [];

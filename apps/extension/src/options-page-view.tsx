@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import type { SpeechVoice } from "@sidra/protocol";
 import type { SpeechCredentialClientSnapshot } from "./bridge/speech-credentials";
 import { SidraIcon, type IconName } from "./sidra-icon";
 import type { SpeechPreviewSettings, SpeechPreviewSnapshot } from "./speech-preview-client";
 import {
   DEFAULT_TRANSCRIPT_SPEECH_SETTINGS,
+  DEFAULT_ACCENT_COLOR,
   MAX_TRANSCRIPT_SPEECH_BUBBLE_CHARACTERS,
   MAX_TRANSCRIPT_SPEECH_INSTRUCTIONS_CHARACTERS,
   MAX_TRANSCRIPT_SPEECH_SPEED,
@@ -26,6 +27,7 @@ type OptionsSettingsStore = Pick<
   | "whenReady"
   | "subscribe"
   | "saveQuickActions"
+  | "saveAccentColor"
   | "saveTranscriptFontSizesPx"
   | "saveTranscriptSpeechSettings"
 >;
@@ -77,6 +79,7 @@ export function OptionsPageView(props: {
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
   const quickActionsDirtyRef = useRef(false);
+  const accentColorDirtyRef = useRef(false);
   const transcriptFontSizesDirtyRef = useRef(false);
   const transcriptSpeechDirtyRef = useRef(false);
   const [saving, setSaving] = useState(false);
@@ -85,6 +88,7 @@ export function OptionsPageView(props: {
   const [touchedFields, setTouchedFields] = useState<TouchedQuickActionFields>({});
   const [promptFontSizeDraft, setPromptFontSizeDraft] = useState("");
   const [responseFontSizeDraft, setResponseFontSizeDraft] = useState("");
+  const [accentColorDraft, setAccentColorDraft] = useState(DEFAULT_ACCENT_COLOR);
   const [promptFontSizeTouched, setPromptFontSizeTouched] = useState(false);
   const [responseFontSizeTouched, setResponseFontSizeTouched] = useState(false);
   const [speechEnabled, setSpeechEnabled] = useState(DEFAULT_TRANSCRIPT_SPEECH_SETTINGS.enabled);
@@ -166,6 +170,13 @@ export function OptionsPageView(props: {
     setSaveSuccessMessage(undefined);
   }
 
+  function markAccentColorDirty() {
+    dirtyRef.current = true;
+    accentColorDirtyRef.current = true;
+    setDirty(true);
+    setSaveSuccessMessage(undefined);
+  }
+
   function markTranscriptFontSizesDirty() {
     dirtyRef.current = true;
     transcriptFontSizesDirtyRef.current = true;
@@ -194,6 +205,7 @@ export function OptionsPageView(props: {
       if (cancelled) return;
       const initialSettings = props.settingsStore.getSnapshot();
       setQuickActions(initialSettings.quickActions);
+      setAccentColorDraft(initialSettings.accentColor);
       setPromptFontSizeDraft(String(initialSettings.promptFontSizePx));
       setResponseFontSizeDraft(String(initialSettings.responseFontSizePx));
       setTranscriptSpeechDraft(initialSettings.transcriptSpeech);
@@ -207,6 +219,9 @@ export function OptionsPageView(props: {
         if (!quickActionsDirtyRef.current) {
           setQuickActions(nextSettings.quickActions);
           setTouchedFields(touchedFieldsForInvalidActions(nextSettings.quickActions.actions));
+        }
+        if (!accentColorDirtyRef.current) {
+          setAccentColorDraft(nextSettings.accentColor);
         }
         if (!transcriptFontSizesDirtyRef.current) {
           setPromptFontSizeDraft(String(nextSettings.promptFontSizePx));
@@ -254,6 +269,9 @@ export function OptionsPageView(props: {
     if (!quickActionsDirtyRef.current) {
       setQuickActions(nextSettings.quickActions);
       setTouchedFields(touchedFieldsForInvalidActions(nextSettings.quickActions.actions));
+    }
+    if (!accentColorDirtyRef.current) {
+      setAccentColorDraft(nextSettings.accentColor);
     }
     if (!transcriptFontSizesDirtyRef.current) {
       setPromptFontSizeDraft(String(nextSettings.promptFontSizePx));
@@ -320,6 +338,9 @@ export function OptionsPageView(props: {
       if (quickActionsDirtyRef.current) {
         await props.settingsStore.saveQuickActions(quickActions);
       }
+      if (accentColorDirtyRef.current) {
+        await props.settingsStore.saveAccentColor(accentColorDraft);
+      }
       if (transcriptFontSizesDirtyRef.current) {
         await props.settingsStore.saveTranscriptFontSizesPx({
           promptFontSizePx: promptFontSizeValue,
@@ -337,6 +358,7 @@ export function OptionsPageView(props: {
       }
       dirtyRef.current = false;
       quickActionsDirtyRef.current = false;
+      accentColorDirtyRef.current = false;
       transcriptFontSizesDirtyRef.current = false;
       transcriptSpeechDirtyRef.current = false;
       setDirty(false);
@@ -411,13 +433,30 @@ export function OptionsPageView(props: {
   }
 
   return (
-    <main className="options-page">
+    <main className="options-page" style={{ "--sidra-accent": accentColorDraft } as CSSProperties}>
       <header className="options-header">
         <h1>Sidra Settings</h1>
       </header>
 
       <section className="options-section" aria-labelledby="display-settings-heading">
         <h2 id="display-settings-heading">Display</h2>
+        <label className="color-setting">
+          <span>Accent color</span>
+          <span className="color-setting-control">
+            <input
+              type="color"
+              aria-label="Accent color"
+              value={accentColorDraft}
+              disabled={controlsDisabled}
+              onChange={(event) => {
+                markAccentColorDirty();
+                setSaveError(undefined);
+                setAccentColorDraft(event.currentTarget.value);
+              }}
+            />
+            <span>{accentColorDraft}</span>
+          </span>
+        </label>
         <label className="font-size-setting">
           <span>Prompt text size</span>
           <input

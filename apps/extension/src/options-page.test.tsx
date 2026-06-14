@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+  DEFAULT_ACCENT_COLOR,
   DEFAULT_PROMPT_FONT_SIZE_PX,
   DEFAULT_QUICK_ACTIONS_SETTINGS,
   DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
@@ -220,6 +221,26 @@ describe("OptionsPage quick actions", () => {
     expect(responseInput).toHaveProperty("value", "18");
     expect(promptInput).toHaveProperty("min", `${MIN_TRANSCRIPT_FONT_SIZE_PX}`);
     expect(responseInput).toHaveProperty("max", `${MAX_TRANSCRIPT_FONT_SIZE_PX}`);
+  });
+
+  it("renders_accent_color_picker_after_settings_are_ready", async () => {
+    render(<OptionsPageView settingsStore={new FakeSettingsStore({ accentColor: "#c026d3" })} />);
+
+    const colorInput = await screen.findByLabelText("Accent color");
+
+    expect(colorInput).toHaveProperty("value", "#c026d3");
+    expect(screen.getByText("#c026d3")).not.toBeNull();
+  });
+
+  it("saves_accent_color_from_options_page", async () => {
+    const user = userEvent.setup();
+    const store = new FakeSettingsStore();
+    render(<OptionsPageView settingsStore={store} />);
+
+    fireEvent.change(await screen.findByLabelText("Accent color"), { target: { value: "#2563eb" } });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(store.accentColorSaveCalls).toEqual(["#2563eb"]);
   });
 
   it("edits_prompt_and_response_font_sizes_from_options_page", async () => {
@@ -674,11 +695,13 @@ class FakeSettingsStore
       | "whenReady"
       | "subscribe"
       | "saveQuickActions"
+      | "saveAccentColor"
       | "saveTranscriptFontSizesPx"
       | "saveTranscriptSpeechSettings"
     >
 {
   readonly saveCalls: QuickActionsSettings[] = [];
+  readonly accentColorSaveCalls: string[] = [];
   readonly transcriptFontSizeSaveCalls: Array<{ promptFontSizePx: number; responseFontSizePx: number }> = [];
   readonly transcriptSpeechSaveCalls: TranscriptSpeechSettings[] = [];
   nextSaveError: Error | undefined;
@@ -693,6 +716,7 @@ class FakeSettingsStore
     this.snapshot = {
       readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
       domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+      accentColor: DEFAULT_ACCENT_COLOR,
       promptFontSizePx: DEFAULT_PROMPT_FONT_SIZE_PX,
       responseFontSizePx: DEFAULT_RESPONSE_FONT_SIZE_PX,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
@@ -746,6 +770,17 @@ class FakeSettingsStore
     this.snapshot = {
       ...this.snapshot,
       transcriptSpeech: { ...nextTranscriptSpeech }
+    };
+    for (const listener of this.listeners) listener();
+  }
+
+  async saveAccentColor(nextAccentColor: string): Promise<void> {
+    if (this.nextSaveError) throw this.nextSaveError;
+    if (this.savePromise) await this.savePromise;
+    this.accentColorSaveCalls.push(nextAccentColor);
+    this.snapshot = {
+      ...this.snapshot,
+      accentColor: nextAccentColor
     };
     for (const listener of this.listeners) listener();
   }

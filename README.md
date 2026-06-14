@@ -155,6 +155,10 @@ If the bridge does not connect, check:
 - Codex CLI is authenticated for the current user.
 - If Codex setup fails, the bridge emits `bridge.error` with code
   `codex_setup_failed`. `bridge.ready` is not expected until setup succeeds.
+- If the side panel misses heartbeats long enough for the bridge to clean up
+  its provider sessions, the bridge emits `bridge.error` with code
+  `heartbeat_timeout`. Click **Retry** to reconnect instead of reinstalling the
+  bridge.
 
 Chrome's Native Messaging documentation defines the manifest shape, absolute
 path requirement, `allowed_origins`, and the macOS host manifest directories:

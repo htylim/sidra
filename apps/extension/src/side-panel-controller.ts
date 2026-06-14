@@ -36,6 +36,7 @@ export type SidePanelSnapshot = {
     canUseChat: boolean;
   };
   display: {
+    accentColor: string;
     promptFontSizePx: number;
     responseFontSizePx: number;
   };
@@ -361,6 +362,7 @@ function createSnapshot(
       canUseChat
     },
     display: {
+      accentColor: settings.accentColor,
       promptFontSizePx: settings.promptFontSizePx,
       responseFontSizePx: settings.responseFontSizePx
     },

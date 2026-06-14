@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import type { PermissionDecision } from "@sidra/protocol";
 import type { CaptureMode } from "./capture-mode";
 import { CurrentPageCard } from "./current-page-card";
@@ -82,7 +82,7 @@ export function SidePanelView(props: {
   const pageCard = getPageCardDisplay(props.snapshot);
 
   return (
-    <main className="panel">
+    <main className="panel" style={{ "--sidra-accent": props.snapshot.display.accentColor } as CSSProperties}>
       <header className="header">
         <div className="brand-mark">S</div>
         <h1>Sidra</h1>

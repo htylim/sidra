@@ -1,8 +1,18 @@
 :root {
+  --sidra-accent: #087c71;
   color: #17201f;
   background: #f6f8f7;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+:root,
+.panel,
+.options-page {
+  --sidra-accent-hover: color-mix(in srgb, var(--sidra-accent) 76%, black);
+  --sidra-accent-soft: color-mix(in srgb, var(--sidra-accent) 10%, white);
+  --sidra-accent-border: color-mix(in srgb, var(--sidra-accent) 46%, white);
+  --sidra-accent-focus: color-mix(in srgb, var(--sidra-accent) 34%, white);
 }
 
 * {
@@ -34,7 +44,7 @@ button:not(:disabled) {
 }
 
 button:not(:disabled):focus-visible {
-  outline: 3px solid #69b8ad;
+  outline: 3px solid var(--sidra-accent-focus);
   outline-offset: 2px;
 }
 
@@ -43,14 +53,14 @@ button:not(:disabled):active {
 }
 
 input:not(:disabled):focus-visible {
-  border-color: #087c71;
-  outline: 3px solid #b7dfd8;
+  border-color: var(--sidra-accent);
+  outline: 3px solid var(--sidra-accent-focus);
   outline-offset: 1px;
 }
 
 textarea:not(:disabled):focus-visible {
-  border-color: #087c71;
-  outline: 3px solid #b7dfd8;
+  border-color: var(--sidra-accent);
+  outline: 3px solid var(--sidra-accent-focus);
   outline-offset: 1px;
 }
 
@@ -82,7 +92,7 @@ textarea:not(:disabled):focus-visible {
   height: 28px;
   place-items: center;
   border-radius: 6px;
-  background: #087c71;
+  background: var(--sidra-accent);
   color: #ffffff;
   font-weight: 700;
 }
@@ -111,8 +121,8 @@ textarea:not(:disabled):focus-visible {
 }
 
 .toolbar-button:not(:disabled):hover {
-  border-color: #83b8ae;
-  background: #eef8f5;
+  border-color: var(--sidra-accent-border);
+  background: var(--sidra-accent-soft);
 }
 
 .sidra-icon {
@@ -151,7 +161,7 @@ textarea:not(:disabled):focus-visible {
   width: 24px;
   height: 24px;
   place-items: center;
-  color: #087c71;
+  color: var(--sidra-accent);
 }
 
 .page-icon .sidra-icon {
@@ -222,8 +232,8 @@ textarea:not(:disabled):focus-visible {
   place-items: center;
   border: 1px solid #c7dbd5;
   border-radius: 8px;
-  color: #087c71;
-  background: #eef8f5;
+  color: var(--sidra-accent);
+  background: var(--sidra-accent-soft);
   font-weight: 700;
 }
 
@@ -260,9 +270,9 @@ textarea:not(:disabled):focus-visible {
 .retry-button {
   min-height: 32px;
   padding: 0 12px;
-  border: 1px solid #087c71;
+  border: 1px solid var(--sidra-accent);
   border-radius: 6px;
-  background: #087c71;
+  background: var(--sidra-accent);
   color: #ffffff;
   font-weight: 650;
 }
@@ -274,8 +284,8 @@ textarea:not(:disabled):focus-visible {
   place-items: center;
   border: 1px solid #c7dbd5;
   border-radius: 8px;
-  color: #087c71;
-  background: #eef8f5;
+  color: var(--sidra-accent);
+  background: var(--sidra-accent-soft);
 }
 
 .empty-state h2 {
@@ -297,9 +307,9 @@ textarea:not(:disabled):focus-visible {
 .quick-action-button,
 .send-button,
 .send-mode-menu-button {
-  border: 1px solid #087c71;
+  border: 1px solid var(--sidra-accent);
   border-radius: 6px;
-  background: #087c71;
+  background: var(--sidra-accent);
   color: #ffffff;
   font-weight: 650;
 }
@@ -324,8 +334,8 @@ textarea:not(:disabled):focus-visible {
 }
 
 .quick-action-button:not(:disabled):hover {
-  border-color: #075e56;
-  background: #075e56;
+  border-color: var(--sidra-accent-hover);
+  background: var(--sidra-accent-hover);
 }
 
 .quick-action-icon {
@@ -413,15 +423,16 @@ textarea:not(:disabled):focus-visible {
 
 .transcript-action-button:not(:disabled):hover,
 .transcript-action-button:not(:disabled):focus-visible {
-  background: #eef3f1;
-  color: #52615d;
+  border-color: var(--sidra-accent-border);
+  background: var(--sidra-accent-soft);
+  color: var(--sidra-accent-hover);
 }
 
 .transcript-action-button[data-speech-state="active"],
 .transcript-action-button[data-copy-state="copied"] {
-  border-color: #83b8ae;
-  background: #eef8f5;
-  color: #075e56;
+  border-color: var(--sidra-accent-border);
+  background: var(--sidra-accent-soft);
+  color: var(--sidra-accent-hover);
 }
 
 .transcript-action-button[data-copy-state="failed"] {
@@ -444,7 +455,7 @@ textarea:not(:disabled):focus-visible {
 
 .message.user {
   margin-left: auto;
-  background: #087c71;
+  background: var(--sidra-accent);
   color: #ffffff;
   font-size: var(--sidra-prompt-font-size, 15px);
   white-space: pre-wrap;
@@ -573,7 +584,7 @@ textarea:not(:disabled):focus-visible {
 }
 
 .assistant-markdown a {
-  color: #075e56;
+  color: var(--sidra-accent-hover);
   font-weight: 650;
 }
 
@@ -629,12 +640,12 @@ textarea:not(:disabled):focus-visible {
 }
 
 .code-copy-button[data-status="copied"] {
-  border-color: #7dd3c7;
+  border-color: var(--sidra-accent-border);
   color: #d9fff8;
 }
 
 .code-copy-button[data-status="copied"]:not(:disabled):hover {
-  border-color: #7dd3c7;
+  border-color: var(--sidra-accent-border);
 }
 
 .code-copy-button[data-status="failed"] {
@@ -752,11 +763,11 @@ textarea:not(:disabled):focus-visible {
 }
 
 .activity-disclosure summary:hover {
-  color: #075e56;
+  color: var(--sidra-accent-hover);
 }
 
 .activity-disclosure summary:focus-visible {
-  outline: 3px solid #b7dfd8;
+  outline: 3px solid var(--sidra-accent-focus);
   outline-offset: 2px;
 }
 
@@ -883,7 +894,7 @@ textarea:not(:disabled):focus-visible {
   width: min(100%, 88%);
   max-width: 100%;
   border: 1px solid #cfd9d5;
-  border-left: 4px solid #087c71;
+  border-left: 4px solid var(--sidra-accent);
   border-radius: 8px;
   padding: 10px;
   background: #ffffff;
@@ -950,19 +961,19 @@ textarea:not(:disabled):focus-visible {
 }
 
 .permission-actions button:first-child {
-  border-color: #087c71;
-  background: #087c71;
+  border-color: var(--sidra-accent);
+  background: var(--sidra-accent);
   color: #ffffff;
 }
 
 .permission-actions button:not(:disabled):hover {
-  border-color: #83b8ae;
-  background: #eef8f5;
+  border-color: var(--sidra-accent-border);
+  background: var(--sidra-accent-soft);
 }
 
 .permission-actions button:first-child:not(:disabled):hover {
-  border-color: #075e56;
-  background: #075e56;
+  border-color: var(--sidra-accent-hover);
+  background: var(--sidra-accent-hover);
 }
 
 .permission-card.unavailable {
@@ -987,6 +998,10 @@ textarea:not(:disabled):focus-visible {
   border: 1px solid #cfd9d5;
   border-radius: 8px;
   padding: 10px;
+}
+
+.composer textarea:not(:disabled):hover {
+  border-color: var(--sidra-accent-border);
 }
 
 .composer-actions {
@@ -1023,7 +1038,7 @@ textarea:not(:disabled):focus-visible {
 .composer-dom-toggle input {
   width: 14px;
   height: 14px;
-  accent-color: #087c71;
+  accent-color: var(--sidra-accent);
 }
 
 .send-button {
@@ -1035,18 +1050,18 @@ textarea:not(:disabled):focus-visible {
 }
 
 .send-button:not(:disabled):hover {
-  border-color: #075e56;
-  background: #075e56;
+  border-color: var(--sidra-accent-hover);
+  background: var(--sidra-accent-hover);
 }
 
 .send-mode-menu-button:not(:disabled):hover {
-  border-color: #075e56;
-  background: #075e56;
+  border-color: var(--sidra-accent-hover);
+  background: var(--sidra-accent-hover);
 }
 
 .retry-button:not(:disabled):hover {
-  border-color: #075e56;
-  background: #075e56;
+  border-color: var(--sidra-accent-hover);
+  background: var(--sidra-accent-hover);
 }
 
 .split-main-button {
@@ -1096,12 +1111,14 @@ textarea:not(:disabled):focus-visible {
 }
 
 .send-mode-menu-item[aria-pressed="true"] {
-  color: #075f58;
+  background: var(--sidra-accent-soft);
+  color: var(--sidra-accent-hover);
   font-weight: 650;
 }
 
 .send-mode-menu-item:not(:disabled):hover {
-  background: #eef8f5;
+  background: var(--sidra-accent-soft);
+  color: var(--sidra-accent-hover);
 }
 
 .send-mode-menu-item:not(:disabled):active {
@@ -1110,7 +1127,7 @@ textarea:not(:disabled):focus-visible {
 
 .send-mode-check {
   opacity: 0;
-  color: #087c71;
+  color: var(--sidra-accent);
 }
 
 .send-mode-menu-item[aria-pressed="true"] .send-mode-check {
@@ -1165,7 +1182,35 @@ textarea:not(:disabled):focus-visible {
 .settings-toggle input {
   width: 16px;
   height: 16px;
-  accent-color: #087c71;
+  accent-color: var(--sidra-accent);
+}
+
+.color-setting {
+  display: grid;
+  gap: 6px;
+  width: min(220px, 100%);
+  color: #62716d;
+  font-size: 12px;
+}
+
+.color-setting-control {
+  display: inline-grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  color: #17201f;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.color-setting input {
+  width: 40px;
+  height: 32px;
+  border: 1px solid #cfd9d5;
+  border-radius: 6px;
+  padding: 2px;
+  background: #ffffff;
 }
 
 .font-size-setting {
@@ -1298,8 +1343,8 @@ textarea[aria-invalid="true"]:not(:disabled):focus-visible {
   border: 1px solid #b9ded5;
   border-radius: 6px;
   padding: 6px 8px;
-  color: #075f58;
-  background: #eef8f5;
+  color: var(--sidra-accent-hover);
+  background: var(--sidra-accent-soft);
   font-size: 13px;
   font-weight: 550;
 }
@@ -1336,8 +1381,8 @@ textarea[aria-invalid="true"]:not(:disabled):focus-visible {
 }
 
 .secondary-button:not(:disabled):hover {
-  border-color: #83b8ae;
-  background: #eef8f5;
+  border-color: var(--sidra-accent-border);
+  background: var(--sidra-accent-soft);
 }
 
 button:disabled,

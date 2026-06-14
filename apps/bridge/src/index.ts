@@ -151,6 +151,12 @@ export function createBridge(
   function scheduleHeartbeatTimeout(): void {
     stopHeartbeatTimeout();
     heartbeatTimeout = scheduleTimeout(() => {
+      runtime.emit({
+        type: "bridge.error",
+        version: PROTOCOL_VERSION,
+        message: "Bridge heartbeat timed out. Retry to reconnect.",
+        code: "heartbeat_timeout"
+      });
       void closeConnection("heartbeat_timeout").catch(() => undefined);
     }, heartbeatTimeoutMs);
   }
