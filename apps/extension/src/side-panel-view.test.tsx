@@ -648,7 +648,7 @@ describe("SidePanelView URL sessions", () => {
     expect(JSON.stringify(snapshot.activeSession.quickActions)).not.toContain("prompt");
   });
 
-  it("renders_active_page_title_and_context_state_from_snapshot", () => {
+  it("renders_active_page_title_without_initial_context_state_in_page_card", () => {
     const markup = renderPageSnapshot(
       snapshotForPage({
         title: "Readable Article",
@@ -656,6 +656,7 @@ describe("SidePanelView URL sessions", () => {
       })
     );
     expect(markup).toContain("Readable Article");
+    expect(markup).toContain("Capture + Send will include readable page text.");
     expect(markup).toContain("No context sent yet");
   });
 
@@ -755,7 +756,8 @@ describe("SidePanelView URL sessions", () => {
 
       expect(screen.getByLabelText("Current page")).not.toBeNull();
       expect(screen.getByText("Readable Article")).not.toBeNull();
-      expect(screen.getByText("Context attached")).not.toBeNull();
+      expect(screen.getAllByText("Context attached")).toHaveLength(1);
+      expect(document.querySelector(".page-status")).toBeNull();
       expect(document.querySelector("img.page-favicon")?.getAttribute("src")).toBe("https://example.com/favicon.ico");
       expect(document.querySelector(`.${"chev"}${"ron"}`)).toBeNull();
       expect(screen.queryByText("›")).toBeNull();
@@ -1048,7 +1050,26 @@ describe("SidePanelView Capture + Send", () => {
     renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: true }));
 
     expect(screen.getByRole("textbox")).toHaveProperty("disabled", true);
-    expect(screen.getByRole("checkbox", { name: "Send DOM" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("checkbox", { name: "Include full page HTML" })).toHaveProperty("disabled", true);
+  });
+
+  it("explains_that_capture_and_send_will_include_readable_page_text", () => {
+    renderInteractiveSnapshot(snapshotForPage());
+
+    expect(screen.getAllByText("No context sent yet")).toHaveLength(1);
+    expect(screen.getByText("Capture + Send will include readable page text.")).not.toBeNull();
+  });
+
+  it("explains_that_full_dom_capture_includes_full_page_html", () => {
+    renderInteractiveSnapshot(snapshotForPage({ captureMode: "full_dom" }));
+
+    expect(screen.getByText("Capture + Send will include full page HTML.")).not.toBeNull();
+  });
+
+  it("explains_that_plain_send_does_not_attach_page_text", () => {
+    renderInteractiveSnapshot(snapshotForPage({ sendMode: "send" }));
+
+    expect(screen.getByText("Send uses the conversation only. Choose Capture + Send to attach current page text.")).not.toBeNull();
   });
 
   it("keeps_cancel_enabled_when_prompt_controls_are_disabled_by_running_turn", () => {
@@ -1125,8 +1146,8 @@ describe("SidePanelView Capture + Send", () => {
     expect(markup).not.toContain("Raw captured article text");
   });
 
-  it("renders_page_card_context_state_after_context_send", () => {
-    const markup = renderPageSnapshot(
+  it("keeps_ready_page_card_identity_only_after_context_send", () => {
+    renderInteractiveSnapshot(
       snapshotForPage({
         contextState: {
           status: "attached",
@@ -1136,11 +1157,12 @@ describe("SidePanelView Capture + Send", () => {
       })
     );
 
-    expect(markup).toContain("Context attached");
+    expect(screen.getAllByText("Context attached")).toHaveLength(1);
+    expect(document.querySelector(".page-status")).toBeNull();
   });
 
-  it("renders_content_too_large_context_state_in_page_card", () => {
-    const markup = renderPageSnapshot(
+  it("keeps_content_too_large_state_in_the_composer_hint", () => {
+    renderInteractiveSnapshot(
       snapshotForPage({
         contextState: {
           status: "content_too_large",
@@ -1151,11 +1173,12 @@ describe("SidePanelView Capture + Send", () => {
       })
     );
 
-    expect(markup).toContain("Content too large");
+    expect(screen.getAllByText("Content too large")).toHaveLength(1);
+    expect(document.querySelector(".page-status")).toBeNull();
   });
 
-  it("renders_full_dom_attached_context_state_in_page_card", () => {
-    const markup = renderPageSnapshot(
+  it("keeps_full_dom_attached_state_in_the_composer_hint", () => {
+    renderInteractiveSnapshot(
       snapshotForPage({
         contextState: {
           status: "full_dom_attached",
@@ -1165,11 +1188,12 @@ describe("SidePanelView Capture + Send", () => {
       })
     );
 
-    expect(markup).toContain("Full DOM attached");
+    expect(screen.getAllByText("Full DOM attached")).toHaveLength(1);
+    expect(document.querySelector(".page-status")).toBeNull();
   });
 
-  it("renders_full_dom_too_large_context_state_in_page_card", () => {
-    const markup = renderPageSnapshot(
+  it("keeps_full_dom_too_large_state_in_the_composer_hint", () => {
+    renderInteractiveSnapshot(
       snapshotForPage({
         contextState: {
           status: "full_dom_too_large",
@@ -1180,7 +1204,22 @@ describe("SidePanelView Capture + Send", () => {
       })
     );
 
-    expect(markup).toContain("Full DOM skipped: too large");
+    expect(screen.getAllByText("Full DOM skipped: too large")).toHaveLength(1);
+    expect(document.querySelector(".page-status")).toBeNull();
+  });
+
+  it("renders_capture_unavailable_state_in_the_page_card", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        contextState: {
+          status: "capture_unavailable",
+          label: "Capture unavailable",
+          message: "The active tab cannot be captured."
+        }
+      })
+    );
+
+    expect(document.querySelector(".page-status")?.textContent).toBe("Capture unavailable");
   });
 });
 
@@ -2195,13 +2234,13 @@ describe("SidePanelView send mode UI", () => {
   it("renders_inline_send_dom_checkbox_without_prompt_options_button", () => {
     renderInteractiveSnapshot(snapshotForPage());
 
-    expect(screen.getByRole("checkbox", { name: "Send DOM" })).not.toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Include full page HTML" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Prompt options" })).toBeNull();
     expect(screen.queryByRole("group", { name: "Send mode" })).toBeNull();
   });
 });
 
-describe("SidePanelView inline Send DOM option", () => {
+describe("SidePanelView inline Include full page HTML option", () => {
   describe("interaction affordances", () => {
     it("adds_title_affordances_to_icon_only_header_buttons", () => {
       renderInteractiveSnapshot(snapshotForPage());
@@ -2214,13 +2253,13 @@ describe("SidePanelView inline Send DOM option", () => {
   it("renders_inline_send_dom_checkbox_off_for_readable_capture_mode", () => {
     renderInteractiveSnapshot(snapshotForPage({ captureMode: "readable" }));
 
-    expect(screen.getByRole("checkbox", { name: "Send DOM" })).toHaveProperty("checked", false);
+    expect(screen.getByRole("checkbox", { name: "Include full page HTML" })).toHaveProperty("checked", false);
   });
 
   it("renders_inline_send_dom_checkbox_on_for_full_dom_capture_mode", () => {
     renderInteractiveSnapshot(snapshotForPage({ captureMode: "full_dom" }));
 
-    expect(screen.getByRole("checkbox", { name: "Send DOM" })).toHaveProperty("checked", true);
+    expect(screen.getByRole("checkbox", { name: "Include full page HTML" })).toHaveProperty("checked", true);
   });
 
   it("inline_send_dom_checkbox_updates_capture_mode_to_full_dom_when_checked", async () => {
@@ -2228,7 +2267,7 @@ describe("SidePanelView inline Send DOM option", () => {
     const onCaptureModeChange = vi.fn();
     renderInteractiveSnapshot(snapshotForPage(), { onCaptureModeChange });
 
-    await user.click(screen.getByRole("checkbox", { name: "Send DOM" }));
+    await user.click(screen.getByRole("checkbox", { name: "Include full page HTML" }));
 
     expect(onCaptureModeChange).toHaveBeenCalledWith("full_dom");
   });
@@ -2238,7 +2277,7 @@ describe("SidePanelView inline Send DOM option", () => {
     const onCaptureModeChange = vi.fn();
     renderInteractiveSnapshot(snapshotForPage({ captureMode: "full_dom" }), { onCaptureModeChange });
 
-    await user.click(screen.getByRole("checkbox", { name: "Send DOM" }));
+    await user.click(screen.getByRole("checkbox", { name: "Include full page HTML" }));
 
     expect(onCaptureModeChange).toHaveBeenCalledWith("readable");
   });
@@ -2262,7 +2301,7 @@ describe("SidePanelView inline Send DOM option", () => {
       />
     );
 
-    expect(screen.getByRole("checkbox", { name: "Send DOM" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("checkbox", { name: "Include full page HTML" })).toHaveProperty("disabled", true);
   });
 
   it("keeps_inline_send_dom_checkbox_disabled_when_chat_controls_become_disabled", async () => {
@@ -2306,7 +2345,7 @@ describe("SidePanelView inline Send DOM option", () => {
       />
     );
 
-    expect(screen.getByRole("checkbox", { name: "Send DOM" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("checkbox", { name: "Include full page HTML" })).toHaveProperty("disabled", true);
   });
 
   it("does_not_send_prompt_when_only_toggling_inline_send_dom", async () => {
@@ -2314,7 +2353,7 @@ describe("SidePanelView inline Send DOM option", () => {
     const onCaptureAndSend = vi.fn(() => true);
     renderInteractiveSnapshot(snapshotForPage({ draftPrompt: "summarize" }), { onCaptureAndSend });
 
-    await user.click(screen.getByRole("checkbox", { name: "Send DOM" }));
+    await user.click(screen.getByRole("checkbox", { name: "Include full page HTML" }));
 
     expect(onCaptureAndSend).not.toHaveBeenCalled();
   });

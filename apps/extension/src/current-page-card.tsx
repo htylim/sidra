@@ -3,7 +3,7 @@ import { SidraIcon } from "./sidra-icon";
 
 export type CurrentPageCardProps = {
   title: string;
-  statusLabel: string;
+  statusLabel?: string;
   favIconUrl?: string;
 };
 
@@ -34,7 +34,7 @@ export function CurrentPageCard(props: CurrentPageCardProps) {
         <div className="page-title" title={props.title}>
           {props.title}
         </div>
-        <div className="page-status">{props.statusLabel}</div>
+        {props.statusLabel ? <div className="page-status">{props.statusLabel}</div> : null}
       </div>
     </section>
   );

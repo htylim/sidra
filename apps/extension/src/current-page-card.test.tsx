@@ -13,7 +13,6 @@ describe("current page card", () => {
     const { container } = render(
       <CurrentPageCard
         title="Example Article"
-        statusLabel="No context sent yet"
         favIconUrl="https://example.com/favicon.ico"
       />
     );
@@ -26,13 +25,13 @@ describe("current page card", () => {
   });
 
   it("preserves_full_title_tooltip_for_truncated_titles", () => {
-    const { container } = render(<CurrentPageCard title="Example Article" statusLabel="No context sent yet" />);
+    const { container } = render(<CurrentPageCard title="Example Article" />);
 
     expect(container.querySelector(".page-title")?.getAttribute("title")).toBe("Example Article");
   });
 
   it("falls_back_to_document_icon_when_favicon_is_missing", () => {
-    const { container } = render(<CurrentPageCard title="Example Article" statusLabel="No context sent yet" />);
+    const { container } = render(<CurrentPageCard title="Example Article" />);
 
     expect(container.querySelector("img.page-favicon")).toBeNull();
     expect(container.querySelector(".page-icon .sidra-icon")).not.toBeNull();
@@ -42,7 +41,6 @@ describe("current page card", () => {
     const { container } = render(
       <CurrentPageCard
         title="Example Article"
-        statusLabel="No context sent yet"
         favIconUrl="https://example.com/broken.ico"
       />
     );
@@ -60,7 +58,6 @@ describe("current page card", () => {
     const { container, rerender } = render(
       <CurrentPageCard
         title="Example Article"
-        statusLabel="No context sent yet"
         favIconUrl="https://example.com/broken.ico"
       />
     );
@@ -72,7 +69,6 @@ describe("current page card", () => {
     rerender(
       <CurrentPageCard
         title="Example Article"
-        statusLabel="No context sent yet"
         favIconUrl="https://example.com/recovered.ico"
       />
     );
@@ -81,7 +77,7 @@ describe("current page card", () => {
   });
 
   it("does_not_render_current_page_card_trailing_affordance", () => {
-    const { container } = render(<CurrentPageCard title="Example Article" statusLabel="No context sent yet" />);
+    const { container } = render(<CurrentPageCard title="Example Article" />);
 
     expect(container.querySelector(`.${"chev"}${"ron"}`)).toBeNull();
     expect(screen.queryByText("›")).toBeNull();
@@ -92,5 +88,11 @@ describe("current page card", () => {
 
     expect(screen.getByText("chrome://extensions")).not.toBeNull();
     expect(screen.getByText("This page cannot be captured")).not.toBeNull();
+  });
+
+  it("omits_status_when_no_status_label_is_provided", () => {
+    const { container } = render(<CurrentPageCard title="Example Article" />);
+
+    expect(container.querySelector(".page-status")).toBeNull();
   });
 });

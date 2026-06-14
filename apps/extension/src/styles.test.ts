@@ -100,6 +100,28 @@ describe("extension UI interaction state CSS", () => {
     expectRule(".composer-dom-toggle input", ["width: 14px", "height: 14px", "accent-color: var(--sidra-accent)"]);
   });
 
+  it("keeps_composer_context_hint_visible_but_secondary", () => {
+    expectRule(".composer-context-hint", [
+      "display: grid",
+      "background: transparent",
+      "font-size: 12px"
+    ]);
+    expectRule(".composer-context-hint span:first-child", ["color: #17201f", "font-weight: 650"]);
+  });
+
+  it("keeps_transcript_actions_quietly_discoverable_without_hover", () => {
+    expectRule(".transcript-action-rail", ["opacity: 0.44", "pointer-events: auto"]);
+  });
+
+  it("uses_full_permission_card_borders_instead_of_side_stripes", () => {
+    const sideBorderProperty = ["border", "left"].join("-");
+
+    expectRule(".permission-card", ["border: 1px solid #cfd9d5"]);
+    expectRule(".permission-card.pending", ["border-color: var(--sidra-accent-border)", "background:"]);
+    expect(stylesheet).not.toContain(`${sideBorderProperty}: 4px solid`);
+    expect(stylesheet).not.toContain(`${sideBorderProperty}-color`);
+  });
+
   it("does_not_keep_prompt_options_button_styles_after_inline_send_dom_replaces_it", () => {
     expect(stylesheet).not.toContain(".options-button");
     expect(stylesheet).not.toContain(".prompt-options-popover");
@@ -122,12 +144,12 @@ describe("extension UI interaction state CSS", () => {
   });
 
   it("defines_transcript_action_rail_visibility_target_size_and_active_states", () => {
-    expectRule(".transcript-action-rail", ["display: grid", "gap: 6px", "opacity: 0"]);
+    expectRule(".transcript-action-rail", ["display: grid", "gap: 6px", "opacity: 0.44", "pointer-events: auto"]);
     expectRule(".transcript-action-button", ["width: 28px", "height: 28px", "border: 1px solid #d8e1dd"]);
     expectRule(".transcript-action-button .sidra-icon", ["width: 16px", "height: 16px"]);
     expectRule(
       ".transcript-message-row:hover .transcript-action-rail,\n.transcript-message-row:focus-within .transcript-action-rail,\n.transcript-message-row[data-speech-active=\"true\"] .transcript-action-rail,\n.transcript-message-row[data-copy-active=\"true\"] .transcript-action-rail",
-      ["opacity: 1", "pointer-events: auto"]
+      ["opacity: 1"]
     );
     expectRule(".transcript-action-button:not(:disabled):hover,\n.transcript-action-button:not(:disabled):focus-visible", [
       "border-color: var(--sidra-accent-border)",

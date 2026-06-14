@@ -86,7 +86,7 @@ describe("side panel New Chat wiring", () => {
     expect(sidePanelSource).toContain("onCaptureModeChange={sidePanelController.updateCaptureMode}");
     expect(viewSource).toContain("onCaptureModeChange(captureMode: CaptureMode): void");
     expect(viewSource).toContain("composer-dom-toggle");
-    expect(viewSource).toContain("Send DOM");
+    expect(viewSource).toContain("Include full page HTML");
   });
 
   it("passes_controller_quick_action_and_settings_commands_into_the_view", () => {

@@ -438,9 +438,20 @@ export function OptionsPageView(props: {
         <h1>Sidra Settings</h1>
       </header>
 
-      <section className="options-section" aria-labelledby="display-settings-heading">
-        <h2 id="display-settings-heading">Display</h2>
-        <label className="color-setting">
+      <div className="options-layout">
+        <nav className="options-nav" aria-label="Settings sections">
+          <a href="#display-settings">Display</a>
+          <a href="#speech-settings">Read aloud</a>
+          <a href="#quick-actions-settings">Quick actions</a>
+        </nav>
+
+        <div className="options-content">
+      <section className="options-section" id="display-settings" aria-labelledby="display-settings-heading">
+        <div className="options-section-heading">
+          <h2 id="display-settings-heading">Display</h2>
+          <p>Adjust how Sidra looks in the side panel.</p>
+        </div>
+        <label className="color-setting settings-row">
           <span>Accent color</span>
           <span className="color-setting-control">
             <input
@@ -457,7 +468,7 @@ export function OptionsPageView(props: {
             <span>{accentColorDraft}</span>
           </span>
         </label>
-        <label className="font-size-setting">
+        <label className="font-size-setting settings-row">
           <span>Prompt text size</span>
           <input
             type="number"
@@ -481,7 +492,7 @@ export function OptionsPageView(props: {
             </span>
           ) : null}
         </label>
-        <label className="font-size-setting">
+        <label className="font-size-setting settings-row">
           <span>Response text size</span>
           <input
             type="number"
@@ -507,11 +518,15 @@ export function OptionsPageView(props: {
         </label>
       </section>
 
-      <section className="options-section" aria-labelledby="speech-settings-heading">
-        <h2 id="speech-settings-heading">Read aloud</h2>
+      <section className="options-section" id="speech-settings" aria-labelledby="speech-settings-heading">
+        <div className="options-section-heading">
+          <h2 id="speech-settings-heading">Read aloud</h2>
+          <p>Manage speech credentials and playback defaults.</p>
+        </div>
         <div className="speech-credential-settings">
+          <h3>Credentials</h3>
           <p className="credential-status">{credentialStatusText(credentialSnapshot)}</p>
-          <label className="font-size-setting">
+          <label className="font-size-setting settings-row">
             <span>OpenAI API key</span>
             <input
               type="password"
@@ -566,134 +581,140 @@ export function OptionsPageView(props: {
           </div>
         </div>
 
-        <label className="settings-toggle">
-          <input
-            type="checkbox"
-            checked={speechEnabled}
-            disabled={controlsDisabled}
-            onChange={(event) => {
-              markTranscriptSpeechDirty();
-              setSaveError(undefined);
-              setSpeechEnabled(event.currentTarget.checked);
-            }}
-          />
-          <span>Enable read aloud</span>
-        </label>
+        <div className="transcript-speech-settings">
+          <h3>Playback</h3>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={speechEnabled}
+              disabled={controlsDisabled}
+              onChange={(event) => {
+                markTranscriptSpeechDirty();
+                setSaveError(undefined);
+                setSpeechEnabled(event.currentTarget.checked);
+              }}
+            />
+            <span>Enable read aloud</span>
+          </label>
 
-        <label className="font-size-setting">
-          <span>Voice</span>
-          <select
-            value={speechVoice}
-            disabled={controlsDisabled}
-            onChange={(event) => {
-              markTranscriptSpeechDirty();
-              setSaveError(undefined);
-              setSpeechVoice(event.currentTarget.value as SpeechVoice);
-            }}
-          >
-            {TRANSCRIPT_SPEECH_VOICES.map((voice) => (
-              <option key={voice} value={voice}>
-                {voice}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="font-size-setting settings-row">
+            <span>Voice</span>
+            <select
+              value={speechVoice}
+              disabled={controlsDisabled}
+              onChange={(event) => {
+                markTranscriptSpeechDirty();
+                setSaveError(undefined);
+                setSpeechVoice(event.currentTarget.value as SpeechVoice);
+              }}
+            >
+              {TRANSCRIPT_SPEECH_VOICES.map((voice) => (
+                <option key={voice} value={voice}>
+                  {voice}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label className="font-size-setting">
-          <span>Speech speed</span>
-          <input
-            type="range"
-            aria-label="Speech speed"
-            min={MIN_TRANSCRIPT_SPEECH_SPEED}
-            max={MAX_TRANSCRIPT_SPEECH_SPEED}
-            step={TRANSCRIPT_SPEECH_SPEED_STEP}
-            value={speechSpeedDraft}
-            disabled={controlsDisabled}
-            aria-invalid={speechSpeedError ? "true" : undefined}
-            aria-describedby={speechSpeedError ? speechSpeedErrorId : undefined}
-            onChange={(event) => {
-              markTranscriptSpeechDirty();
-              setSaveError(undefined);
-              setSpeechSpeedTouched(true);
-              setSpeechSpeedDraft(event.currentTarget.value);
-            }}
-          />
-          <output>{speechSpeedDraft}x</output>
-          {speechSpeedError ? (
-            <span className="validation-error" id={speechSpeedErrorId}>
-              {speechSpeedError}
-            </span>
+          <label className="font-size-setting settings-row">
+            <span>Speech speed</span>
+            <input
+              type="range"
+              aria-label="Speech speed"
+              min={MIN_TRANSCRIPT_SPEECH_SPEED}
+              max={MAX_TRANSCRIPT_SPEECH_SPEED}
+              step={TRANSCRIPT_SPEECH_SPEED_STEP}
+              value={speechSpeedDraft}
+              disabled={controlsDisabled}
+              aria-invalid={speechSpeedError ? "true" : undefined}
+              aria-describedby={speechSpeedError ? speechSpeedErrorId : undefined}
+              onChange={(event) => {
+                markTranscriptSpeechDirty();
+                setSaveError(undefined);
+                setSpeechSpeedTouched(true);
+                setSpeechSpeedDraft(event.currentTarget.value);
+              }}
+            />
+            <output>{speechSpeedDraft}x</output>
+            {speechSpeedError ? (
+              <span className="validation-error" id={speechSpeedErrorId}>
+                {speechSpeedError}
+              </span>
+            ) : null}
+          </label>
+
+          <label className="font-size-setting speech-instructions-setting settings-row">
+            <span>Speech instructions</span>
+            <textarea
+              value={speechInstructionsDraft}
+              disabled={controlsDisabled}
+              aria-invalid={speechInstructionsError ? "true" : undefined}
+              aria-describedby={speechInstructionsError ? speechInstructionsErrorId : undefined}
+              onChange={(event) => {
+                markTranscriptSpeechDirty();
+                setSaveError(undefined);
+                setSpeechInstructionsTouched(true);
+                setSpeechInstructionsDraft(event.currentTarget.value);
+              }}
+            />
+            {speechInstructionsError ? (
+              <span className="validation-error" id={speechInstructionsErrorId}>
+                {speechInstructionsError}
+              </span>
+            ) : null}
+          </label>
+
+          <label className="font-size-setting settings-row">
+            <span>Maximum characters per bubble</span>
+            <input
+              type="number"
+              min={MIN_TRANSCRIPT_SPEECH_BUBBLE_CHARACTERS}
+              max={MAX_TRANSCRIPT_SPEECH_BUBBLE_CHARACTERS}
+              step={1}
+              value={speechMaxCharactersDraft}
+              disabled={controlsDisabled}
+              aria-invalid={speechMaxCharactersError ? "true" : undefined}
+              aria-describedby={speechMaxCharactersError ? speechMaxCharactersErrorId : undefined}
+              onChange={(event) => {
+                markTranscriptSpeechDirty();
+                setSaveError(undefined);
+                setSpeechMaxCharactersTouched(true);
+                setSpeechMaxCharactersDraft(event.currentTarget.value);
+              }}
+            />
+            {speechMaxCharactersError ? (
+              <span className="validation-error" id={speechMaxCharactersErrorId}>
+                {speechMaxCharactersError}
+              </span>
+            ) : null}
+          </label>
+
+          {speechPreviewSnapshot.error ? (
+            <div className="settings-error" role="alert">
+              {speechPreviewSnapshot.error}
+            </div>
           ) : null}
-        </label>
 
-        <label className="font-size-setting speech-instructions-setting">
-          <span>Speech instructions</span>
-          <textarea
-            value={speechInstructionsDraft}
-            disabled={controlsDisabled}
-            aria-invalid={speechInstructionsError ? "true" : undefined}
-            aria-describedby={speechInstructionsError ? speechInstructionsErrorId : undefined}
-            onChange={(event) => {
-              markTranscriptSpeechDirty();
-              setSaveError(undefined);
-              setSpeechInstructionsTouched(true);
-              setSpeechInstructionsDraft(event.currentTarget.value);
-            }}
-          />
-          {speechInstructionsError ? (
-            <span className="validation-error" id={speechInstructionsErrorId}>
-              {speechInstructionsError}
-            </span>
-          ) : null}
-        </label>
-
-        <label className="font-size-setting">
-          <span>Maximum characters per bubble</span>
-          <input
-            type="number"
-            min={MIN_TRANSCRIPT_SPEECH_BUBBLE_CHARACTERS}
-            max={MAX_TRANSCRIPT_SPEECH_BUBBLE_CHARACTERS}
-            step={1}
-            value={speechMaxCharactersDraft}
-            disabled={controlsDisabled}
-            aria-invalid={speechMaxCharactersError ? "true" : undefined}
-            aria-describedby={speechMaxCharactersError ? speechMaxCharactersErrorId : undefined}
-            onChange={(event) => {
-              markTranscriptSpeechDirty();
-              setSaveError(undefined);
-              setSpeechMaxCharactersTouched(true);
-              setSpeechMaxCharactersDraft(event.currentTarget.value);
-            }}
-          />
-          {speechMaxCharactersError ? (
-            <span className="validation-error" id={speechMaxCharactersErrorId}>
-              {speechMaxCharactersError}
-            </span>
-          ) : null}
-        </label>
-
-        {speechPreviewSnapshot.error ? (
-          <div className="settings-error" role="alert">
-            {speechPreviewSnapshot.error}
+          <div className="speech-preview-actions">
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={!speechPreviewCanStart}
+              aria-busy={speechPreviewSnapshot.status === "loading" ? "true" : undefined}
+              onClick={playSpeechSample}
+            >
+              <SidraIcon name={speechPreviewIconName(speechPreviewSnapshot.status)} />
+              <span>{speechPreviewButtonLabel(speechPreviewSnapshot.status)}</span>
+            </button>
           </div>
-        ) : null}
-
-        <div className="speech-preview-actions">
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={!speechPreviewCanStart}
-            aria-busy={speechPreviewSnapshot.status === "loading" ? "true" : undefined}
-            onClick={playSpeechSample}
-          >
-            <SidraIcon name={speechPreviewIconName(speechPreviewSnapshot.status)} />
-            <span>{speechPreviewButtonLabel(speechPreviewSnapshot.status)}</span>
-          </button>
         </div>
       </section>
 
-      <section className="options-section" aria-labelledby="quick-actions-settings-heading">
-        <h2 id="quick-actions-settings-heading">Quick actions</h2>
+      <section className="options-section" id="quick-actions-settings" aria-labelledby="quick-actions-settings-heading">
+        <div className="options-section-heading">
+          <h2 id="quick-actions-settings-heading">Quick actions</h2>
+          <p>Choose the shortcuts shown in a new page conversation.</p>
+        </div>
         <label className="settings-toggle">
           <input
             type="checkbox"
@@ -791,6 +812,8 @@ export function OptionsPageView(props: {
           </button>
         </div>
       </section>
+        </div>
+      </div>
     </main>
   );
 }

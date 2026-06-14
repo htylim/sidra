@@ -240,7 +240,7 @@ Troubleshooting setup failures:
 
 After the readable smoke passes, keep the same side panel open.
 
-1. Enable `Send DOM`.
+1. Enable `Include full page HTML`.
 2. Leave the send mode on `Capture + Send`, or choose `Capture + Send` from the split-button menu.
 3. Send another prompt.
 4. Confirm the page card shows `Full DOM attached`.
@@ -259,7 +259,7 @@ await sidePanelPage.evaluate(async () => {
 });
 ```
 
-Then keep `Send DOM` enabled, choose `Capture + Send` from the split-button
+Then keep `Include full page HTML` enabled, choose `Capture + Send` from the split-button
 menu, and send from a page whose HTML is over that limit. Expected marker:
 
 ```text
@@ -304,7 +304,7 @@ Tell the user how to play:
 - Use the `example.com` tab or navigate it to any page.
 - Click the Sidra extension icon to open the real side panel.
 - Type a prompt and send.
-- Enable `Send DOM`, then choose `Capture + Send`
+- Enable `Include full page HTML`, then choose `Capture + Send`
   from the split-button menu and send. Expected marker: `Full DOM attached`.
 - To smoke oversized DOM, set `domContentLimitCharacters` in extension local
   storage as shown above, then choose `Capture + Send` from the split-button

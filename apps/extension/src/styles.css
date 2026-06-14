@@ -390,8 +390,8 @@ textarea:not(:disabled):focus-visible {
 .transcript-action-rail {
   display: grid;
   gap: 6px;
-  opacity: 0;
-  pointer-events: none;
+  opacity: 0.44;
+  pointer-events: auto;
   transition: opacity 120ms ease;
 }
 
@@ -400,7 +400,6 @@ textarea:not(:disabled):focus-visible {
 .transcript-message-row[data-speech-active="true"] .transcript-action-rail,
 .transcript-message-row[data-copy-active="true"] .transcript-action-rail {
   opacity: 1;
-  pointer-events: auto;
 }
 
 .transcript-action-button {
@@ -443,7 +442,7 @@ textarea:not(:disabled):focus-visible {
 
 .transcript-action-button:disabled {
   cursor: default;
-  opacity: 0.55;
+  opacity: 0.45;
 }
 
 .transcript-action-error {
@@ -894,12 +893,16 @@ textarea:not(:disabled):focus-visible {
   width: min(100%, 88%);
   max-width: 100%;
   border: 1px solid #cfd9d5;
-  border-left: 4px solid var(--sidra-accent);
   border-radius: 8px;
   padding: 10px;
   background: #ffffff;
   font-size: 13px;
   line-height: 1.35;
+}
+
+.permission-card.pending {
+  border-color: var(--sidra-accent-border);
+  background: color-mix(in srgb, var(--sidra-accent) 4%, #ffffff);
 }
 
 .permission-actions {
@@ -977,7 +980,8 @@ textarea:not(:disabled):focus-visible {
 }
 
 .permission-card.unavailable {
-  border-left-color: #8f2d16;
+  border-color: #efc8bd;
+  background: #fff7ed;
 }
 
 .composer {
@@ -1002,6 +1006,23 @@ textarea:not(:disabled):focus-visible {
 
 .composer textarea:not(:disabled):hover {
   border-color: var(--sidra-accent-border);
+}
+
+.composer-context-hint {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  border-radius: 6px;
+  padding: 4px 2px;
+  background: transparent;
+  color: #50605c;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.composer-context-hint span:first-child {
+  color: #17201f;
+  font-weight: 650;
 }
 
 .composer-actions {
@@ -1140,8 +1161,8 @@ textarea:not(:disabled):focus-visible {
 }
 
 .options-header,
-.options-section {
-  width: min(720px, calc(100% - 24px));
+.options-layout {
+  width: min(920px, calc(100% - 24px));
   margin: 0 auto;
 }
 
@@ -1154,14 +1175,52 @@ textarea:not(:disabled):focus-visible {
   font-size: 18px;
 }
 
+.options-layout {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+}
+
+.options-nav {
+  position: sticky;
+  top: 12px;
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  font-size: 13px;
+}
+
+.options-nav a {
+  border-radius: 6px;
+  padding: 7px 8px;
+  color: #50605c;
+  text-decoration: none;
+}
+
+.options-nav a:hover,
+.options-nav a:focus-visible {
+  background: var(--sidra-accent-soft);
+  color: var(--sidra-accent-hover);
+}
+
+.options-content {
+  min-width: 0;
+}
+
 .options-section {
   display: grid;
-  gap: 14px;
-  padding: 16px 0 24px;
+  gap: 16px;
+  padding: 18px 0 28px;
 }
 
 .options-section + .options-section {
   border-top: 1px solid #d8e1dd;
+}
+
+.options-section-heading {
+  display: grid;
+  gap: 4px;
 }
 
 .options-section h2 {
@@ -1169,6 +1228,14 @@ textarea:not(:disabled):focus-visible {
   color: #17201f;
   font-size: 14px;
   font-weight: 700;
+}
+
+.options-section-heading p {
+  max-width: 62ch;
+  margin: 0;
+  color: #50605c;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .settings-toggle {
@@ -1188,7 +1255,6 @@ textarea:not(:disabled):focus-visible {
 .color-setting {
   display: grid;
   gap: 6px;
-  width: min(220px, 100%);
   color: #62716d;
   font-size: 12px;
 }
@@ -1216,9 +1282,22 @@ textarea:not(:disabled):focus-visible {
 .font-size-setting {
   display: grid;
   gap: 6px;
-  width: min(220px, 100%);
   color: #62716d;
   font-size: 12px;
+}
+
+.settings-row {
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
+  align-items: start;
+  width: 100%;
+}
+
+.settings-row > span:first-child {
+  padding-top: 8px;
+}
+
+.settings-row .validation-error {
+  grid-column: 2;
 }
 
 .font-size-setting input,
@@ -1238,7 +1317,7 @@ textarea:not(:disabled):focus-visible {
 }
 
 .speech-instructions-setting {
-  width: min(420px, 100%);
+  width: 100%;
 }
 
 .speech-instructions-setting textarea {
@@ -1247,7 +1326,23 @@ textarea:not(:disabled):focus-visible {
 
 .speech-credential-settings {
   display: grid;
-  gap: 8px;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.transcript-speech-settings {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid #d8e1dd;
+  padding-top: 16px;
+}
+
+.speech-credential-settings h3,
+.transcript-speech-settings h3 {
+  margin: 0;
+  color: #2d3b38;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .credential-status,
@@ -1323,6 +1418,38 @@ textarea[aria-invalid="true"]:not(:disabled):focus-visible {
   background: #e6ece9;
   color: #62716d;
   opacity: 1;
+}
+
+@media (max-width: 760px) {
+  .options-layout {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .options-nav {
+    position: static;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 0 0 6px;
+  }
+
+  .options-nav a {
+    text-align: center;
+  }
+}
+
+@media (max-width: 560px) {
+  .settings-row {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-row > span:first-child {
+    padding-top: 0;
+  }
+
+  .settings-row .validation-error {
+    grid-column: 1;
+  }
 }
 
 .settings-error {

@@ -94,7 +94,7 @@ The side panel has:
 - Split send button with modes:
   - **Capture + Send**
   - **Send**
-- Inline `Send DOM` checkbox for full DOM capture.
+- Inline `Include full page HTML` checkbox for full DOM capture.
 - Cancel state while an agent response is in flight.
 
 Settings live in a separate dedicated extension settings/options page, not inside the side panel. The gear icon opens that page.
@@ -120,9 +120,9 @@ The UI mockups establish these V1 layout details:
 - Show the current page as a persistent card near the top of the sidebar.
 - Show the browser tab favicon in the current page card when available. Fall back to a document/page icon.
 - Truncate long page titles with ellipsis.
-- Show page context status in the card, such as `No context sent yet` or `Context attached`.
+- Keep the current page card focused on page identity. Show a status there only when the page itself cannot be captured.
 - Empty state should be centered in the chat area with a small chat illustration/icon, a short heading, helper text, and quick actions.
-- The composer should be visually separated at the bottom with a large text area, inline `Send DOM` checkbox on the left, and split send button on the right.
+- The composer should be visually separated at the bottom with a large text area, a compact context hint, inline `Include full page HTML` checkbox on the left, and split send button on the right.
 - The send button should use an icon plus text, such as `Capture + Send` or `Send`.
 
 ## Current Page Card
@@ -133,11 +133,12 @@ The current page card displays:
 
 - browser tab favicon, or a page/document fallback icon
 - truncated page title
-- context state
+- page capture availability, only when capture is unavailable
 
-Context states include:
+Session context state appears in the composer hint, not in the current page card.
 
-- `No context sent yet`
+Composer context states include:
+
 - `Context attached`
 - `Metadata attached`
 - `Content too large`
@@ -159,14 +160,20 @@ The first prompt in a new URL session defaults to `Capture + Send`. After a succ
 
 ## Composer Capture Option
 
-The composer shows a quiet inline `Send DOM` checkbox.
+The composer shows a quiet inline `Include full page HTML` checkbox.
 
-`Send DOM` switches the capture mode from readable text to full DOM. Capture mode is mutually exclusive:
+`Include full page HTML` switches the capture mode from readable text to full DOM. Capture mode is mutually exclusive:
 
 - Off: send readable extracted text plus metadata.
 - On: send full DOM plus metadata.
 
 Sidra should not send both readable text and full DOM in the same capture request.
+
+The composer also shows a compact context hint near the send controls. It shows the current page-context state and explains what the selected send path will attach:
+
+- `Capture + Send` with the checkbox off includes readable page text.
+- `Capture + Send` with the checkbox on includes full page HTML.
+- `Send` uses the conversation only and does not attach current page text.
 
 The DOM size limit is controlled by extension settings.
 
@@ -275,7 +282,7 @@ V1 is optimized for articles and text-heavy pages. Other page types are best eff
 V1 includes optional full DOM capture.
 
 - Default off.
-- Controlled by the inline `Send DOM` checkbox.
+- Controlled by the inline `Include full page HTML` checkbox.
 - Separate size limit from readable content.
 - If DOM exceeds the configured limit, skip the DOM and show a clear marker.
 - Full DOM and readable text are mutually exclusive capture modes.
@@ -305,7 +312,7 @@ If full DOM exceeds its configured limit:
 
 - Do not send partial DOM.
 - Skip full DOM.
-- Show a clear page-card state such as `Full DOM skipped: too large`.
+- Show a clear composer context state such as `Full DOM skipped: too large`.
 - Show a clear transcript marker such as `Full DOM skipped; content too large`.
 
 Codex/provider errors for oversized payloads must be surfaced separately.

@@ -196,7 +196,7 @@ Then trace the code:
 2. `SidePanelController.captureAndSend` reads the active tab at click time.
 3. `CaptureService.captureActivePageDocument` captures the page document and resolves the canonical URL session.
 4. `UrlSessionStore` selects that URL session and supplies its session-scoped `captureMode`.
-5. `CaptureService.buildPageContextForCapturedDocument` builds readable context by default, or full-DOM context when `Send DOM` is enabled.
+5. `CaptureService.buildPageContextForCapturedDocument` builds readable context by default, or full-DOM context when `Include full page HTML` is enabled.
 6. `UrlSessionStore.sendPromptWithContext` delegates to `BridgeSessionCoordinator`.
 7. `BridgeSessionCoordinator.sendPrompt` sends `session.start` if needed.
 8. `BridgeConnection.post` opens the Native Messaging port and posts the message.

@@ -42,6 +42,7 @@ export function SidePanelView(props: {
   const sendFullDom = props.snapshot.activeSession.captureMode === "full_dom";
   const sendMode = props.snapshot.activeSession.sendMode;
   const sendActionLabel = sendMode === "capture" ? "Capture + Send" : "Send";
+  const composerContextHint = getComposerContextHint(props.snapshot.activeSession);
 
   useEffect(() => {
     if (promptEntryDisabled) {
@@ -164,6 +165,10 @@ export function SidePanelView(props: {
             }
           }}
         />
+        <div className="composer-context-hint" role="note">
+          <span>{composerContextHint.label}</span>
+          <span>{composerContextHint.detail}</span>
+        </div>
         <div className="composer-actions">
           <label className="composer-dom-toggle">
             <input
@@ -175,7 +180,7 @@ export function SidePanelView(props: {
                 props.onCaptureModeChange(event.currentTarget.checked ? "full_dom" : "readable");
               }}
             />
-            <span>Send DOM</span>
+            <span>Include full page HTML</span>
           </label>
           {showCancelButton ? (
             <button
@@ -262,7 +267,28 @@ function hasPendingPermissionRequest(sessionTranscript: SidePanelSnapshot["activ
   return sessionTranscript.some((entry) => entry.kind === "permission_request" && entry.status === "pending");
 }
 
-function getPageCardDisplay(snapshot: SidePanelSnapshot): { title: string; statusLabel: string; favIconUrl?: string } {
+function getComposerContextHint(activeSession: SidePanelSnapshot["activeSession"]): { label: string; detail: string } {
+  if (activeSession.sendMode === "send") {
+    return {
+      label: activeSession.contextState.label,
+      detail: "Send uses the conversation only. Choose Capture + Send to attach current page text."
+    };
+  }
+
+  if (activeSession.captureMode === "full_dom") {
+    return {
+      label: activeSession.contextState.label,
+      detail: "Capture + Send will include full page HTML."
+    };
+  }
+
+  return {
+    label: activeSession.contextState.label,
+    detail: "Capture + Send will include readable page text."
+  };
+}
+
+function getPageCardDisplay(snapshot: SidePanelSnapshot): { title: string; statusLabel?: string; favIconUrl?: string } {
   if (snapshot.activePage.status === "unsupported") {
     return {
       title: snapshot.activePage.title?.trim() || snapshot.activePage.url || "No active page",
@@ -273,7 +299,10 @@ function getPageCardDisplay(snapshot: SidePanelSnapshot): { title: string; statu
 
   return {
     title: snapshot.activePage.displayTitle || snapshot.activePage.url,
-    statusLabel: snapshot.activeSession.contextState.label,
+    statusLabel:
+      snapshot.activeSession.contextState.status === "capture_unavailable"
+        ? snapshot.activeSession.contextState.label
+        : undefined,
     favIconUrl: snapshot.activePage.favIconUrl
   };
 }
