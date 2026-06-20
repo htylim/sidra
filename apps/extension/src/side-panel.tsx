@@ -32,6 +32,7 @@ function SidePanel() {
       onDraftPromptChange={sidePanelController.updateDraftPrompt}
       onCaptureModeChange={sidePanelController.updateCaptureMode}
       onSendModeChange={sidePanelController.updateSendMode}
+      onPromptEffortChange={sidePanelController.updatePromptEffort}
       onNewChat={sidePanelController.newChat}
       onRetryBridge={sidePanelController.retryBridge}
       onOpenSettings={sidePanelController.openSettings}

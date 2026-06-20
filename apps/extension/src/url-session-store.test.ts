@@ -190,6 +190,46 @@ describe("UrlSessionStore", () => {
     );
   });
 
+  it("plain_send_forwards_prompt_effort_to_coordinator", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect((store as unknown as { sendPrompt(input: { prompt: string; promptEffort: string }): boolean }).sendPrompt({ prompt: "plain", promptEffort: "high" })).toBe(true);
+    transport.emitMessage(sessionStarted("client-1"));
+
+    expect(transport.postedMessages).toContainEqual({
+      type: "session.send",
+      version: 3,
+      clientSessionId: "client-1",
+      prompt: "plain",
+      promptEffort: "high"
+    });
+  });
+
+  it("capture_send_forwards_prompt_effort_to_coordinator", () => {
+    const { store, transport } = createStoreHarness();
+    const pageContext = readablePageContext();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(
+      (store as unknown as { sendPromptWithContext(input: { prompt: string; pageContext: PageContext; promptEffort: string }): boolean }).sendPromptWithContext({
+        prompt: "summarize",
+        pageContext,
+        promptEffort: "xhigh"
+      })
+    ).toBe(true);
+    transport.emitMessage(sessionStarted("client-1"));
+
+    expect(transport.postedMessages).toContainEqual({
+      type: "session.send",
+      version: 3,
+      clientSessionId: "client-1",
+      prompt: "summarize",
+      promptEffort: "xhigh",
+      pageContext
+    });
+  });
+
   it("updates_only_the_active_session_draft", () => {
     const { store } = createStoreHarness();
     store.selectPage(pageIdentity("https://example.com/a"));

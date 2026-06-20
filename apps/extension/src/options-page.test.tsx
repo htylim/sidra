@@ -232,6 +232,55 @@ describe("OptionsPage quick actions", () => {
     expect(screen.getByText("#c026d3")).not.toBeNull();
   });
 
+  it("options_page_renders_prompt_effort_setting", async () => {
+    render(<OptionsPageView settingsStore={new FakeSettingsStore({ promptEffort: "high" } as Partial<SidraSettings>)} />);
+
+    const select = await screen.findByRole("combobox", { name: "Prompt effort" });
+
+    expect(select).toHaveProperty("value", "high");
+  });
+
+  it("options_page_changes_prompt_effort_marks_dirty", async () => {
+    const store = new FakeSettingsStore();
+    render(<OptionsPageView settingsStore={store} />);
+
+    fireEvent.change(await screen.findByRole("combobox", { name: "Prompt effort" }), { target: { value: "high" } });
+
+    expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", false);
+  });
+
+  it("options_page_saves_prompt_effort", async () => {
+    const user = userEvent.setup();
+    const store = new FakeSettingsStore();
+    render(<OptionsPageView settingsStore={store} />);
+
+    fireEvent.change(await screen.findByRole("combobox", { name: "Prompt effort" }), { target: { value: "xhigh" } });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(store.promptEffortSaveCalls).toEqual(["xhigh"]);
+  });
+
+  it("options_page_syncs_live_prompt_effort_when_clean", async () => {
+    const store = new FakeSettingsStore({ promptEffort: "high" } as Partial<SidraSettings>);
+    render(<OptionsPageView settingsStore={store} />);
+
+    const select = await screen.findByRole("combobox", { name: "Prompt effort" });
+    store.replacePromptEffort("low");
+
+    await waitFor(() => expect(select).toHaveProperty("value", "low"));
+  });
+
+  it("options_page_keeps_dirty_prompt_effort_draft_on_external_update", async () => {
+    const store = new FakeSettingsStore({ promptEffort: "medium" } as Partial<SidraSettings>);
+    render(<OptionsPageView settingsStore={store} />);
+
+    const select = await screen.findByRole("combobox", { name: "Prompt effort" });
+    fireEvent.change(select, { target: { value: "high" } });
+    store.replacePromptEffort("low");
+
+    expect(select).toHaveProperty("value", "high");
+  });
+
   it("saves_accent_color_from_options_page", async () => {
     const user = userEvent.setup();
     const store = new FakeSettingsStore();
@@ -704,6 +753,7 @@ class FakeSettingsStore
   readonly accentColorSaveCalls: string[] = [];
   readonly transcriptFontSizeSaveCalls: Array<{ promptFontSizePx: number; responseFontSizePx: number }> = [];
   readonly transcriptSpeechSaveCalls: TranscriptSpeechSettings[] = [];
+  readonly promptEffortSaveCalls: string[] = [];
   nextSaveError: Error | undefined;
   private readonly listeners = new Set<() => void>();
   private snapshot: SidraSettings;
@@ -721,8 +771,9 @@ class FakeSettingsStore
       responseFontSizePx: DEFAULT_RESPONSE_FONT_SIZE_PX,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       transcriptSpeech: DEFAULT_TRANSCRIPT_SPEECH_SETTINGS,
+      promptEffort: "medium",
       ...overrides
-    };
+    } as SidraSettings;
   }
 
   getSnapshot(): SidraSettings {
@@ -774,6 +825,17 @@ class FakeSettingsStore
     for (const listener of this.listeners) listener();
   }
 
+  async savePromptEffort(nextPromptEffort: string): Promise<void> {
+    if (this.nextSaveError) throw this.nextSaveError;
+    if (this.savePromise) await this.savePromise;
+    this.promptEffortSaveCalls.push(nextPromptEffort);
+    this.snapshot = {
+      ...this.snapshot,
+      promptEffort: nextPromptEffort
+    } as SidraSettings;
+    for (const listener of this.listeners) listener();
+  }
+
   async saveAccentColor(nextAccentColor: string): Promise<void> {
     if (this.nextSaveError) throw this.nextSaveError;
     if (this.savePromise) await this.savePromise;
@@ -806,6 +868,11 @@ class FakeSettingsStore
 
   replaceTranscriptFontSizes(nextFontSizesPx: { promptFontSizePx: number; responseFontSizePx: number }): void {
     this.snapshot = { ...this.snapshot, ...nextFontSizesPx };
+    for (const listener of this.listeners) listener();
+  }
+
+  replacePromptEffort(nextPromptEffort: string): void {
+    this.snapshot = { ...this.snapshot, promptEffort: nextPromptEffort } as SidraSettings;
     for (const listener of this.listeners) listener();
   }
 

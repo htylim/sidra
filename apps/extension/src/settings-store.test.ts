@@ -28,11 +28,57 @@ const DEFAULT_FONT_SIZE_FIELDS = {
 const DEFAULT_ACCENT_FIELD = {
   accentColor: DEFAULT_ACCENT_COLOR
 };
+const DEFAULT_PROMPT_EFFORT_FIELD = {
+  promptEffort: "medium"
+};
 const DEFAULT_TRANSCRIPT_SPEECH_FIELD = {
   transcriptSpeech: DEFAULT_TRANSCRIPT_SPEECH_SETTINGS
 };
 
 describe("SettingsStore", () => {
+  it("settings_defaults_include_prompt_effort", async () => {
+    const store = new SettingsStore({ storage: new FakeSettingsStorage() });
+
+    await store.start();
+
+    expect(store.getSnapshot()).toMatchObject({ promptEffort: "medium" });
+  });
+
+  it("settings_parse_invalid_prompt_effort_to_default", async () => {
+    for (const promptEffort of ["", " ", "minimal", null, 1, true]) {
+      const store = new SettingsStore({
+        storage: new FakeSettingsStorage({
+          [SIDRA_SETTINGS_STORAGE_KEY]: { promptEffort }
+        })
+      });
+
+      await store.start();
+
+      expect(store.getSnapshot()).toMatchObject({ promptEffort: "medium" });
+    }
+  });
+
+  it("writes_prompt_effort_to_storage", async () => {
+    const storage = new FakeSettingsStorage({
+      [SIDRA_SETTINGS_STORAGE_KEY]: {
+        readableContentLimitCharacters: 5_000,
+        domContentLimitCharacters: 6_000,
+        quickActions: { enabled: false, actions: [{ id: "explain", label: "Explain", prompt: "Explain this" }] }
+      }
+    });
+    const store = new SettingsStore({ storage });
+    await store.start();
+
+    await (store as SettingsStore & { savePromptEffort(nextPromptEffort: string): Promise<void> }).savePromptEffort("high");
+
+    expect(storage.storedSnapshot()[SIDRA_SETTINGS_STORAGE_KEY]).toMatchObject({
+      readableContentLimitCharacters: 5_000,
+      domContentLimitCharacters: 6_000,
+      quickActions: { enabled: false, actions: [{ id: "explain", label: "Explain", prompt: "Explain this" }] },
+      promptEffort: "high"
+    });
+  });
+
   it("settings_defaults_include_transcript_speech", async () => {
     const store = new SettingsStore({ storage: new FakeSettingsStorage() });
 
@@ -108,6 +154,7 @@ describe("SettingsStore", () => {
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
       ...DEFAULT_ACCENT_FIELD,
+      ...DEFAULT_PROMPT_EFFORT_FIELD,
       ...DEFAULT_FONT_SIZE_FIELDS,
       ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
@@ -127,6 +174,7 @@ describe("SettingsStore", () => {
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: 42_000,
       ...DEFAULT_ACCENT_FIELD,
+      ...DEFAULT_PROMPT_EFFORT_FIELD,
       ...DEFAULT_FONT_SIZE_FIELDS,
       ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
@@ -221,6 +269,7 @@ describe("SettingsStore", () => {
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
       ...DEFAULT_ACCENT_FIELD,
+      ...DEFAULT_PROMPT_EFFORT_FIELD,
       ...DEFAULT_FONT_SIZE_FIELDS,
       ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
@@ -336,6 +385,7 @@ describe("SettingsStore", () => {
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: 42_000,
       ...DEFAULT_ACCENT_FIELD,
+      ...DEFAULT_PROMPT_EFFORT_FIELD,
       ...DEFAULT_FONT_SIZE_FIELDS,
       ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
@@ -358,6 +408,7 @@ describe("SettingsStore", () => {
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
       ...DEFAULT_ACCENT_FIELD,
+      ...DEFAULT_PROMPT_EFFORT_FIELD,
       ...DEFAULT_FONT_SIZE_FIELDS,
       ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
@@ -550,6 +601,7 @@ describe("SettingsStore", () => {
       domContentLimitCharacters: 444_000,
       quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
       ...DEFAULT_ACCENT_FIELD,
+      ...DEFAULT_PROMPT_EFFORT_FIELD,
       ...DEFAULT_FONT_SIZE_FIELDS,
       ...DEFAULT_TRANSCRIPT_SPEECH_FIELD
     });
@@ -733,6 +785,7 @@ describe("SettingsStore", () => {
           readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
           domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
           ...DEFAULT_ACCENT_FIELD,
+          ...DEFAULT_PROMPT_EFFORT_FIELD,
           ...DEFAULT_FONT_SIZE_FIELDS,
           ...DEFAULT_TRANSCRIPT_SPEECH_FIELD,
           quickActions: {
@@ -801,6 +854,7 @@ describe("SettingsStore", () => {
           readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
           domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
           ...DEFAULT_ACCENT_FIELD,
+          ...DEFAULT_PROMPT_EFFORT_FIELD,
           promptFontSizePx: 14,
           responseFontSizePx: 18,
           quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
@@ -823,6 +877,7 @@ describe("SettingsStore", () => {
           readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
           domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
           accentColor: "#2563eb",
+          ...DEFAULT_PROMPT_EFFORT_FIELD,
           ...DEFAULT_FONT_SIZE_FIELDS,
           quickActions: DEFAULT_QUICK_ACTIONS_SETTINGS,
           ...DEFAULT_TRANSCRIPT_SPEECH_FIELD

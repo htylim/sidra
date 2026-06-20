@@ -1,4 +1,4 @@
-import type { PageContext, PermissionDecision } from "@sidra/protocol";
+import type { PageContext, PermissionDecision, PromptEffort } from "@sidra/protocol";
 import type { BridgeSessionCoordinatorSnapshot } from "./bridge/session-coordinator";
 import type { CaptureMode } from "./capture-mode";
 import type { PageIdentity, PageKey } from "./page-key";
@@ -74,7 +74,7 @@ type UrlSessionRecord = {
 export type UrlSessionCoordinator = {
   getSnapshot(): BridgeSessionCoordinatorSnapshot;
   subscribe(listener: () => void): () => void;
-  sendPrompt(input: string | { prompt: string; pageContext?: PageContext; userPromptDisplay?: UserPromptDisplay }): boolean;
+  sendPrompt(input: string | { prompt: string; pageContext?: PageContext; promptEffort?: PromptEffort; userPromptDisplay?: UserPromptDisplay }): boolean;
   cancelTurn?(): boolean;
   recordCaptureUnavailable?(message: string): void;
   respondToPermission?(requestId: string, decision: PermissionDecision): boolean;
@@ -95,6 +95,13 @@ export type UrlSessionStoreSnapshot = {
 };
 
 type Listener = () => void;
+type PromptInput = string | { prompt?: string; promptEffort?: PromptEffort };
+type ContextPromptInput = {
+  prompt: string;
+  pageContext: PageContext;
+  promptEffort?: PromptEffort;
+  userPromptDisplay?: UserPromptDisplay;
+};
 
 const EMPTY_PAGE_KEY = "" as PageKey;
 const INITIAL_CONTEXT_STATE: ContextState = { status: "none", label: "No context sent yet" };
@@ -186,12 +193,15 @@ export class UrlSessionStore {
     this.emit();
   }
 
-  sendPrompt(prompt?: string): boolean {
+  sendPrompt(input?: PromptInput): boolean {
     const activeRecord = this.getActiveRecord();
     if (!activeRecord) return false;
 
-    const promptToSend = prompt ?? activeRecord.draftPrompt;
-    const accepted = activeRecord.coordinator.sendPrompt(promptToSend);
+    const promptToSend = typeof input === "object" ? input.prompt ?? activeRecord.draftPrompt : input ?? activeRecord.draftPrompt;
+    const promptEffort = typeof input === "object" ? input.promptEffort : undefined;
+    const accepted = activeRecord.coordinator.sendPrompt(
+      promptEffort ? { prompt: promptToSend, promptEffort } : promptToSend
+    );
     if (!accepted) return false;
 
     activeRecord.draftPrompt = "";
@@ -199,7 +209,7 @@ export class UrlSessionStore {
     return true;
   }
 
-  sendPromptWithContext(input: { prompt: string; pageContext: PageContext; userPromptDisplay?: UserPromptDisplay }): boolean {
+  sendPromptWithContext(input: ContextPromptInput): boolean {
     const activeRecord = this.getActiveRecord();
     if (!activeRecord) return false;
 

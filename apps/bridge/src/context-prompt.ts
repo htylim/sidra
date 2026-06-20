@@ -1,8 +1,9 @@
-import type { PageContext } from "@sidra/protocol";
+import type { PageContext, PromptEffort } from "@sidra/protocol";
 
 export type BridgeTurnInput = {
   prompt: string;
   pageContext?: PageContext;
+  promptEffort?: PromptEffort;
 };
 
 export function formatPromptForAgent(input: BridgeTurnInput): string {

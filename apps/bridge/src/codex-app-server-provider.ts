@@ -148,6 +148,7 @@ class CodexAppServerTurn {
         threadId: this.threadId,
         input: [toTextUserInput(input.prompt)],
         cwd: this.workingDirectory,
+        ...(input.promptEffort ? { effort: input.promptEffort } : {}),
         approvalPolicy: "on-request",
         approvalsReviewer: "user",
         sandboxPolicy: { type: "readOnly", networkAccess: false }

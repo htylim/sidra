@@ -318,6 +318,9 @@ class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" |
   private accentColor = DEFAULT_ACCENT_COLOR;
   private promptFontSizePx = DEFAULT_PROMPT_FONT_SIZE_PX;
   private responseFontSizePx = DEFAULT_RESPONSE_FONT_SIZE_PX;
+  private promptEffort = "medium";
+  private promptEffortSaveOverride?: (promptEffort: string) => Promise<void>;
+  private readonly promptEffortSaveResolvers: Array<() => void> = [];
   private quickActions: QuickActionsSettings;
 
   constructor(
@@ -352,9 +355,10 @@ class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" |
       accentColor: this.accentColor,
       promptFontSizePx: this.promptFontSizePx,
       responseFontSizePx: this.responseFontSizePx,
+      promptEffort: this.promptEffort,
       quickActions: this.quickActions,
       transcriptSpeech: DEFAULT_TRANSCRIPT_SPEECH_SETTINGS
-    };
+    } as SidraSettings;
   }
 
   setLimit(readableContentLimitCharacters: number): void {
@@ -381,6 +385,38 @@ class FakeSettingsStore implements Pick<SettingsStore, "start" | "getSnapshot" |
   setAccentColor(accentColor: string): void {
     this.accentColor = accentColor;
     this.emit();
+  }
+
+  setPromptEffort(promptEffort: string): void {
+    this.promptEffort = promptEffort;
+    this.emit();
+  }
+
+  async savePromptEffort(promptEffort: string): Promise<void> {
+    if (this.promptEffortSaveOverride) {
+      await this.promptEffortSaveOverride(promptEffort);
+      return;
+    }
+    this.promptEffort = promptEffort;
+    this.emit();
+  }
+
+  delayPromptEffortSaves(): void {
+    this.promptEffortSaveOverride = () => new Promise(() => undefined);
+  }
+
+  holdPromptEffortSaves(): void {
+    this.promptEffortSaveOverride = async (promptEffort) => {
+      await new Promise<void>((resolve) => {
+        this.promptEffortSaveResolvers.push(resolve);
+      });
+      this.promptEffort = promptEffort;
+      this.emit();
+    };
+  }
+
+  resolveNextPromptEffortSave(): void {
+    this.promptEffortSaveResolvers.shift()?.();
   }
 
   holdReadiness(): void {
@@ -765,7 +801,7 @@ describe("SidePanelController", () => {
 
     expect(ports[0].postedMessages).toEqual([
       { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "hello" }
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "hello", promptEffort: "medium" }
     ]);
   });
 
@@ -785,7 +821,7 @@ describe("SidePanelController", () => {
 
     expect(ports[0].postedMessages).toEqual([
       { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first" }
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first", promptEffort: "medium" }
     ]);
   });
 
@@ -977,7 +1013,7 @@ describe("SidePanelController", () => {
 
     expect(ports[1].postedMessages).toEqual([
       { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "second" }
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "second", promptEffort: "medium" }
     ]);
   });
 
@@ -1141,7 +1177,7 @@ describe("SidePanelController newChat", () => {
 
     expect(ports[0].postedMessages).toEqual([
       { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first", promptEffort: "medium" },
       { type: "session.reset", version: 3, clientSessionId: "client-1" }
     ]);
 
@@ -1149,9 +1185,9 @@ describe("SidePanelController newChat", () => {
 
     expect(ports[0].postedMessages).toEqual([
       { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first", promptEffort: "medium" },
       { type: "session.reset", version: 3, clientSessionId: "client-1" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "after reset" }
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "after reset", promptEffort: "medium" }
     ]);
   });
 
@@ -1225,7 +1261,7 @@ describe("SidePanelController newChat", () => {
 
     expect(ports[0].postedMessages).toEqual([
       { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first", promptEffort: "medium" },
       { type: "session.reset", version: 3, clientSessionId: "client-1" }
     ]);
 
@@ -1235,7 +1271,8 @@ describe("SidePanelController newChat", () => {
       type: "session.send",
       version: 3,
       clientSessionId: "client-1",
-      prompt: "after reset"
+      prompt: "after reset",
+      promptEffort: "medium"
     });
   });
 
@@ -1722,6 +1759,7 @@ describe("SidePanelController Capture + Send", () => {
       version: 3,
       clientSessionId: "client-1",
       prompt: "summarize",
+      promptEffort: "medium",
       pageContext: captureService.nextResult.status === "captured" ? captureService.nextResult.pageContext : undefined
     });
     expect(controller.getSnapshot().activeSession.contextState.status).toBe("attached");
@@ -1771,6 +1809,7 @@ describe("SidePanelController Capture + Send", () => {
       version: 3,
       clientSessionId: "client-1",
       prompt: "summarize",
+      promptEffort: "medium",
       pageContext
     });
     expect(controller.getSnapshot().activeSession.contextState.status).toBe("full_dom_attached");
@@ -2190,9 +2229,174 @@ describe("SidePanelController Capture + Send", () => {
       type: "session.send",
       version: 3,
       clientSessionId: "client-1",
-      prompt: "plain"
+      prompt: "plain",
+      promptEffort: "medium"
     });
     expect(captureService.captureCalls).toBe(0);
+  });
+
+  it("plain_send_includes_current_prompt_effort", () => {
+    const settingsStore = new FakeSettingsStore(1_000);
+    settingsStore.setPromptEffort("high");
+    const { controller, ports } = createHarnessWithOptions({ settingsStore });
+    ports[0].emitMessage(bridgeReady());
+
+    expect(controller.sendPrompt("plain")).toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.send",
+      version: 3,
+      clientSessionId: "client-1",
+      prompt: "plain",
+      promptEffort: "high"
+    });
+  });
+
+  it("plain_send_uses_prompt_effort_update_before_async_settings_save_finishes", () => {
+    const settingsStore = new FakeSettingsStore(1_000);
+    settingsStore.delayPromptEffortSaves();
+    const { controller, ports } = createHarnessWithOptions({ settingsStore });
+    ports[0].emitMessage(bridgeReady());
+
+    controller.updatePromptEffort("high");
+    expect(controller.sendPrompt("plain")).toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.send",
+      version: 3,
+      clientSessionId: "client-1",
+      prompt: "plain",
+      promptEffort: "high"
+    });
+  });
+
+  it("plain_send_keeps_latest_prompt_effort_after_older_save_emits", async () => {
+    const settingsStore = new FakeSettingsStore(1_000);
+    settingsStore.holdPromptEffortSaves();
+    const { controller, ports } = createHarnessWithOptions({ settingsStore });
+    ports[0].emitMessage(bridgeReady());
+
+    controller.updatePromptEffort("high");
+    controller.updatePromptEffort("xhigh");
+    settingsStore.resolveNextPromptEffortSave();
+    await waitForControllerSettings();
+
+    expect(controller.getSnapshot().display.promptEffort).toBe("xhigh");
+    expect(controller.sendPrompt("plain")).toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual({
+      type: "session.send",
+      version: 3,
+      clientSessionId: "client-1",
+      prompt: "plain",
+      promptEffort: "xhigh"
+    });
+
+    settingsStore.resolveNextPromptEffortSave();
+    await waitForControllerSettings();
+    expect(controller.getSnapshot().display.promptEffort).toBe("xhigh");
+  });
+
+  it("capture_and_send_includes_current_prompt_effort", async () => {
+    const captureService = new FakeCaptureService();
+    const settingsStore = new FakeSettingsStore(1_000);
+    settingsStore.setPromptEffort("low");
+    const { controller, ports } = createHarnessWithOptions({ captureService, settingsStore });
+    ports[0].emitMessage(bridgeReady());
+
+    await expect(controller.captureAndSend("summarize")).resolves.toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        prompt: "summarize",
+        promptEffort: "low",
+        pageContext: expect.any(Object)
+      })
+    );
+  });
+
+  it("capture_send_uses_prompt_effort_update_before_async_settings_save_finishes", async () => {
+    const captureService = new FakeCaptureService();
+    const settingsStore = new FakeSettingsStore(1_000);
+    settingsStore.delayPromptEffortSaves();
+    const { controller, ports } = createHarnessWithOptions({ captureService, settingsStore });
+    ports[0].emitMessage(bridgeReady());
+
+    controller.updatePromptEffort("xhigh");
+    await expect(controller.captureAndSend("summarize")).resolves.toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        prompt: "summarize",
+        promptEffort: "xhigh",
+        pageContext: expect.any(Object)
+      })
+    );
+  });
+
+  it("capture_send_keeps_latest_prompt_effort_after_older_save_emits", async () => {
+    const captureService = new FakeCaptureService();
+    const settingsStore = new FakeSettingsStore(1_000);
+    settingsStore.holdPromptEffortSaves();
+    const { controller, ports } = createHarnessWithOptions({ captureService, settingsStore });
+    ports[0].emitMessage(bridgeReady());
+
+    controller.updatePromptEffort("low");
+    controller.updatePromptEffort("xhigh");
+    settingsStore.resolveNextPromptEffortSave();
+    await waitForControllerSettings();
+
+    await expect(controller.captureAndSend("summarize")).resolves.toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        prompt: "summarize",
+        promptEffort: "xhigh",
+        pageContext: expect.any(Object)
+      })
+    );
+  });
+
+  it("capture_send_snapshots_prompt_effort_before_async_capture", async () => {
+    const captureService = new FakeCaptureService();
+    const settingsStore = new FakeSettingsStore(1_000);
+    settingsStore.setPromptEffort("high");
+    let resolveCapture: ((result: CaptureDocumentResult) => void) | undefined;
+    captureService.captureActivePageDocument = vi.fn(async () => {
+      captureService.captureCalls += 1;
+      return await new Promise<CaptureDocumentResult>((resolve) => {
+        resolveCapture = resolve;
+      });
+    });
+    const { controller, ports } = createHarnessWithOptions({ captureService, settingsStore });
+    ports[0].emitMessage(bridgeReady());
+
+    const send = controller.captureAndSend("summarize");
+    settingsStore.setPromptEffort("low");
+    resolveCapture?.({
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/slow-capture"),
+      capturedDocument: capturedDocument()
+    });
+    await expect(send).resolves.toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        prompt: "summarize",
+        promptEffort: "high"
+      })
+    );
   });
 });
 
@@ -2236,7 +2440,8 @@ describe("SidePanelController send mode", () => {
       type: "session.send",
       version: 3,
       clientSessionId: "client-1",
-      prompt: "follow up"
+      prompt: "follow up",
+      promptEffort: "medium"
     });
   });
 
@@ -2282,7 +2487,8 @@ describe("SidePanelController send mode", () => {
       type: "session.send",
       version: 3,
       clientSessionId: "client-1",
-      prompt: "plain first"
+      prompt: "plain first",
+      promptEffort: "medium"
     });
   });
 
@@ -2493,6 +2699,19 @@ describe("SidePanelController quick actions", () => {
     expect(controller.getSnapshot().display.responseFontSizePx).toBe(19);
   });
 
+  it("side_panel_snapshot_exposes_live_prompt_effort", async () => {
+    const settingsStore = new FakeSettingsStore(1_000);
+    const { controller, ports } = createHarnessWithOptions({ settingsStore });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    expect(controller.getSnapshot().display).toMatchObject({ promptEffort: "medium" });
+
+    settingsStore.setPromptEffort("xhigh");
+
+    expect(controller.getSnapshot().display).toMatchObject({ promptEffort: "xhigh" });
+  });
+
   it("does_not_expose_quick_actions_before_initial_settings_load", async () => {
     const settingsStore = new FakeSettingsStore(1_000);
     settingsStore.holdReadiness();
@@ -2536,6 +2755,26 @@ describe("SidePanelController quick actions", () => {
       })
     );
     expect(captureService.captureCalls).toBe(1);
+  });
+
+  it("quick_action_includes_current_prompt_effort", async () => {
+    const captureService = new FakeCaptureService();
+    const settingsStore = new FakeSettingsStore(1_000);
+    settingsStore.setPromptEffort("xhigh");
+    const { controller, ports } = createHarnessWithOptions({ captureService, settingsStore });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+
+    await expect(controller.sendQuickAction("summarize-page")).resolves.toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        prompt: DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT,
+        promptEffort: "xhigh"
+      })
+    );
   });
 
   it("sendQuickAction_sends_full_prompt_but_marks_transcript_as_quick_action", async () => {

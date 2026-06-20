@@ -59,6 +59,50 @@ describe("createCodexAppServerProvider", () => {
     await expect(events).resolves.toEqual([{ type: "assistant.text.delta", text: "Hello" }, { type: "assistant.done" }]);
   });
 
+  it("passes_prompt_effort_as_turn_start_effort", async () => {
+    const appServer = createFakeAppServer();
+    appServer.nextResponse = { thread: { id: "thread-1" } };
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+    const session = await provider.createSession();
+    appServer.nextResponse = { turn: { id: "turn-1" } };
+
+    const events = collectAsync(
+      session.send(
+        { prompt: "Summarize", promptEffort: "high" } as Parameters<typeof session.send>[0] & { promptEffort: "high" },
+        new AbortController().signal,
+        ignoredPermissions()
+      )
+    );
+    await vi.waitFor(() => expect(appServer.requests.some((request) => request.method === "turn/start")).toBe(true));
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+    await events;
+
+    const turnStart = appServer.requests.find((request) => request.method === "turn/start");
+    expect(turnStart).toEqual({
+      method: "turn/start",
+      params: {
+        threadId: "thread-1",
+        input: [{ type: "text", text: "Summarize", text_elements: [] }],
+        cwd: "/tmp/sidra-workspace",
+        effort: "high",
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+        sandboxPolicy: { type: "readOnly", networkAccess: false }
+      }
+    });
+    expect(turnStart?.params).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("omits_turn_start_effort_only_when_provider_input_has_no_effort", async () => {
+    const { appServer, events } = await startProviderTurn("Summarize");
+
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+    await events;
+
+    const turnStart = appServer.requests.find((request) => request.method === "turn/start");
+    expect(turnStart?.params).not.toHaveProperty("effort");
+  });
+
   it("inserts_markdown_paragraph_boundary_between_agent_message_items", async () => {
     const { appServer, events } = await startProviderTurn("Summarize");
 
@@ -718,6 +762,28 @@ describe("Codex App Server thread naming", () => {
     await runCompletedSend(appServer, session, { prompt: "Second", displayTitleSource: { prompt: "Second prompt" } }, "turn-2");
 
     expect(appServer.requests.filter((request) => request.method === "thread/name/set")).toHaveLength(1);
+  });
+
+  it("subsequent_turns_send_current_prompt_effort_after_app_server_sticky_override", async () => {
+    const appServer = createFakeAppServer();
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+    const session = await provider.createSession();
+
+    await runCompletedSend(
+      appServer,
+      session,
+      { prompt: "First", promptEffort: "high" } as Parameters<typeof session.send>[0] & { promptEffort: "high" },
+      "turn-1"
+    );
+    await runCompletedSend(
+      appServer,
+      session,
+      { prompt: "Second", promptEffort: "low" } as Parameters<typeof session.send>[0] & { promptEffort: "low" },
+      "turn-2"
+    );
+
+    const turnStarts = appServer.requests.filter((request) => request.method === "turn/start");
+    expect(turnStarts.map((request) => (request.params as { effort?: string }).effort)).toEqual(["high", "low"]);
   });
 
   it("continues_turn_start_when_thread_name_set_fails", async () => {

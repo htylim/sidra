@@ -8,6 +8,7 @@ import {
   type PermissionDecision,
   type PermissionRequest,
   type PermissionRequestMetadata,
+  type PromptEffort,
   type ProviderId
 } from "@sidra/protocol";
 import { formatPromptForAgent, type BridgeTurnInput } from "./context-prompt.js";
@@ -21,6 +22,7 @@ export type ProviderDisplayTitleSource = {
 
 export type AgentSendInput = {
   prompt: string;
+  promptEffort?: PromptEffort;
   displayTitleSource?: ProviderDisplayTitleSource;
 };
 
@@ -150,6 +152,7 @@ export class BridgeSessionManager {
       : { prompt: input.prompt };
     const providerInput: AgentSendInput = {
       prompt: formatPromptForAgent(input),
+      ...(input.promptEffort ? { promptEffort: input.promptEffort } : {}),
       displayTitleSource
     };
 

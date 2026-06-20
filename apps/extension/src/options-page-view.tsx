@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import type { SpeechVoice } from "@sidra/protocol";
+import { DEFAULT_PROMPT_EFFORT, PROMPT_EFFORT_VALUES, type PromptEffort, type SpeechVoice } from "@sidra/protocol";
 import type { SpeechCredentialClientSnapshot } from "./bridge/speech-credentials";
 import { SidraIcon, type IconName } from "./sidra-icon";
 import type { SpeechPreviewSettings, SpeechPreviewSnapshot } from "./speech-preview-client";
@@ -27,6 +27,7 @@ type OptionsSettingsStore = Pick<
   | "whenReady"
   | "subscribe"
   | "saveQuickActions"
+  | "savePromptEffort"
   | "saveAccentColor"
   | "saveTranscriptFontSizesPx"
   | "saveTranscriptSpeechSettings"
@@ -79,6 +80,7 @@ export function OptionsPageView(props: {
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
   const quickActionsDirtyRef = useRef(false);
+  const promptEffortDirtyRef = useRef(false);
   const accentColorDirtyRef = useRef(false);
   const transcriptFontSizesDirtyRef = useRef(false);
   const transcriptSpeechDirtyRef = useRef(false);
@@ -88,6 +90,7 @@ export function OptionsPageView(props: {
   const [touchedFields, setTouchedFields] = useState<TouchedQuickActionFields>({});
   const [promptFontSizeDraft, setPromptFontSizeDraft] = useState("");
   const [responseFontSizeDraft, setResponseFontSizeDraft] = useState("");
+  const [promptEffortDraft, setPromptEffortDraft] = useState<PromptEffort>(DEFAULT_PROMPT_EFFORT);
   const [accentColorDraft, setAccentColorDraft] = useState(DEFAULT_ACCENT_COLOR);
   const [promptFontSizeTouched, setPromptFontSizeTouched] = useState(false);
   const [responseFontSizeTouched, setResponseFontSizeTouched] = useState(false);
@@ -170,6 +173,13 @@ export function OptionsPageView(props: {
     setSaveSuccessMessage(undefined);
   }
 
+  function markPromptEffortDirty() {
+    dirtyRef.current = true;
+    promptEffortDirtyRef.current = true;
+    setDirty(true);
+    setSaveSuccessMessage(undefined);
+  }
+
   function markAccentColorDirty() {
     dirtyRef.current = true;
     accentColorDirtyRef.current = true;
@@ -205,6 +215,7 @@ export function OptionsPageView(props: {
       if (cancelled) return;
       const initialSettings = props.settingsStore.getSnapshot();
       setQuickActions(initialSettings.quickActions);
+      setPromptEffortDraft(initialSettings.promptEffort);
       setAccentColorDraft(initialSettings.accentColor);
       setPromptFontSizeDraft(String(initialSettings.promptFontSizePx));
       setResponseFontSizeDraft(String(initialSettings.responseFontSizePx));
@@ -219,6 +230,9 @@ export function OptionsPageView(props: {
         if (!quickActionsDirtyRef.current) {
           setQuickActions(nextSettings.quickActions);
           setTouchedFields(touchedFieldsForInvalidActions(nextSettings.quickActions.actions));
+        }
+        if (!promptEffortDirtyRef.current) {
+          setPromptEffortDraft(nextSettings.promptEffort);
         }
         if (!accentColorDirtyRef.current) {
           setAccentColorDraft(nextSettings.accentColor);
@@ -269,6 +283,9 @@ export function OptionsPageView(props: {
     if (!quickActionsDirtyRef.current) {
       setQuickActions(nextSettings.quickActions);
       setTouchedFields(touchedFieldsForInvalidActions(nextSettings.quickActions.actions));
+    }
+    if (!promptEffortDirtyRef.current) {
+      setPromptEffortDraft(nextSettings.promptEffort);
     }
     if (!accentColorDirtyRef.current) {
       setAccentColorDraft(nextSettings.accentColor);
@@ -338,6 +355,9 @@ export function OptionsPageView(props: {
       if (quickActionsDirtyRef.current) {
         await props.settingsStore.saveQuickActions(quickActions);
       }
+      if (promptEffortDirtyRef.current) {
+        await props.settingsStore.savePromptEffort(promptEffortDraft);
+      }
       if (accentColorDirtyRef.current) {
         await props.settingsStore.saveAccentColor(accentColorDraft);
       }
@@ -358,6 +378,7 @@ export function OptionsPageView(props: {
       }
       dirtyRef.current = false;
       quickActionsDirtyRef.current = false;
+      promptEffortDirtyRef.current = false;
       accentColorDirtyRef.current = false;
       transcriptFontSizesDirtyRef.current = false;
       transcriptSpeechDirtyRef.current = false;
@@ -440,12 +461,39 @@ export function OptionsPageView(props: {
 
       <div className="options-layout">
         <nav className="options-nav" aria-label="Settings sections">
+          <a href="#agent-settings">Agent</a>
           <a href="#display-settings">Display</a>
           <a href="#speech-settings">Read aloud</a>
           <a href="#quick-actions-settings">Quick actions</a>
         </nav>
 
         <div className="options-content">
+      <section className="options-section" id="agent-settings" aria-labelledby="agent-settings-heading">
+        <div className="options-section-heading">
+          <h2 id="agent-settings-heading">Agent</h2>
+          <p>Choose the default effort used for new prompts.</p>
+        </div>
+        <label className="font-size-setting settings-row prompt-effort-setting">
+          <span>Prompt effort</span>
+          <select
+            aria-label="Prompt effort"
+            value={promptEffortDraft}
+            disabled={controlsDisabled}
+            onChange={(event) => {
+              markPromptEffortDirty();
+              setSaveError(undefined);
+              setPromptEffortDraft(event.currentTarget.value as PromptEffort);
+            }}
+          >
+            {PROMPT_EFFORT_VALUES.map((promptEffort) => (
+              <option key={promptEffort} value={promptEffort}>
+                {promptEffortLabel(promptEffort)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </section>
+
       <section className="options-section" id="display-settings" aria-labelledby="display-settings-heading">
         <div className="options-section-heading">
           <h2 id="display-settings-heading">Display</h2>
@@ -816,6 +864,19 @@ export function OptionsPageView(props: {
       </div>
     </main>
   );
+}
+
+function promptEffortLabel(promptEffort: PromptEffort): string {
+  switch (promptEffort) {
+    case "low":
+      return "Low";
+    case "medium":
+      return "Medium";
+    case "high":
+      return "High";
+    case "xhigh":
+      return "Extra high";
+  }
 }
 
 function credentialStatusText(snapshot: SpeechCredentialClientSnapshot): string {

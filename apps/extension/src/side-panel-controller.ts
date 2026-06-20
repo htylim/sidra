@@ -1,4 +1,4 @@
-import type { PageContext, PermissionDecision, ProviderId } from "@sidra/protocol";
+import type { PageContext, PermissionDecision, PromptEffort, ProviderId } from "@sidra/protocol";
 import { createChromeActivePageTracker } from "./active-page";
 import {
   CaptureService,
@@ -37,6 +37,7 @@ export type SidePanelSnapshot = {
   };
   display: {
     accentColor: string;
+    promptEffort: PromptEffort;
     promptFontSizePx: number;
     responseFontSizePx: number;
   };
@@ -74,6 +75,7 @@ export type SidePanelController = {
   respondToPermission(requestId: string, decision: PermissionDecision): boolean;
   updateCaptureMode(captureMode: CaptureMode): void;
   updateSendMode(sendMode: SendMode): void;
+  updatePromptEffort(promptEffort: PromptEffort): void;
   updateDraftPrompt(text: string): void;
   toggleSpeechForTranscriptEntry(entryId: string, text: string): boolean;
   newChat(): void;
@@ -102,14 +104,16 @@ type SidePanelControllerOptions = {
   activePageTracker?: ActivePageSource;
   captureService?: CaptureServiceLike;
   captureGateway?: CaptureGateway;
-  settingsStore?: Pick<SettingsStore, "start" | "getSnapshot" | "whenReady" | "subscribe">;
+  settingsStore?: ControllerSettingsInput;
   speechPlaybackGateway?: TranscriptSpeechPlaybackGateway;
   createSpeechRequestId?: () => string;
   openOptionsPage?: () => void;
   providerId?: ProviderId;
 };
 
-type ControllerSettingsSource = Pick<SettingsStore, "start" | "getSnapshot" | "whenReady" | "subscribe">;
+type ControllerSettingsInput = Pick<SettingsStore, "start" | "getSnapshot" | "whenReady" | "subscribe"> &
+  Partial<Pick<SettingsStore, "savePromptEffort">>;
+type ControllerSettingsSource = Pick<SettingsStore, "start" | "getSnapshot" | "whenReady" | "subscribe" | "savePromptEffort">;
 
 /**
  * Composes the bridge transport and session coordinator into the side panel API.
@@ -126,7 +130,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       subscribe: () => () => undefined,
       start: async () => undefined
     } satisfies ActivePageSource);
-  const settingsStore = options.settingsStore ?? createDefaultControllerSettingsSource();
+  const settingsStore = createControllerSettingsSource(options.settingsStore);
   const captureService =
     options.captureService ??
     (options.captureGateway
@@ -161,6 +165,20 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
   let snapshotSettingsReady = settingsReady;
   let snapshotSpeechSnapshot = speechSnapshot;
   let shutdownStarted = false;
+  let pendingPromptEffort: PromptEffort | undefined;
+  let promptEffortSaveQueue: Promise<void> = Promise.resolve();
+
+  const applySettingsSnapshot = (nextSettingsSnapshot: SidraSettings) => {
+    if (pendingPromptEffort && nextSettingsSnapshot.promptEffort !== pendingPromptEffort) {
+      settingsSnapshot = { ...nextSettingsSnapshot, promptEffort: pendingPromptEffort };
+    } else {
+      if (pendingPromptEffort && nextSettingsSnapshot.promptEffort === pendingPromptEffort) {
+        pendingPromptEffort = undefined;
+      }
+      settingsSnapshot = nextSettingsSnapshot;
+    }
+    speechController.updateSettings(settingsSnapshot.transcriptSpeech);
+  };
 
   const refreshSnapshot = () => {
     const nextBridgeSnapshot = connection.getSnapshot();
@@ -214,8 +232,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
   });
   const unsubscribeUrlSessionStore = urlSessionStore.subscribe(emit);
   const unsubscribeSettingsStore = settingsStore.subscribe(() => {
-    settingsSnapshot = settingsStore.getSnapshot();
-    speechController.updateSettings(settingsSnapshot.transcriptSpeech);
+    applySettingsSnapshot(settingsStore.getSnapshot());
     emit();
   });
   const unsubscribeSpeechController = speechController.subscribe(emit);
@@ -223,8 +240,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
   void settingsStore.start();
   void settingsStore.whenReady().then(() => {
     if (shutdownStarted) return;
-    settingsSnapshot = settingsStore.getSnapshot();
-    speechController.updateSettings(settingsSnapshot.transcriptSpeech);
+    applySettingsSnapshot(settingsStore.getSnapshot());
     settingsReady = true;
     emit();
   });
@@ -240,6 +256,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     if (!snapshot.bridge.canUseChat) return false;
     if (activeSessionIsBusy(snapshot.activeSession)) return false;
 
+    const promptEffort = settingsSnapshot.promptEffort;
     const preCaptureMode = snapshot.activeSession.captureMode;
     const preCaptureSendMode = snapshot.activeSession.sendMode;
     const captureResult = await captureService.captureActivePageDocument();
@@ -261,6 +278,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       const accepted = urlSessionStore.sendPromptWithContext({
         prompt: normalizedPrompt,
         pageContext,
+        promptEffort,
         userPromptDisplay
       });
       emit();
@@ -292,7 +310,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       refreshSnapshot();
       if (!snapshot.bridge.canUseChat) return false;
       if (activeSessionIsBusy(snapshot.activeSession)) return false;
-      return urlSessionStore.sendPrompt(prompt);
+      return urlSessionStore.sendPrompt({ prompt, promptEffort: settingsSnapshot.promptEffort });
     },
     captureAndSend: captureAndSendCommand,
     sendQuickAction: async (actionId) => {
@@ -315,6 +333,18 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     },
     updateCaptureMode: (captureMode) => urlSessionStore.updateActiveCaptureMode(captureMode),
     updateSendMode: (sendMode) => urlSessionStore.updateActiveSendMode(sendMode),
+    updatePromptEffort: (promptEffort) => {
+      pendingPromptEffort = promptEffort;
+      if (settingsSnapshot.promptEffort !== promptEffort) {
+        settingsSnapshot = { ...settingsSnapshot, promptEffort };
+        emit();
+      }
+      promptEffortSaveQueue = promptEffortSaveQueue
+        .catch(() => undefined)
+        .then(() => settingsStore.savePromptEffort(promptEffort))
+        .catch(() => undefined);
+      void promptEffortSaveQueue;
+    },
     updateDraftPrompt: (text) => urlSessionStore.updateActiveDraftPrompt(text),
     toggleSpeechForTranscriptEntry: (entryId, text) => speechController.toggleSpeech({ entryId, text }),
     newChat: () => {
@@ -363,6 +393,7 @@ function createSnapshot(
     },
     display: {
       accentColor: settings.accentColor,
+      promptEffort: settings.promptEffort,
       promptFontSizePx: settings.promptFontSizePx,
       responseFontSizePx: settings.responseFontSizePx
     },
@@ -441,12 +472,24 @@ function activePageIdentityMatches(first: PageIdentity, second: PageIdentity): b
   return true;
 }
 
+function createControllerSettingsSource(settingsStore?: ControllerSettingsInput): ControllerSettingsSource {
+  if (!settingsStore) return createDefaultControllerSettingsSource();
+  return {
+    getSnapshot: settingsStore.getSnapshot.bind(settingsStore),
+    start: settingsStore.start.bind(settingsStore),
+    whenReady: settingsStore.whenReady.bind(settingsStore),
+    subscribe: settingsStore.subscribe.bind(settingsStore),
+    savePromptEffort: settingsStore.savePromptEffort?.bind(settingsStore) ?? (async () => undefined)
+  };
+}
+
 function createDefaultControllerSettingsSource(): ControllerSettingsSource {
   const defaultSettingsSource = createDefaultSettingsSource();
   return {
     getSnapshot: defaultSettingsSource.getSnapshot,
     start: async () => undefined,
     whenReady: defaultSettingsSource.whenReady,
+    savePromptEffort: async () => undefined,
     subscribe: () => () => undefined
   };
 }

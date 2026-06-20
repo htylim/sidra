@@ -1,5 +1,5 @@
-import { type CSSProperties, useEffect, useState } from "react";
-import type { PermissionDecision } from "@sidra/protocol";
+import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
+import { PROMPT_EFFORT_VALUES, type PermissionDecision, type PromptEffort } from "@sidra/protocol";
 import type { CaptureMode } from "./capture-mode";
 import { CurrentPageCard } from "./current-page-card";
 import { SidraIcon } from "./sidra-icon";
@@ -20,6 +20,7 @@ export function SidePanelView(props: {
   onDraftPromptChange(text: string): void;
   onCaptureModeChange(captureMode: CaptureMode): void;
   onSendModeChange(sendMode: SendMode): void;
+  onPromptEffortChange(promptEffort: PromptEffort): void;
   onNewChat(): void;
   onRetryBridge(): void;
   onOpenSettings(): void;
@@ -27,6 +28,11 @@ export function SidePanelView(props: {
   clipboard?: TranscriptClipboardGateway;
 }) {
   const [sendModeMenuOpen, setSendModeMenuOpen] = useState(false);
+  const [effortMenuOpen, setEffortMenuOpen] = useState(false);
+  const [focusedPromptEffort, setFocusedPromptEffort] = useState<PromptEffort>(props.snapshot.display.promptEffort);
+  const effortControlRef = useRef<HTMLDivElement>(null);
+  const effortTriggerRef = useRef<HTMLButtonElement>(null);
+  const effortOptionRefs = useRef<Partial<Record<PromptEffort, HTMLDivElement | null>>>({});
   const bridgeBlocked = props.snapshot.bridge.availability.status !== "ready";
   const pageUnsupported = props.snapshot.activePage.status === "unsupported";
   const chatUnavailable = !props.snapshot.bridge.canUseChat || pageUnsupported;
@@ -41,25 +47,75 @@ export function SidePanelView(props: {
   const draftPrompt = props.snapshot.activeSession.draftPrompt;
   const sendFullDom = props.snapshot.activeSession.captureMode === "full_dom";
   const sendMode = props.snapshot.activeSession.sendMode;
+  const promptEffort = props.snapshot.display.promptEffort;
+  const promptEffortLabelText = promptEffortLabel(promptEffort);
+  const promptEffortMenuId = "prompt-effort-menu";
   const sendActionLabel = sendMode === "capture" ? "Capture + Send" : "Send";
   const composerContextHint = getComposerContextHint(props.snapshot.activeSession);
 
   useEffect(() => {
     if (promptEntryDisabled) {
       setSendModeMenuOpen(false);
+      setEffortMenuOpen(false);
     }
   }, [promptEntryDisabled]);
 
   useEffect(() => {
+    if (!effortMenuOpen) {
+      setFocusedPromptEffort(promptEffort);
+    }
+  }, [effortMenuOpen, promptEffort]);
+
+  useEffect(() => {
+    if (!effortMenuOpen) return;
+    effortOptionRefs.current[focusedPromptEffort]?.focus();
+  }, [effortMenuOpen, focusedPromptEffort]);
+
+  useEffect(() => {
+    if (!effortMenuOpen) return;
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (effortControlRef.current?.contains(target)) return;
+      setEffortMenuOpen(false);
+    };
+    const closeOnOutsideFocus = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (effortControlRef.current?.contains(target)) return;
+      setEffortMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("focusin", closeOnOutsideFocus);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("focusin", closeOnOutsideFocus);
+    };
+  }, [effortMenuOpen]);
+
+  useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (effortMenuOpen) {
+        event.preventDefault();
+        setEffortMenuOpen(false);
+        effortTriggerRef.current?.focus();
+        return;
+      }
+      if (sendModeMenuOpen) {
+        event.preventDefault();
+        setSendModeMenuOpen(false);
+        return;
+      }
       if (cancelDisabled) return;
       props.onCancelTurn();
     };
 
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [cancelDisabled, props.onCancelTurn]);
+  }, [cancelDisabled, effortMenuOpen, props.onCancelTurn, sendModeMenuOpen]);
 
   function submitPrompt() {
     if (promptEntryDisabled) return;
@@ -78,6 +134,78 @@ export function SidePanelView(props: {
   function selectSendMode(nextSendMode: SendMode) {
     props.onSendModeChange(nextSendMode);
     setSendModeMenuOpen(false);
+  }
+
+  function openPromptEffortMenu(nextFocusedPromptEffort: PromptEffort = promptEffort) {
+    if (promptEntryDisabled) return;
+    setFocusedPromptEffort(nextFocusedPromptEffort);
+    setSendModeMenuOpen(false);
+    setEffortMenuOpen(true);
+  }
+
+  function selectPromptEffort(nextPromptEffort: PromptEffort) {
+    if (promptEntryDisabled) return;
+    props.onPromptEffortChange(nextPromptEffort);
+    setFocusedPromptEffort(nextPromptEffort);
+    setEffortMenuOpen(false);
+    effortTriggerRef.current?.focus();
+  }
+
+  function handlePromptEffortTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (promptEntryDisabled) return;
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      openPromptEffortMenu(promptEffort);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      openPromptEffortMenu(promptEffort);
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      openPromptEffortMenu(PROMPT_EFFORT_VALUES[0]);
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      openPromptEffortMenu(PROMPT_EFFORT_VALUES[PROMPT_EFFORT_VALUES.length - 1]);
+    }
+  }
+
+  function handlePromptEffortOptionKeyDown(event: ReactKeyboardEvent<HTMLDivElement>, effort: PromptEffort) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setFocusedPromptEffort(getAdjacentPromptEffort(effort, 1));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setFocusedPromptEffort(getAdjacentPromptEffort(effort, -1));
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      setFocusedPromptEffort(PROMPT_EFFORT_VALUES[0]);
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      setFocusedPromptEffort(PROMPT_EFFORT_VALUES[PROMPT_EFFORT_VALUES.length - 1]);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setEffortMenuOpen(false);
+      effortTriggerRef.current?.focus();
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      selectPromptEffort(effort);
+    }
   }
 
   const pageCard = getPageCardDisplay(props.snapshot);
@@ -173,6 +301,7 @@ export function SidePanelView(props: {
           <label className="composer-dom-toggle">
             <input
               type="checkbox"
+              aria-label="Include full page HTML"
               checked={sendFullDom}
               disabled={promptEntryDisabled}
               onChange={(event) => {
@@ -180,8 +309,57 @@ export function SidePanelView(props: {
                 props.onCaptureModeChange(event.currentTarget.checked ? "full_dom" : "readable");
               }}
             />
-            <span>Include full page HTML</span>
+            <span aria-hidden="true">Full DOM</span>
           </label>
+          <div className="composer-effort-control" ref={effortControlRef}>
+            <button
+              ref={effortTriggerRef}
+              type="button"
+              className="composer-effort-trigger"
+              aria-label={`Prompt effort: ${promptEffortLabelText}`}
+              aria-haspopup="listbox"
+              aria-expanded={effortMenuOpen}
+              aria-controls={promptEffortMenuId}
+              title="Prompt effort"
+              disabled={promptEntryDisabled}
+              onClick={() => {
+                if (promptEntryDisabled) return;
+                if (effortMenuOpen) {
+                  setEffortMenuOpen(false);
+                  return;
+                }
+                openPromptEffortMenu(promptEffort);
+              }}
+              onKeyDown={handlePromptEffortTriggerKeyDown}
+            >
+              <span>{promptEffortLabelText}</span>
+              <SidraIcon name={effortMenuOpen ? "chevron-up" : "chevron-down"} className="composer-effort-chevron" />
+            </button>
+            {effortMenuOpen && !promptEntryDisabled ? (
+              <div className="composer-effort-menu" id={promptEffortMenuId} role="listbox" aria-label="Prompt effort options">
+                {PROMPT_EFFORT_VALUES.map((effort) => {
+                  const selected = effort === promptEffort;
+                  return (
+                    <div
+                      key={effort}
+                      ref={(element) => {
+                        effortOptionRefs.current[effort] = element;
+                      }}
+                      className="composer-effort-option"
+                      role="option"
+                      aria-selected={selected}
+                      tabIndex={effort === focusedPromptEffort ? 0 : -1}
+                      onClick={() => selectPromptEffort(effort)}
+                      onKeyDown={(event) => handlePromptEffortOptionKeyDown(event, effort)}
+                    >
+                      <SidraIcon name="check" className="composer-effort-check" />
+                      <span>{promptEffortLabel(effort)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
           {showCancelButton ? (
             <button
               type="button"
@@ -209,6 +387,7 @@ export function SidePanelView(props: {
                 aria-controls="send-mode-menu"
                 disabled={promptEntryDisabled}
                 onClick={() => {
+                  setEffortMenuOpen(false);
                   setSendModeMenuOpen((open) => !open);
                 }}
               >
@@ -242,6 +421,25 @@ export function SidePanelView(props: {
       </footer>
     </main>
   );
+}
+
+function promptEffortLabel(promptEffort: PromptEffort): string {
+  switch (promptEffort) {
+    case "low":
+      return "Low";
+    case "medium":
+      return "Medium";
+    case "high":
+      return "High";
+    case "xhigh":
+      return "Extra high";
+  }
+}
+
+function getAdjacentPromptEffort(promptEffort: PromptEffort, offset: number): PromptEffort {
+  const currentIndex = PROMPT_EFFORT_VALUES.indexOf(promptEffort);
+  const nextIndex = (currentIndex + offset + PROMPT_EFFORT_VALUES.length) % PROMPT_EFFORT_VALUES.length;
+  return PROMPT_EFFORT_VALUES[nextIndex];
 }
 
 function getChatWorkState(session: SidePanelSnapshot["activeSession"]): ChatWorkState {

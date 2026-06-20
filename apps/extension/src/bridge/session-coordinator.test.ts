@@ -1,4 +1,4 @@
-import type { AgentEvent, BridgeToExtension, ExtensionToBridge, SessionErrorCode, ProviderId } from "@sidra/protocol";
+import { serializedJsonByteLength, type AgentEvent, type BridgeToExtension, type ExtensionToBridge, type SessionErrorCode, type ProviderId } from "@sidra/protocol";
 import { describe, expect, it } from "vitest";
 import {
   BridgeSessionCoordinator,
@@ -1265,6 +1265,38 @@ describe("BridgeSessionCoordinator rich assistant events", () => {
 });
 
 describe("BridgeSessionCoordinator page context", () => {
+  it("queued_startup_prompt_uses_effort_selected_at_send_time", () => {
+    const { coordinator, transport } = createHarness();
+
+    coordinator.sendPrompt({ prompt: "first", promptEffort: "high" } as PromptSubmission & { promptEffort: string });
+    transport.emitMessage(sessionStarted());
+
+    expect(transport.postedMessages).toContainEqual({
+      type: "session.send",
+      version: 3,
+      clientSessionId: "client-1",
+      prompt: "first",
+      promptEffort: "high"
+    });
+  });
+
+  it("payload_preflight_includes_prompt_effort", () => {
+    const messageWithoutPromptEffort = {
+      type: "session.send" as const,
+      version: 3 as const,
+      clientSessionId: "client-1",
+      prompt: "a"
+    };
+    const byteLength = serializedJsonByteLength(messageWithoutPromptEffort);
+    if (!byteLength.ok) throw new Error("test message must be serializable");
+    const { coordinator, transport } = createHarness("codex", byteLength.byteLength);
+
+    expect(coordinator.sendPrompt({ prompt: "a", promptEffort: "xhigh" } as PromptSubmission & { promptEffort: string })).toBe(false);
+
+    expect(transport.postedMessages).toEqual([]);
+    expect(coordinator.getSnapshot().lastError).toBe("Payload is too large.");
+  });
+
   it("sends_page_context_with_the_matching_session_send_message", () => {
     const { coordinator, transport } = createHarness();
     const pageContext = readablePageContext();

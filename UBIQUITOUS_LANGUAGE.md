@@ -9,6 +9,7 @@
 | **Settings Page** | The dedicated extension options page where persistent Sidra configuration is edited. | Settings modal, preferences panel |
 | **Current Page Card** | The persistent side-panel card showing the active page identity and context state for the visible URL session. | Context card, page card, page context card |
 | **Prompt Composer** | The bottom input area where the user writes a prompt and chooses the send mode. | Input box, message box, chat input |
+| **Prompt Effort** | The user-selected reasoning depth attached to a prompt. The prompt effort value can be low, medium, high, or extra high; medium is the default. It is structured turn metadata, not part of the prompt text or reasoning summary. | Reasoning prompt, effort prompt, prompt text effort |
 | **Send DOM Toggle** | The inline composer checkbox that switches capture mode from readable content to full DOM. | Prompt options, context menu, settings popover |
 | **Quick Action** | A configured shortcut prompt shown in an empty URL session. | Suggested prompt, canned prompt, shortcut |
 
