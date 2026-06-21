@@ -24,7 +24,7 @@ describe("TranscriptSpeechController", () => {
     expect(transport.postedMessages).toEqual([
       {
         type: "speech.synthesize",
-        version: 3,
+        version: 4,
         requestId: "speech-1",
         text: "Read this bubble.",
         options: {
@@ -53,9 +53,9 @@ describe("TranscriptSpeechController", () => {
 
     controller.toggleSpeech({ entryId: "entry-1", text: "First" });
     controller.toggleSpeech({ entryId: "entry-2", text: "Second" });
-    transport.emit({ type: "speech.started", version: 3, requestId: "speech-2", mimeType: "audio/mpeg" });
-    transport.emit({ type: "speech.chunk", version: 3, requestId: "speech-1", sequence: 0, audioBase64: "AQ==" });
-    transport.emit({ type: "speech.chunk", version: 3, requestId: "speech-2", sequence: 0, audioBase64: "Ag==" });
+    transport.emit({ type: "speech.started", version: 4, requestId: "speech-2", mimeType: "audio/mpeg" });
+    transport.emit({ type: "speech.chunk", version: 4, requestId: "speech-1", sequence: 0, audioBase64: "AQ==" });
+    transport.emit({ type: "speech.chunk", version: 4, requestId: "speech-2", sequence: 0, audioBase64: "Ag==" });
 
     expect(playback.chunks).toEqual([[2]]);
   });
@@ -63,7 +63,7 @@ describe("TranscriptSpeechController", () => {
   it("speech_controller_plays_after_first_chunk", async () => {
     const { controller, transport, playback } = await createStartedController();
 
-    transport.emit({ type: "speech.chunk", version: 3, requestId: "speech-1", sequence: 0, audioBase64: "AQI=" });
+    transport.emit({ type: "speech.chunk", version: 4, requestId: "speech-1", sequence: 0, audioBase64: "AQI=" });
 
     expect(playback.playCalls).toBe(1);
     expect(playback.chunks).toEqual([[1, 2]]);
@@ -73,7 +73,7 @@ describe("TranscriptSpeechController", () => {
   it("speech_done_returns_to_idle_after_playback_ends", async () => {
     const { controller, transport, playback } = await createPlayingController();
 
-    transport.emit({ type: "speech.done", version: 3, requestId: "speech-1" });
+    transport.emit({ type: "speech.done", version: 4, requestId: "speech-1" });
     expect(controller.getSnapshot()).toMatchObject({ activeEntryId: "entry-1", status: "playing" });
 
     playback.finishPlayback();
@@ -87,7 +87,7 @@ describe("TranscriptSpeechController", () => {
     const { controller, transport, playback } = await createPlayingController(["speech-1", "speech-2"]);
     const firstEnded = playback.endCallbacks[0];
     controller.toggleSpeech({ entryId: "entry-2", text: "Second bubble." });
-    transport.emit({ type: "speech.started", version: 3, requestId: "speech-2", mimeType: "audio/mpeg" });
+    transport.emit({ type: "speech.started", version: 4, requestId: "speech-2", mimeType: "audio/mpeg" });
 
     firstEnded?.();
 
@@ -99,7 +99,7 @@ describe("TranscriptSpeechController", () => {
 
     transport.emit({
       type: "speech.error",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       code: "openai_api_key_missing",
       message: "OpenAI API key is not configured."
@@ -147,7 +147,7 @@ describe("TranscriptSpeechController", () => {
 
     controller.toggleSpeech({ entryId: "entry-1", text: "Read this." });
 
-    expect(transport.postedMessages.at(-1)).toEqual({ type: "speech.cancel", version: 3, requestId: "speech-1" });
+    expect(transport.postedMessages.at(-1)).toEqual({ type: "speech.cancel", version: 4, requestId: "speech-1" });
     expect(playback.stopCalls).toBe(1);
     expect(controller.getSnapshot()).toMatchObject({ status: "idle", activeEntryId: undefined });
   });
@@ -158,7 +158,7 @@ describe("TranscriptSpeechController", () => {
     controller.toggleSpeech({ entryId: "entry-2", text: "Second bubble." });
 
     expect(playback.stopCalls).toBe(1);
-    expect(transport.postedMessages).toContainEqual({ type: "speech.cancel", version: 3, requestId: "speech-1" });
+    expect(transport.postedMessages).toContainEqual({ type: "speech.cancel", version: 4, requestId: "speech-1" });
     expect(transport.postedMessages.at(-1)).toMatchObject({
       type: "speech.synthesize",
       requestId: "speech-2",
@@ -173,8 +173,8 @@ describe("TranscriptSpeechController", () => {
     first.controller.stopActiveSpeech();
 
     expect(first.playback.stopCalls).toBe(2);
-    expect(first.transport.postedMessages).toContainEqual({ type: "speech.cancel", version: 3, requestId: "speech-1" });
-    expect(first.transport.postedMessages).toContainEqual({ type: "speech.cancel", version: 3, requestId: "speech-2" });
+    expect(first.transport.postedMessages).toContainEqual({ type: "speech.cancel", version: 4, requestId: "speech-1" });
+    expect(first.transport.postedMessages).toContainEqual({ type: "speech.cancel", version: 4, requestId: "speech-2" });
   });
 
   it("local_speech_stop_does_not_post_cancel_to_bridge", async () => {
@@ -183,7 +183,7 @@ describe("TranscriptSpeechController", () => {
     controller.stopLocalSpeech();
 
     expect(playback.stopCalls).toBe(1);
-    expect(transport.postedMessages).not.toContainEqual({ type: "speech.cancel", version: 3, requestId: "speech-1" });
+    expect(transport.postedMessages).not.toContainEqual({ type: "speech.cancel", version: 4, requestId: "speech-1" });
     expect(controller.getSnapshot()).toMatchObject({ activeEntryId: undefined, status: "idle" });
   });
 
@@ -193,7 +193,7 @@ describe("TranscriptSpeechController", () => {
     controller.updateSettings({ ...DEFAULT_TRANSCRIPT_SPEECH_SETTINGS, enabled: false });
 
     expect(playback.stopCalls).toBe(1);
-    expect(transport.postedMessages).toContainEqual({ type: "speech.cancel", version: 3, requestId: "speech-1" });
+    expect(transport.postedMessages).toContainEqual({ type: "speech.cancel", version: 4, requestId: "speech-1" });
     expect(controller.getSnapshot()).toMatchObject({ enabled: false, status: "idle" });
   });
 
@@ -267,13 +267,13 @@ async function createStartedController(requestIds = ["speech-1"]) {
     createRequestId: () => requestIds.shift() ?? "speech-x"
   });
   controller.toggleSpeech({ entryId: "entry-1", text: "Read this." });
-  transport.emit({ type: "speech.started", version: 3, requestId: "speech-1", mimeType: "audio/mpeg" });
+  transport.emit({ type: "speech.started", version: 4, requestId: "speech-1", mimeType: "audio/mpeg" });
   return { controller, transport, playback };
 }
 
 async function createPlayingController(requestIds = ["speech-1"]) {
   const started = await createStartedController(requestIds);
-  started.transport.emit({ type: "speech.chunk", version: 3, requestId: "speech-1", sequence: 0, audioBase64: "AQ==" });
+  started.transport.emit({ type: "speech.chunk", version: 4, requestId: "speech-1", sequence: 0, audioBase64: "AQ==" });
   return started;
 }
 

@@ -18,6 +18,8 @@ type SnapshotOptions = {
   favIconUrl?: string;
   contextLabel?: string;
   contextState?: SidePanelSnapshot["activeSession"]["contextState"];
+  contextAttachments?: SidePanelSnapshot["activeSession"]["contextAttachments"];
+  pageSelection?: SidePanelSnapshot["pageSelection"];
   captureMode?: SidePanelSnapshot["activeSession"]["captureMode"];
   sendMode?: SidePanelSnapshot["activeSession"]["sendMode"];
   draftPrompt?: string;
@@ -100,6 +102,7 @@ function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
       responseFontSizePx: options.responseFontSizePx ?? 17
     },
     speech: { enabled: true, status: "idle" },
+    pageSelection: options.pageSelection ?? { status: "idle" },
     activePage: {
       status: "ready",
       pageKey: "https://example.com/article" as PageKey,
@@ -114,6 +117,7 @@ function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
       sendMode: options.sendMode ?? "capture",
       draftPrompt: options.draftPrompt ?? "",
       contextState: options.contextState ?? { status: "none", label: "No context sent yet" },
+      contextAttachments: options.contextAttachments ?? [],
       transcript: options.transcript ?? [],
       pendingPromptCount: options.pendingPromptCount ?? 0,
       sessionStarted: false,
@@ -136,6 +140,38 @@ function snapshotForUnsupportedPage(): SidePanelSnapshot {
       clientSessionId: "",
       transcript: []
     }
+  };
+}
+
+function textAttachmentSnapshot(
+  overrides: Partial<SidePanelSnapshot["activeSession"]["contextAttachments"][number]> = {}
+): SidePanelSnapshot["activeSession"]["contextAttachments"][number] {
+  return {
+    id: "selected-1",
+    source: "selected_text",
+    label: "Selected text",
+    pageTitle: "Example Article",
+    url: "https://example.com/article",
+    preview: "Pricing paragraph from Example article",
+    capturedAt: "2026-05-10T12:00:00.000Z",
+    ...overrides
+  };
+}
+
+function snapshotAttachmentSnapshot(
+  overrides: Partial<SidePanelSnapshot["activeSession"]["contextAttachments"][number]> = {}
+): SidePanelSnapshot["activeSession"]["contextAttachments"][number] {
+  return {
+    id: "snapshot-1",
+    source: "area_snapshot",
+    label: "Area snapshot",
+    pageTitle: "Example Article",
+    url: "https://example.com/article",
+    preview: "Selected page area",
+    thumbnailDataUrl: "data:image/png;base64,thumbnail",
+    imageDimensions: { width: 612, height: 284 },
+    capturedAt: "2026-05-10T12:00:00.000Z",
+    ...overrides
   };
 }
 
@@ -194,6 +230,10 @@ function renderInteractiveSnapshot(
     onQuickAction(actionId: string): boolean | Promise<boolean>;
     onCancelTurn(): boolean;
     onRespondToPermission(requestId: string, decision: "allow_once" | "allow_for_session" | "deny"): boolean;
+    onStartPageSelection(mode: "text" | "snapshot"): boolean | Promise<boolean>;
+    onCancelPageSelection(): boolean;
+    onRemoveContextAttachment(attachmentId: string): boolean;
+    onClearContextAttachments(): boolean;
     onDraftPromptChange(text: string): void;
     onCaptureModeChange(captureMode: SidePanelSnapshot["activeSession"]["captureMode"]): void;
     onSendModeChange(sendMode: SidePanelSnapshot["activeSession"]["sendMode"]): void;
@@ -215,6 +255,10 @@ function renderInteractiveSnapshot(
         onQuickAction={overrides.onQuickAction ?? (() => false)}
         onCancelTurn={overrides.onCancelTurn ?? (() => false)}
         onRespondToPermission={overrides.onRespondToPermission ?? (() => false)}
+        onStartPageSelection={overrides.onStartPageSelection ?? (() => false)}
+        onCancelPageSelection={overrides.onCancelPageSelection ?? (() => false)}
+        onRemoveContextAttachment={overrides.onRemoveContextAttachment ?? (() => false)}
+        onClearContextAttachments={overrides.onClearContextAttachments ?? (() => false)}
         onDraftPromptChange={(text) => {
           currentSnapshot = {
             ...currentSnapshot,
@@ -257,6 +301,10 @@ function renderInteractiveSnapshot(
         onQuickAction={overrides.onQuickAction ?? (() => false)}
         onCancelTurn={overrides.onCancelTurn ?? (() => false)}
         onRespondToPermission={overrides.onRespondToPermission ?? (() => false)}
+        onStartPageSelection={overrides.onStartPageSelection ?? (() => false)}
+        onCancelPageSelection={overrides.onCancelPageSelection ?? (() => false)}
+        onRemoveContextAttachment={overrides.onRemoveContextAttachment ?? (() => false)}
+        onClearContextAttachments={overrides.onClearContextAttachments ?? (() => false)}
         onDraftPromptChange={(text) => {
           currentSnapshot = {
             ...currentSnapshot,
@@ -2125,6 +2173,235 @@ describe("SidePanelView rich transcript rendering", () => {
     const status = screen.getByRole("status");
     expect(status.textContent).toBe("Assistant turn cancelled");
     expect(status.closest(".status-card")?.className).toContain("cancelled");
+  });
+});
+
+describe("SidePanelView page selection attachments", () => {
+  it("renders_select_page_context_toolbar_button_states", () => {
+    renderInteractiveSnapshot(snapshotForPage());
+
+    const selectButton = screen.getByRole("button", { name: "Select page context", pressed: false });
+    expect(selectButton.getAttribute("title")).toBe("Select page context");
+    expect(selectButton.getAttribute("aria-expanded")).toBe("false");
+    expect(selectButton.getAttribute("aria-controls")).toBe("page-selection-mode-menu");
+    expect(screen.getByRole("button", { name: "Settings" })).not.toBeNull();
+    expect(selectButton.compareDocumentPosition(screen.getByRole("button", { name: "Settings" }))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+  });
+
+  it("opens_page_selection_mode_controls_and_starts_text_selection", async () => {
+    const user = userEvent.setup();
+    const onStartPageSelection = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage(), { onStartPageSelection });
+
+    await user.click(screen.getByRole("button", { name: "Select page context" }));
+    const group = screen.getByRole("group", { name: "Page selection mode" });
+
+    expect(group.id).toBe("page-selection-mode-menu");
+    expect(screen.getByRole("button", { name: "Select page context" }).getAttribute("aria-expanded")).toBe("true");
+    expect(group).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "Text" }));
+
+    expect(onStartPageSelection).toHaveBeenCalledWith("text");
+  });
+
+  it("starts_snapshot_selection_from_mode_controls", async () => {
+    const user = userEvent.setup();
+    const onStartPageSelection = vi.fn(() => true);
+    renderInteractiveSnapshot(snapshotForPage(), { onStartPageSelection });
+
+    await user.click(screen.getByRole("button", { name: "Select page context" }));
+    await user.click(screen.getByRole("button", { name: "Snapshot" }));
+
+    expect(onStartPageSelection).toHaveBeenCalledWith("snapshot");
+  });
+
+  it("shows_active_selecting_toolbar_state_and_clicking_it_cancels_selection", async () => {
+    const user = userEvent.setup();
+    const onCancelPageSelection = vi.fn(() => true);
+    renderInteractiveSnapshot(
+      snapshotForPage({ pageSelection: { status: "selecting", requestId: "selection-1", mode: "text" } }),
+      { onCancelPageSelection }
+    );
+
+    const selectButton = screen.getByRole("button", { name: "Select page context", pressed: true });
+    expect(screen.getByText("Selecting")).not.toBeNull();
+
+    await user.click(selectButton);
+
+    expect(onCancelPageSelection).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps_active_selection_cancellable_if_a_turn_becomes_busy", async () => {
+    const user = userEvent.setup();
+    const onCancelPageSelection = vi.fn(() => true);
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        pageSelection: { status: "selecting", requestId: "selection-1", mode: "snapshot" },
+        turnInFlight: true,
+        canCancelTurn: true
+      }),
+      { onCancelPageSelection }
+    );
+
+    const selectButton = screen.getByRole("button", { name: "Select page context", pressed: true });
+    expect(selectButton).toHaveProperty("disabled", false);
+
+    await user.click(selectButton);
+
+    expect(onCancelPageSelection).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables_prompt_controls_and_quick_actions_while_selecting_page_context", async () => {
+    const user = userEvent.setup();
+    const onCaptureAndSend = vi.fn(() => true);
+    const onQuickAction = vi.fn(() => true);
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        pageSelection: { status: "selecting", requestId: "selection-1", mode: "text" },
+        draftPrompt: "summarize",
+        quickActions: [{ id: "summarize-page", label: "Summarize this page" }]
+      }),
+      { onCaptureAndSend, onQuickAction }
+    );
+
+    expect(screen.getByRole("textbox")).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Capture + Send" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Summarize this page" })).toHaveProperty("disabled", true);
+
+    await user.click(screen.getByRole("button", { name: "Capture + Send" }));
+    await user.click(screen.getByRole("button", { name: "Summarize this page" }));
+
+    expect(onCaptureAndSend).not.toHaveBeenCalled();
+    expect(onQuickAction).not.toHaveBeenCalled();
+  });
+
+  it("disables_selection_toolbar_on_unsupported_pages", () => {
+    renderInteractiveSnapshot(snapshotForUnsupportedPage());
+
+    expect(screen.getByRole("button", { name: "Select page context" })).toHaveProperty("disabled", true);
+  });
+
+  it("disables_selection_toolbar_while_the_active_session_is_busy", () => {
+    renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: true }));
+
+    expect(screen.getByRole("button", { name: "Select page context" })).toHaveProperty("disabled", true);
+  });
+
+  it("renders_text_attachment_with_preview_and_remove", async () => {
+    const user = userEvent.setup();
+    const onRemoveContextAttachment = vi.fn(() => true);
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        contextAttachments: [textAttachmentSnapshot()]
+      }),
+      { onRemoveContextAttachment }
+    );
+
+    const tray = screen.getByRole("region", { name: "Context attachments" });
+    expect(tray).not.toBeNull();
+    expect(screen.getByText("Selected text")).not.toBeNull();
+    expect(tray.querySelector(".attachment-source")?.textContent).toBe("Example Article");
+    expect(screen.getByText("Pricing paragraph from Example article")).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Remove Selected text attachment" }));
+
+    expect(onRemoveContextAttachment).toHaveBeenCalledWith("selected-1");
+  });
+
+  it("renders_snapshot_attachment_with_thumbnail_dimensions_and_remove", async () => {
+    const user = userEvent.setup();
+    const onRemoveContextAttachment = vi.fn(() => true);
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        contextAttachments: [snapshotAttachmentSnapshot()]
+      }),
+      { onRemoveContextAttachment }
+    );
+
+    expect(screen.getByText("Area snapshot")).not.toBeNull();
+    expect(screen.getByRole("region", { name: "Context attachments" }).querySelector(".attachment-source")?.textContent).toBe(
+      "Example Article"
+    );
+    expect(screen.getByText("Selected page area, 612 x 284")).not.toBeNull();
+    expect(screen.getByRole("img", { name: "Area snapshot thumbnail" })).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Remove Area snapshot attachment" }));
+
+    expect(onRemoveContextAttachment).toHaveBeenCalledWith("snapshot-1");
+  });
+
+  it("renders_clear_all_for_multiple_attachments", async () => {
+    const user = userEvent.setup();
+    const onClearContextAttachments = vi.fn(() => true);
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        contextAttachments: [textAttachmentSnapshot(), snapshotAttachmentSnapshot()]
+      }),
+      { onClearContextAttachments }
+    );
+
+    await user.click(screen.getByRole("button", { name: "Clear all" }));
+
+    expect(onClearContextAttachments).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders_too_large_text_attachment_as_warning_state", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        contextAttachments: [
+          textAttachmentSnapshot({
+            id: "selected-too-large",
+            label: "Selected text too large",
+            tone: "warning",
+            preview: "Selection is too large to attach."
+          })
+        ]
+      })
+    );
+
+    expect(screen.getByText("Selected text too large").closest(".attachment-row")?.className).toContain("warning");
+    expect(screen.getByText("Selection is too large to attach.")).not.toBeNull();
+  });
+
+  it("shows_selection_error_without_mutating_attachments", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        pageSelection: { status: "failed", message: "The page changed before the snapshot was captured." },
+        contextAttachments: [snapshotAttachmentSnapshot()]
+      })
+    );
+
+    expect(screen.getByRole("alert").textContent).toBe("The page changed before the snapshot was captured.");
+    expect(screen.getByText("Area snapshot")).not.toBeNull();
+  });
+
+  it.each([
+    "Could not start page selection on this page.",
+    "The selected area is too large to attach.",
+    "Image input was rejected before the turn started."
+  ])("renders_selection_or_send_failure_message: %s", (message) => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        pageSelection: { status: "failed", message },
+        contextAttachments: [textAttachmentSnapshot()]
+      })
+    );
+
+    expect(screen.getByRole("alert").textContent).toBe(message);
+    expect(screen.getByText("Selected text")).not.toBeNull();
+  });
+
+  it("updates_composer_hint_when_attachments_exist", () => {
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        contextAttachments: [textAttachmentSnapshot(), snapshotAttachmentSnapshot()]
+      })
+    );
+
+    expect(screen.getAllByText("Context attachments").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("2 attachments will be sent with the page capture.")).not.toBeNull();
   });
 });
 

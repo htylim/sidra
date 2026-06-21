@@ -29,6 +29,10 @@ function SidePanel() {
       onQuickAction={sidePanelController.sendQuickAction}
       onCancelTurn={sidePanelController.cancelTurn}
       onRespondToPermission={sidePanelController.respondToPermission}
+      onStartPageSelection={sidePanelController.startPageSelection}
+      onCancelPageSelection={sidePanelController.cancelPageSelection}
+      onRemoveContextAttachment={sidePanelController.removeContextAttachment}
+      onClearContextAttachments={sidePanelController.clearContextAttachments}
       onDraftPromptChange={sidePanelController.updateDraftPrompt}
       onCaptureModeChange={sidePanelController.updateCaptureMode}
       onSendModeChange={sidePanelController.updateSendMode}

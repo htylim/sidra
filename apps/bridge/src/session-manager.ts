@@ -10,7 +10,7 @@ import {
   type PermissionRequestMetadata,
   type ProviderId
 } from "@sidra/protocol";
-import { formatPromptForAgent, type BridgeTurnInput } from "./context-prompt.js";
+import { formatPromptForAgent, formatPromptForAgentParts, type AgentInputPart, type BridgeTurnInput } from "./context-prompt.js";
 
 export type SafeProviderTurnEvent = AgentEvent;
 
@@ -21,6 +21,7 @@ export type ProviderDisplayTitleSource = {
 
 export type AgentSendInput = {
   prompt: string;
+  parts?: AgentInputPart[];
   displayTitleSource?: ProviderDisplayTitleSource;
 };
 
@@ -150,6 +151,7 @@ export class BridgeSessionManager {
       : { prompt: input.prompt };
     const providerInput: AgentSendInput = {
       prompt: formatPromptForAgent(input),
+      parts: formatPromptForAgentParts(input),
       displayTitleSource
     };
 

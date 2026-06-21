@@ -1,0 +1,865 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Page Selection Capture Implementation Plan</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #202124;
+      --muted: #5f6368;
+      --line: #dadce0;
+      --soft: #f8fafd;
+      --accent: #0f766e;
+      --accent-soft: #e6f4f1;
+      --warn: #8a5a00;
+      --warn-soft: #fff7df;
+      --code: #f1f3f4;
+    }
+    body {
+      margin: 0;
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: white;
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 40px 28px 72px;
+    }
+    h1, h2, h3 { line-height: 1.2; margin: 0; }
+    h1 { font-size: 32px; letter-spacing: 0; }
+    h2 { font-size: 22px; margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--line); }
+    h3 { font-size: 17px; margin-top: 24px; }
+    p { margin: 10px 0; }
+    ul, ol { padding-left: 22px; }
+    li { margin: 6px 0; }
+    a { color: #0b57d0; }
+    code {
+      font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: var(--code);
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
+    pre {
+      overflow: auto;
+      background: var(--code);
+      border-radius: 6px;
+      padding: 12px;
+      font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 14px 0 20px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: var(--soft); }
+    .meta {
+      margin-top: 14px;
+      color: var(--muted);
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 4px 14px;
+    }
+    .callout {
+      margin: 16px 0;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      border-radius: 6px;
+    }
+    .warning {
+      border-left-color: var(--warn);
+      background: var(--warn-soft);
+    }
+    .toc a { text-decoration: none; }
+    .phase {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 16px 0;
+    }
+    .phase h3 { margin-top: 0; }
+    .checklist label { display: block; margin: 7px 0; }
+    .decision { font-weight: 600; color: var(--accent); }
+    .mock-grid { display: grid; gap: 18px; margin: 16px 0; }
+    .mock-figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; overflow: hidden; }
+    .mock-figure figcaption { padding: 10px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+    .mock-svg { display: block; width: 100%; height: auto; background: #f6f8f7; }
+    .mock-svg text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17201f; }
+    .mock-svg .muted { fill: #62716d; }
+    .mock-svg .small { font-size: 11px; }
+    .mock-svg .label { font-size: 12px; font-weight: 650; }
+    .mock-svg .title { font-size: 15px; font-weight: 700; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Page Selection Capture Implementation Plan</h1>
+  <div class="meta">
+    <span>Status</span><span>Implementation spec</span>
+    <span>Date</span><span>2026-06-20</span>
+    <span>Scope</span><span>Sidra Chrome extension page-context capture</span>
+    <span>Owner modules</span><span><code>apps/extension</code>, <code>packages/protocol</code>, <code>apps/bridge</code></span>
+  </div>
+
+  <section class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#goal">Goal</a></li>
+      <li><a href="#current-state">Current State</a></li>
+      <li><a href="#codex-research">Codex In-Browser Research</a></li>
+      <li><a href="#product-behavior">Product Behavior</a></li>
+      <li><a href="#ui-mockups">UI Mockups</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#data-model">Data Model</a></li>
+      <li><a href="#edge-cases">Edge Cases</a></li>
+      <li><a href="#implementation-plan">Implementation Plan</a></li>
+      <li><a href="#test-map">Phase Test Map</a></li>
+      <li><a href="#validation">Validation</a></li>
+      <li><a href="#references">References</a></li>
+      <li><a href="#non-goals">Non-Goals</a></li>
+    </ol>
+  </section>
+
+  <section id="goal">
+    <h2>Goal</h2>
+    <p>Add a toolbar-driven page selection mode with two distinct capture modes.</p>
+    <table>
+      <thead>
+        <tr><th>Mode</th><th>User interaction</th><th>Attachment result</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Text selection</td>
+          <td>The cursor changes to text selection. The user clicks, holds, drags over page text, and releases.</td>
+          <td>Sidra attaches the selected text as untrusted context.</td>
+        </tr>
+        <tr>
+          <td>Area snapshot</td>
+          <td>The cursor changes to a crosshair. The user clicks, holds, drags a rectangle, and releases.</td>
+          <td>Sidra captures the selected visible area as an image snapshot and attaches that image as untrusted context.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>The resulting attachment is added to the composer for the active page session. It is included in the next accepted send, whether that send is plain <code>Send</code>, <code>Capture + Send</code>, or a quick action.</p>
+    <p>The composer shows attachments inside the composer box. Text attachments show a preview. Image snapshot attachments show a thumbnail, dimensions, source page, and remove control.</p>
+    <div class="callout">
+      <p><span class="decision">Decision:</span> Area snapshot capture is an image attachment, not text extraction from the selected rectangle. All page-derived text and images enter the bridge as untrusted context, same as current <code>Capture + Send</code> page context.</p>
+    </div>
+  </section>
+
+  <section id="current-state">
+    <h2>Current State</h2>
+    <table>
+      <thead>
+        <tr><th>Area</th><th>Current behavior</th><th>Relevant files</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Capture service</td>
+          <td>Queries the active tab, injects <code>captureCurrentDocumentSnapshot</code>, then builds readable or full DOM page context. Capture is explicit.</td>
+          <td><code>apps/extension/src/capture-service.ts</code>, <code>apps/extension/src/capture-script.ts</code></td>
+        </tr>
+        <tr>
+          <td>Side-panel controller</td>
+          <td><code>captureAndSendCommand</code> always captures the active page document before sending context.</td>
+          <td><code>apps/extension/src/side-panel-controller.ts</code></td>
+        </tr>
+        <tr>
+          <td>UI toolbar</td>
+          <td>The header currently has Settings and New chat icon buttons. Capture controls live in the composer split button and the full DOM checkbox.</td>
+          <td><code>apps/extension/src/side-panel-view.tsx</code>, <code>apps/extension/src/styles.css</code></td>
+        </tr>
+        <tr>
+          <td>Protocol</td>
+          <td><code>PageContext</code> supports <code>readable</code>, <code>full_dom</code>, and <code>metadata_only</code>. The parser is strict and rejects unknown keys and unknown kinds.</td>
+          <td><code>packages/protocol/src/index.ts</code></td>
+        </tr>
+        <tr>
+          <td>Bridge prompt and provider input</td>
+          <td>The bridge currently wraps text page context as untrusted JSON before the user request. <code>BridgeTurnInput</code> and <code>AgentSendInput</code> are text-only today, and <code>CodexAppServerProvider</code> sends <code>turn/start</code> with one text item. Image attachments require a provider-neutral multimodal turn model plus a Codex app-server mapping that preserves the same untrusted-context boundary.</td>
+          <td><code>apps/bridge/src/context-prompt.ts</code>, <code>apps/bridge/src/session-manager.ts</code>, <code>apps/bridge/src/codex-app-server-provider.ts</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="codex-research">
+    <h2>Codex In-Browser Research</h2>
+    <p>Local Codex app assets were inspected from <code>/Applications/Codex.app</code>, version <code>26.616.41845</code>. The relevant webview chunks were extracted read-only from <code>Contents/Resources/app.asar</code>.</p>
+    <table>
+      <thead>
+        <tr><th>Observed asset</th><th>Behavior to imitate</th><th>Sidra adaptation</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>webview/assets/annotation-mode-button-*.js</code></td>
+          <td>Annotation is a toolbar mode button with <code>aria-pressed</code>, inactive icon-only width, and active labeled width. Active state changes tint and hover background.</td>
+          <td>Add a compact <code>Select page context</code> toolbar button. When active, it expands enough to show <code>Selecting</code>, uses <code>aria-pressed="true"</code>, and uses Sidra accent tint.</td>
+        </tr>
+        <tr>
+          <td><code>webview/assets/annotate-*.js</code></td>
+          <td>Uses a dedicated annotation icon.</td>
+          <td>Add a selection-oriented Lucide icon to <code>SidraIcon</code>, for example <code>ScanText</code> exposed as <code>scan-text</code>.</td>
+        </tr>
+        <tr>
+          <td><code>webview/assets/browser-use-settings-*.js</code></td>
+          <td>Browser-use settings include annotation screenshot behavior with an option limited to drag-selected areas.</td>
+          <td>Sidra area snapshot mode should capture the selected rectangle as a PNG image attachment. It should not OCR or downgrade that image to text.</td>
+        </tr>
+        <tr>
+          <td><code>webview/assets/browser-sidebar-manager-*.js</code></td>
+          <td>The browser host tracks browser-use active state, tab-capture active state, capture-surface size, viewport size, and a cursor overlay host.</td>
+          <td>Treat selection as a transient mode with explicit active/cancel state, request IDs, cursor changes, viewport geometry, screenshot crop geometry, and stale-result rejection.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>Inference from these assets: Codex treats annotation as an explicit browser mode over the current webview or capture surface. Sidra should copy that interaction shape, including image snapshots for drag-selected areas, while keeping every page-derived attachment untrusted.</p>
+  </section>
+
+  <section id="product-behavior">
+    <h2>Product Behavior</h2>
+    <table>
+      <thead>
+        <tr><th>User action</th><th>Expected result</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Open side panel</td>
+          <td>No selection script is injected. No page content is read.</td>
+        </tr>
+        <tr>
+          <td>Click <code>Select page context</code></td>
+          <td>The active tab receives a transient overlay. The toolbar button enters active <code>Selecting</code> state. The overlay exposes <code>Text</code>, <code>Snapshot</code>, and <code>Cancel</code> controls.</td>
+        </tr>
+        <tr>
+          <td>Use <code>Text</code> mode</td>
+          <td>The cursor changes to text selection. The user clicks, holds, drags across page text, and releases. Sidra captures the native selected text and adds a text attachment.</td>
+        </tr>
+        <tr>
+          <td>Use <code>Snapshot</code> mode</td>
+          <td>The cursor changes to a crosshair. The user clicks, holds, drags a rectangle, and releases. Sidra captures a PNG image of that visible rectangle and adds an image attachment.</td>
+        </tr>
+        <tr>
+          <td>Finish either mode</td>
+          <td>The side panel appends a composer attachment for the current URL session. Nothing is sent to the bridge yet.</td>
+        </tr>
+        <tr>
+          <td>Review composer attachments</td>
+          <td>The composer box shows attachment chips or rows with type, page title or domain, preview text for text attachments, thumbnail for image attachments, and remove buttons.</td>
+        </tr>
+        <tr>
+          <td>Remove an attachment</td>
+          <td>Only that attachment is removed. Draft prompt, transcript, current page state, and other attachments remain unchanged.</td>
+        </tr>
+        <tr>
+          <td>Click plain <code>Send</code></td>
+          <td>If composer attachments exist, Sidra sends the prompt with those attachments as untrusted context. No whole-page capture runs. Attachments clear only after the coordinator accepts the send.</td>
+        </tr>
+        <tr>
+          <td>Click <code>Capture + Send</code></td>
+          <td>Sidra captures the current page using readable or full DOM mode, then sends a context bundle containing composer attachments plus the captured page context. All bundle items are untrusted. Attachments clear only after the coordinator accepts the send.</td>
+        </tr>
+        <tr>
+          <td>Click a quick action</td>
+          <td>Quick actions include composer attachments as untrusted context. If the quick action uses capture, the sent context bundle includes both attachments and the captured page context.</td>
+        </tr>
+        <tr>
+          <td>Capture fails while attachments exist</td>
+          <td><code>Capture + Send</code> does not silently downgrade to attachment-only send. The draft and attachments remain. The user can switch to plain <code>Send</code>.</td>
+        </tr>
+        <tr>
+          <td>Cancel or press Escape</td>
+          <td>The overlay is removed. Existing composer attachments are left unchanged.</td>
+        </tr>
+        <tr>
+          <td>Navigate or switch tabs while selecting</td>
+          <td>The active request is cancelled or its result is ignored. No stale attachment is stored.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="ui-mockups">
+    <h2>UI Mockups</h2>
+    <p>These are emulated screenshots based on the current side-panel layout: 36px toolbar buttons, 6-8px radii, white composer surface, pale green panel background, and Sidra accent <code>#087c71</code>. They are implementation targets, not final pixel-perfect assets.</p>
+    <div class="mock-grid">
+      <figure class="mock-figure">
+        <svg class="mock-svg" viewBox="0 0 720 620" role="img" aria-labelledby="mock-composer-title mock-composer-desc">
+          <title id="mock-composer-title">Composer attachments in the side panel</title>
+          <desc id="mock-composer-desc">A Sidra side panel with a new toolbar selection button and two context attachment rows above the prompt textarea.</desc>
+          <rect x="180" y="10" width="360" height="600" rx="10" fill="#f6f8f7" stroke="#dce3e0"/>
+          <rect x="180" y="10" width="360" height="62" rx="10" fill="#fff"/>
+          <line x1="180" y1="72" x2="540" y2="72" stroke="#dce3e0"/>
+          <rect x="196" y="27" width="28" height="28" rx="6" fill="#087c71"/>
+          <text x="210" y="46" fill="#fff" text-anchor="middle" font-size="15" font-weight="700">S</text>
+          <text class="title" x="236" y="45">Sidra</text>
+          <rect x="398" y="23" width="36" height="36" rx="6" fill="#fff" stroke="#cfd9d5"/>
+          <rect x="408" y="33" width="16" height="16" rx="3" fill="none" stroke="#087c71" stroke-width="2"/>
+          <line x1="405" y1="41" x2="427" y2="41" stroke="#087c71" stroke-width="2"/>
+          <line x1="416" y1="30" x2="416" y2="52" stroke="#087c71" stroke-width="2"/>
+          <rect x="442" y="23" width="36" height="36" rx="6" fill="#fff" stroke="#cfd9d5"/>
+          <circle cx="460" cy="41" r="8" fill="none" stroke="#17201f" stroke-width="2"/>
+          <line x1="460" y1="29" x2="460" y2="33" stroke="#17201f" stroke-width="2"/>
+          <line x1="460" y1="49" x2="460" y2="53" stroke="#17201f" stroke-width="2"/>
+          <rect x="486" y="23" width="36" height="36" rx="6" fill="#fff" stroke="#cfd9d5"/>
+          <line x1="504" y1="33" x2="504" y2="49" stroke="#17201f" stroke-width="2"/>
+          <line x1="496" y1="41" x2="512" y2="41" stroke="#17201f" stroke-width="2"/>
+
+          <rect x="192" y="84" width="336" height="48" rx="8" fill="#fff" stroke="#d8e1dd"/>
+          <rect x="204" y="96" width="24" height="24" rx="6" fill="#e6f4f1" stroke="#c7dbd5"/>
+          <text class="label" x="240" y="106">Example article</text>
+          <text class="small muted" x="240" y="123">Ready to capture this page</text>
+          <rect x="192" y="150" width="136" height="40" rx="8" fill="#087c71"/>
+          <text x="216" y="175" fill="#fff" font-size="13" font-weight="650">Summarize</text>
+          <rect x="340" y="150" width="136" height="40" rx="8" fill="#087c71"/>
+          <text x="364" y="175" fill="#fff" font-size="13" font-weight="650">Find actions</text>
+          <text class="muted" x="360" y="300" text-anchor="middle" font-size="13">Transcript area</text>
+
+          <rect x="180" y="410" width="360" height="200" fill="#fff"/>
+          <line x1="180" y1="410" x2="540" y2="410" stroke="#dce3e0"/>
+          <text class="label" x="196" y="433">Context attachments</text>
+          <text class="small muted" x="446" y="433">Clear all</text>
+          <rect x="196" y="442" width="328" height="42" rx="8" fill="#f6f8f7" stroke="#d8e1dd"/>
+          <rect x="206" y="452" width="24" height="22" rx="5" fill="#e6f4f1" stroke="#c7dbd5"/>
+          <text class="small" x="238" y="458">Selected text</text>
+          <text class="small muted" x="238" y="474">Pricing paragraph from Example article</text>
+          <text class="small muted" x="508" y="468" text-anchor="middle">x</text>
+          <rect x="196" y="490" width="328" height="42" rx="8" fill="#f6f8f7" stroke="#d8e1dd"/>
+          <rect x="206" y="500" width="24" height="22" rx="5" fill="#e6f4f1" stroke="#c7dbd5"/>
+          <text class="small" x="238" y="506">Area snapshot</text>
+          <text class="small muted" x="238" y="522">Screenshot of the selected page area</text>
+          <text class="small muted" x="508" y="516" text-anchor="middle">x</text>
+          <rect x="196" y="540" width="328" height="36" rx="8" fill="#fff" stroke="#cfd9d5"/>
+          <text class="small muted" x="208" y="562">Ask about this page</text>
+          <text class="small" x="196" y="594">2 attachments will be sent</text>
+          <rect x="422" y="580" width="78" height="30" rx="6" fill="#087c71"/>
+          <text x="461" y="599" fill="#fff" text-anchor="middle" font-size="12" font-weight="650">Send</text>
+          <rect x="500" y="580" width="24" height="30" rx="6" fill="#087c71"/>
+          <path d="M508 592 l4 4 l4 -4" fill="none" stroke="#fff" stroke-width="2"/>
+        </svg>
+        <figcaption>Composer attachment tray. The user can inspect the source, preview, and remove each selected-context attachment before the next send.</figcaption>
+      </figure>
+
+      <figure class="mock-figure">
+        <svg class="mock-svg" viewBox="0 0 720 420" role="img" aria-labelledby="mock-selecting-title mock-selecting-desc">
+          <title id="mock-selecting-title">Active selection mode on the page</title>
+          <desc id="mock-selecting-desc">A browser page with a rectangular selection overlay and a Sidra side panel showing the active Selecting toolbar button.</desc>
+          <rect x="16" y="16" width="438" height="388" rx="10" fill="#fff" stroke="#d8e1dd"/>
+          <rect x="36" y="44" width="250" height="18" rx="4" fill="#d8e1dd"/>
+          <rect x="36" y="82" width="360" height="10" rx="3" fill="#eef3f1"/>
+          <rect x="36" y="104" width="330" height="10" rx="3" fill="#eef3f1"/>
+          <rect x="36" y="126" width="386" height="10" rx="3" fill="#eef3f1"/>
+          <rect x="36" y="174" width="160" height="80" rx="8" fill="#f6f8f7" stroke="#d8e1dd"/>
+          <rect x="216" y="174" width="180" height="80" rx="8" fill="#f6f8f7" stroke="#d8e1dd"/>
+          <rect x="126" y="96" width="252" height="168" rx="8" fill="rgba(8,124,113,0.08)" stroke="#087c71" stroke-width="2" stroke-dasharray="8 6"/>
+          <circle cx="126" cy="96" r="5" fill="#087c71"/>
+          <circle cx="378" cy="264" r="5" fill="#087c71"/>
+          <rect x="130" y="28" width="210" height="36" rx="8" fill="#17201f"/>
+          <rect x="140" y="36" width="56" height="20" rx="5" fill="#087c71"/>
+          <text x="168" y="51" fill="#fff" text-anchor="middle" font-size="12" font-weight="650">Text</text>
+          <text x="226" y="51" fill="#fff" text-anchor="middle" font-size="12">Snapshot</text>
+          <text x="290" y="51" fill="#fff" text-anchor="middle" font-size="12">Cancel</text>
+          <text class="small muted" x="36" y="310">Drag a box or switch to Text to use native selection.</text>
+
+          <rect x="474" y="16" width="230" height="388" rx="10" fill="#f6f8f7" stroke="#dce3e0"/>
+          <rect x="474" y="16" width="230" height="56" rx="10" fill="#fff"/>
+          <line x1="474" y1="72" x2="704" y2="72" stroke="#dce3e0"/>
+          <rect x="488" y="30" width="28" height="28" rx="6" fill="#087c71"/>
+          <text x="502" y="49" fill="#fff" text-anchor="middle" font-size="15" font-weight="700">S</text>
+          <text class="title" x="526" y="49">Sidra</text>
+          <rect x="606" y="26" width="84" height="36" rx="6" fill="#e6f4f1" stroke="#7fbcb4"/>
+          <rect x="616" y="36" width="16" height="16" rx="3" fill="none" stroke="#087c71" stroke-width="2"/>
+          <text x="644" y="49" fill="#087c71" font-size="12" font-weight="650">Selecting</text>
+          <rect x="488" y="88" width="202" height="48" rx="8" fill="#fff" stroke="#d8e1dd"/>
+          <text class="label" x="500" y="110">Example article</text>
+          <text class="small muted" x="500" y="128">Selection mode active</text>
+          <text class="muted" x="589" y="226" text-anchor="middle" font-size="13">Choose text or snapshot on the page</text>
+          <rect x="474" y="292" width="230" height="112" fill="#fff"/>
+          <line x1="474" y1="292" x2="704" y2="292" stroke="#dce3e0"/>
+          <rect x="488" y="308" width="202" height="48" rx="8" fill="#fff" stroke="#cfd9d5"/>
+          <text class="small muted" x="500" y="335">Ask about this page</text>
+          <rect x="596" y="364" width="70" height="28" rx="6" fill="#087c71"/>
+          <text x="631" y="382" fill="#fff" text-anchor="middle" font-size="12" font-weight="650">Capture</text>
+          <rect x="666" y="364" width="24" height="28" rx="6" fill="#087c71"/>
+        </svg>
+        <figcaption>Active page selection. The toolbar button uses an active state, while the page overlay provides Text, Snapshot, and Cancel controls.</figcaption>
+      </figure>
+
+      <figure class="mock-figure">
+        <svg class="mock-svg" viewBox="0 0 720 380" role="img" aria-labelledby="mock-manage-title mock-manage-desc">
+          <title id="mock-manage-title">Attachment management close-up</title>
+          <desc id="mock-manage-desc">A close-up of the composer attachment tray with multiple removable attachments and a clear-all action.</desc>
+          <rect x="90" y="30" width="540" height="320" rx="10" fill="#fff" stroke="#dce3e0"/>
+          <text class="label" x="114" y="62">Context attachments</text>
+          <text class="small muted" x="550" y="62">Clear all</text>
+          <rect x="114" y="78" width="492" height="58" rx="8" fill="#f6f8f7" stroke="#d8e1dd"/>
+          <rect x="128" y="94" width="28" height="28" rx="6" fill="#e6f4f1" stroke="#c7dbd5"/>
+          <text class="label" x="168" y="99">Selected text</text>
+          <text class="small muted" x="168" y="118">Example article - The refund policy applies after checkout...</text>
+          <circle cx="580" cy="107" r="13" fill="#fff" stroke="#cfd9d5"/>
+          <text class="small muted" x="580" y="111" text-anchor="middle">x</text>
+          <rect x="114" y="146" width="492" height="58" rx="8" fill="#f6f8f7" stroke="#d8e1dd"/>
+          <rect x="128" y="162" width="28" height="28" rx="6" fill="#e6f4f1" stroke="#c7dbd5"/>
+          <text class="label" x="168" y="167">Area snapshot</text>
+          <text class="small muted" x="168" y="186">Example article - PNG snapshot, 612 x 284</text>
+          <circle cx="580" cy="175" r="13" fill="#fff" stroke="#cfd9d5"/>
+          <text class="small muted" x="580" y="179" text-anchor="middle">x</text>
+          <rect x="114" y="214" width="492" height="44" rx="8" fill="#fff7ed" stroke="#efc8bd"/>
+          <text class="label" x="128" y="234" fill="#8f2d16">Text selection too large</text>
+          <text class="small muted" x="128" y="250">Metadata only unless removed.</text>
+          <circle cx="580" cy="236" r="13" fill="#fff" stroke="#efc8bd"/>
+          <text class="small muted" x="580" y="240" text-anchor="middle">x</text>
+          <rect x="114" y="278" width="492" height="42" rx="8" fill="#fff" stroke="#cfd9d5"/>
+          <text class="small muted" x="128" y="304">Ask a question using these attachments</text>
+          <rect x="416" y="328" width="110" height="34" rx="6" fill="#087c71"/>
+          <text x="471" y="350" fill="#fff" text-anchor="middle" font-size="12" font-weight="650">Send</text>
+          <rect x="526" y="328" width="34" height="34" rx="6" fill="#087c71"/>
+          <path d="M538 341 l5 5 l5 -5" fill="none" stroke="#fff" stroke-width="2"/>
+          <text class="small" x="114" y="350">3 attachments ready</text>
+        </svg>
+        <figcaption>Attachment management. Rows are visible before send and can be removed without changing the draft or transcript.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="architecture">
+    <h2>Architecture</h2>
+    <h3>Ownership</h3>
+    <ul>
+      <li><code>apps/extension/src/page-selection-service.ts</code> owns active-tab selection orchestration, dynamic script injection, request IDs, timeout handling, cancellation, screenshot capture, screenshot cropping, and stale-result filtering.</li>
+      <li><code>apps/extension/src/page-selection-content.ts</code> owns the in-page overlay, mode controls, cursor changes, native text selection capture, snapshot drag geometry, cleanup, and message replies.</li>
+      <li><code>apps/extension/src/capture-service.ts</code> continues to own conversion from captured page material into <code>PageContext</code>. Add selected-text, area-snapshot, and bundle builders here or in a sibling capture helper used only by <code>CaptureService</code>.</li>
+      <li><code>apps/extension/src/url-session-store.ts</code> owns composer context attachments scoped by page key, remove-by-id, and clear-on-accepted-send behavior.</li>
+      <li><code>apps/extension/src/side-panel-controller.ts</code> owns user commands. React calls controller intents only.</li>
+      <li><code>packages/protocol</code> owns the wire schema for untrusted text, untrusted images, and bundles.</li>
+      <li><code>apps/bridge</code> owns translating text plus image context into provider input while preserving the untrusted context boundary.</li>
+    </ul>
+
+    <h3>Data Flow</h3>
+    <pre>Toolbar button
+  -> SidePanelController.startPageSelection(mode)
+  -> PageSelectionService.start({ tabId, windowId, requestId, mode })
+  -> chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ["page-selection-content.js"] })
+  -> PageSelectionService records injected frameIds from InjectionResult[]
+  -> chrome.tabs.sendMessage(tabId, { type: "sidra.pageSelection.start", requestId, mode, topFrame: true }, { frameId: 0 })
+  -> chrome.tabs.sendMessage(...same requestId/mode..., { frameId }) for each non-top injected frame
+  -> Text mode: permitted frame script captures native selection text on mouseup
+  -> Snapshot mode: content script captures rectangle geometry and viewport proof on mouseup
+  -> Snapshot mode: extension validates the same tab/window/URL/viewport is still active
+  -> Snapshot mode: extension rate-limits and calls chrome.tabs.captureVisibleTab(windowId, { format: "png" })
+  -> Snapshot mode: extension crops the visible-tab PNG to the selected rectangle only if viewport proof still matches
+  -> CaptureService builds selected_text or area_snapshot PageContext
+  -> UrlSessionStore appends composer context attachment
+  -> next Send builds a context bundle from attachments
+  -> Capture + Send adds the current page capture to the same bundle</pre>
+
+    <h3>Content Script Strategy</h3>
+    <p>Use a bundled file injection, not a serialized function. Selection mode needs multiple event listeners, Shadow DOM UI, runtime messaging, cursor changes, and robust cleanup. Add a new Vite Rollup input that emits <code>page-selection-content.js</code> at the extension root.</p>
+    <p>Inject the bundle with <code>chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ["page-selection-content.js"] })</code> and keep the returned <code>InjectionResult.frameId</code> values. <code>PageSelectionService</code> starts the request by sending <code>chrome.tabs.sendMessage(tabId, message, { frameId })</code> to each injected frame. Only <code>frameId: 0</code> receives <code>topFrame: true</code> and creates overlay controls. Non-top frames arm only their text-selection listeners for the same <code>requestId</code> and mode. Every permitted frame reports selected text with <code>frameId</code>, <code>documentUrl</code>, and the same <code>requestId</code>. <code>PageSelectionService</code> accepts the first non-empty text result for the active request, sends cleanup to every injected frame, and ignores duplicate or late frame results. If all injected frames report empty text, or if the selected frame cannot be injected because Chrome blocks that frame or URL, text mode must fail visibly with no attachment. Snapshot mode remains top-frame orchestrated and captures pixels from the visible tab.</p>
+    <p>Text mode must allow native page text selection outside the overlay controls and use a text-selection cursor. Snapshot mode must capture pointer events, use a crosshair cursor, draw the rectangle, and return viewport-relative geometry, scroll offsets, document URL, viewport dimensions, and device pixel ratio. The extension crops the visible-tab screenshot outside the page script.</p>
+    <p>The manifest already has <code>scripting</code>, <code>tabs</code>, and <code>&lt;all_urls&gt;</code>. Chrome host permissions allow matching-tab calls such as <code>chrome.tabs.captureVisibleTab</code> and <code>chrome.scripting.executeScript</code>. Do not add <code>activeTab</code> for normal <code>http</code>/<code>https</code> pages. Chrome-restricted pages, extension pages, Chrome Web Store pages, blocked frames, and file URLs without user-granted file access remain unsupported.</p>
+    <p><code>chrome.tabs.captureVisibleTab</code> is expensive and Chrome exposes <code>MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND</code> as 2. <code>PageSelectionService</code> must serialize snapshot captures, call it at most once per completed snapshot drag, and reject additional snapshot requests while a capture is in flight or inside the local rate-limit window.</p>
+    <p>The script must be idempotent. Re-injection should reuse one controller per document. It must remove overlay DOM, cursor styles, and event listeners after completion, cancellation, timeout message, side-panel shutdown, document unload, or Escape.</p>
+
+    <h3>Snapshot Crop Safety Contract</h3>
+    <p>Snapshot selection must never crop stale pixels. The content script returns a <code>SelectionViewportProof</code> at mouseup containing <code>requestId</code>, <code>tabId</code> if available, <code>windowId</code> if available, <code>documentUrl</code>, <code>viewport.width</code>, <code>viewport.height</code>, <code>viewport.devicePixelRatio</code>, <code>viewport.scrollX</code>, <code>viewport.scrollY</code>, and the selected viewport-relative rectangle. Before calling <code>captureVisibleTab</code>, the extension re-queries the active tab and asks the top-frame script for current viewport proof. After the PNG is decoded, it compares the decoded screenshot dimensions to <code>viewport.width * devicePixelRatio</code> and <code>viewport.height * devicePixelRatio</code> within one physical pixel.</p>
+    <p>Abort without adding an attachment if the active tab ID, window ID, document URL, viewport dimensions, device pixel ratio, or scroll offsets changed since mouseup. Clamp the crop rectangle to the decoded image bounds only after the stale-proof checks pass. Browser zoom changes are treated as device-pixel-ratio or screenshot-dimension mismatches and must fail visibly instead of guessing.</p>
+
+    <h3>Bridge and Provider Input Contract</h3>
+    <p>Replace the text-only provider boundary with a provider-neutral part model. <code>BridgeTurnInput</code> remains the protocol-facing input, but <code>formatPromptForAgent</code> must produce ordered provider parts instead of only one string when images are present.</p>
+    <pre>export type AgentInputPart =
+  | { kind: "text"; text: string }
+  | {
+      kind: "image";
+      mimeType: "image/png";
+      dataBase64: string;
+      byteLength: number;
+      width: number;
+      height: number;
+      untrustedBoundaryText: string;
+    };
+
+export type AgentSendInput = {
+  parts: AgentInputPart[];
+  displayTitleSource?: ProviderDisplayTitleSource;
+};</pre>
+    <p>For text-only turns, <code>parts</code> contains one text part equivalent to today's formatted prompt. For image turns, the bridge must order parts as: untrusted context introduction text, selected text and metadata JSON text, an untrusted-boundary text part immediately before each image, the image part, then the user request text. Any JSON text representation of an <code>area_snapshot</code> or <code>context_bundle</code> must omit <code>image.dataBase64</code> and include only image metadata such as MIME type, byte length, dimensions, source label, and selection geometry. The boundary text must state that the image is untrusted page content and visible instructions inside it must not be followed unless the user's request explicitly asks for that content to be analyzed.</p>
+    <p><code>CodexAppServerProvider</code> must map text parts to <code>{ type: "text", text, text_elements: [] }</code>. It must map image parts to <code>{ type: "image", url: "data:image/png;base64,..." }</code>, matching the real installed Codex app-server contract. It must not serialize image base64 into a text prompt, omit an image, OCR an image, or silently degrade to text-only. If the app-server rejects or does not support image items, the provider must fail the send before starting the turn; the extension must preserve the draft and attachments.</p>
+    <p>Phase 1 must include a fake app-server contract test that asserts the exact <code>turn/start.input</code> array, including the <code>image</code> item and the adjacent untrusted-boundary text. Phase 1 must also add and run <code>tools/codex-smoke/image-input-smoke.mjs</code> to smoke-test this shape against the real installed Codex app-server before proceeding. If the real app-server rejects this item shape, stop Phase 1 and update the spec; do not implement a hidden alternate mapping.</p>
+  </section>
+
+  <section id="data-model">
+    <h2>Data Model</h2>
+    <h3>Protocol Version</h3>
+    <p>Bump <code>PROTOCOL_VERSION</code> from <code>3</code> to <code>4</code>. The parser is strict, and selected text, area image snapshots, and bundled context add new accepted <code>PageContext.kind</code> values. Updating the version makes extension/bridge mismatches fail clearly.</p>
+
+    <h3>New Protocol Types</h3>
+    <pre>export type PageContextRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type PageContextViewport = {
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+  scrollX: number;
+  scrollY: number;
+};
+
+export type PageContextCaptureProof = {
+  requestId: string;
+  tabId?: number;
+  windowId?: number;
+  documentUrl: string;
+  viewport: PageContextViewport;
+  screenshotWidth?: number;
+  screenshotHeight?: number;
+};
+
+export type PageContextSelectionGeometry = {
+  mode: "text_selection" | "area_snapshot";
+  viewport: PageContextViewport;
+  boundingRect: PageContextRect;
+  textRects?: PageContextRect[];
+  captureProof: PageContextCaptureProof;
+};
+
+export type PageContextImage = {
+  mimeType: "image/png";
+  dataBase64: string;
+  byteLength: number;
+  width: number;
+  height: number;
+};
+
+export type MetadataOnlyPageContextReason =
+  | "no_usable_text"
+  | "content_too_large"
+  | "full_dom_too_large"
+  | "selection_too_large";
+
+export type PageContextBase =
+  | ExistingReadableContext
+  | ExistingFullDomContext
+  | ExistingMetadataOnlyContext
+  | {
+      kind: "selected_text";
+      metadata: PageContextMetadata;
+      text: string;
+      textLength: number;
+      selection: PageContextSelectionGeometry;
+    }
+  | {
+      kind: "area_snapshot";
+      metadata: PageContextMetadata;
+      image: PageContextImage;
+      selection: PageContextSelectionGeometry;
+    };
+
+export type PageContextBundleItem = {
+  id: string;
+  label: string;
+  trust: "untrusted";
+  source: "selected_text" | "area_snapshot" | "page_capture";
+  context: PageContextBase;
+};
+
+export type PageContext =
+  | PageContextBase
+  | {
+      kind: "context_bundle";
+      trust: "untrusted";
+      metadata: PageContextMetadata;
+      createdAt: string;
+      items: PageContextBundleItem[];
+    };</pre>
+
+    <p>The parser must enforce geometry, image, proof, and bundle invariants: all rect, viewport, and proof numbers are finite, width and height are positive, <code>selection.viewport</code> exactly matches <code>selection.captureProof.viewport</code>, text length exactly matches text content, <code>selected_text</code> uses <code>mode: "text_selection"</code>, <code>area_snapshot</code> uses <code>mode: "area_snapshot"</code>, images are PNG base64 with exact decoded byte length and positive dimensions, bundles have 1 to 12 items, bundle metadata is required, bundle item IDs are unique, every bundle item has <code>trust: "untrusted"</code>, bundle item source matches its context kind, and bundle items cannot recursively contain another bundle.</p>
+    <p>Bundle metadata is the provider-neutral page metadata used for Sidra history titles and context state. For plain sends with composer attachments, build bundle metadata from the active URL session page identity and the send timestamp. For <code>Capture + Send</code>, use the newly captured page context metadata. If item metadata differs from bundle metadata because an attachment was created before a title update, keep each item metadata intact but use only bundle metadata for display-title derivation. The bridge must update <code>pickTitlePageMetadata</code> to read <code>context_bundle.metadata</code>.</p>
+
+    <h3>Extension State</h3>
+    <pre>export type ComposerContextAttachment = {
+  id: string;
+  pageContext: Extract&lt;PageContextBase, { kind: "selected_text" | "area_snapshot" }&gt;
+    | (Extract&lt;PageContextBase, { kind: "metadata_only" }&gt; &amp; { reason: "selection_too_large" });
+  display: {
+    source: "selected_text" | "area_snapshot";
+    label: string;
+    pageTitle?: string;
+    url: string;
+    preview: string;
+    thumbnailDataUrl?: string;
+    imageDimensions?: { width: number; height: number };
+    capturedAt: string;
+  };
+};
+
+export type ComposerAttachmentSnapshot = ComposerContextAttachment["display"] & {
+  id: string;
+};
+
+export type PageSelectionCaptureState =
+  | { status: "idle" }
+  | { status: "selecting"; requestId: string; mode: "text" | "snapshot" }
+  | { status: "failed"; message: string };</pre>
+    <p><code>UrlSessionSnapshot</code> must expose attachment snapshots with previews, thumbnails, dimensions, and IDs, but it must never expose full selected text beyond the short preview or raw image <code>dataBase64</code>. Keep raw selected text and raw PNG payloads only in volatile in-memory attachment records inside <code>UrlSessionStore</code> or a sibling controller-owned store. Do not persist raw attachments to Chrome storage, transcript state, or serialized UI snapshots. Clear raw payloads on accepted send, remove-one, clear-all, new chat, session disposal, and bridge disconnect cleanup.</p>
+  </section>
+
+  <section id="edge-cases">
+    <h2>Edge Cases</h2>
+    <table>
+      <thead>
+        <tr><th>Case</th><th>Required handling</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Unsupported pages such as <code>chrome://</code></td>
+          <td>Disable the toolbar button when active page status is unsupported. If injection or screenshot capture still fails, show a non-chat selection error and do not mutate attachments.</td>
+        </tr>
+        <tr>
+          <td>Frames and cross-origin iframes</td>
+          <td>Inject selection listeners into all permitted frames. Text mode may attach selected text from the top frame or any frame where injection is permitted. If the selected text lives in a frame Chrome blocks, show a local unsupported-frame error and do not add an attachment. Snapshot mode captures pixels from the visible tab, including cross-origin iframe pixels visible in the selected rectangle.</td>
+        </tr>
+        <tr>
+          <td>PDF viewer, file URLs, or extension pages</td>
+          <td>Treat as unsupported unless script injection and, for snapshot mode, visible-tab screenshot capture both work. File URLs remain unsupported unless the user has granted extension file access and manual validation proves both injection and screenshot capture. Do not special-case OCR.</td>
+        </tr>
+        <tr>
+          <td>Large selected text</td>
+          <td>Use the readable content character limit. If exceeded, add a removable too-large attachment row and send <code>metadata_only</code> with <code>selection_too_large</code> if the user keeps it.</td>
+        </tr>
+        <tr>
+          <td>Large image snapshot</td>
+          <td>Enforce an image byte limit below the hard bridge payload limit and below the Native Messaging frame budget after JSON/base64 overhead. If exceeded, show a local error and do not add the image attachment.</td>
+        </tr>
+        <tr>
+          <td>Bundled payload too large</td>
+          <td>Before plain send, capture send, or quick action sends a bundle, compute the serialized <code>session.send</code> payload byte length with the same protocol helper used by the bridge. If the final message would exceed <code>BRIDGE_HARD_PAYLOAD_BYTE_LIMIT</code>, fail locally, preserve draft and attachments, and show which attachments must be removed.</td>
+        </tr>
+        <tr>
+          <td>Empty text selection</td>
+          <td>Do not add an attachment. Clear the active overlay, keep existing attachments unchanged, and show a local selection error that no text was selected.</td>
+        </tr>
+        <tr>
+          <td>Tiny or empty snapshot rectangle</td>
+          <td>Do not add an attachment. Require a minimum rectangle size so accidental clicks do not create image attachments.</td>
+        </tr>
+        <tr>
+          <td>Many attachments</td>
+          <td>Limit composer attachments to 10 per URL session. Show a local error when the user tries to add another.</td>
+        </tr>
+        <tr>
+          <td>Raw image lifecycle</td>
+          <td>Raw PNG payloads stay in volatile memory only and never appear in <code>UrlSessionSnapshot</code>, transcript entries, logs, or Chrome storage. Thumbnails in the composer are allowed.</td>
+        </tr>
+        <tr>
+          <td>Screenshot API rate limit</td>
+          <td>Allow one <code>captureVisibleTab</code> call per completed snapshot selection and serialize snapshot capture requests so Sidra never exceeds Chrome's 2 calls per second limit.</td>
+        </tr>
+        <tr>
+          <td>Page scroll, zoom, resize, or tab switch during snapshot</td>
+          <td>Capture viewport proof at mouseup, revalidate active tab/window/document URL/viewport/DPR/scroll before screenshot, and verify decoded screenshot dimensions after capture. If any value changed, fail visibly and do not add an attachment.</td>
+        </tr>
+        <tr>
+          <td>Multiple selections</td>
+          <td>Each successful selection appends a new attachment. The user can remove attachments individually or clear all.</td>
+        </tr>
+        <tr>
+          <td>Send rejected by coordinator</td>
+          <td>Keep draft prompt and attachments. Clear attachments only after the coordinator accepts the send.</td>
+        </tr>
+        <tr>
+          <td>Bridge or provider cannot accept image input</td>
+          <td>Fail the send visibly before clearing the draft or attachments. Do not OCR the image, serialize image base64 as text, or silently drop it.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="implementation-plan">
+    <h2>Implementation Plan</h2>
+
+    <div class="phase">
+      <h3>Phase 1: Protocol and Bridge Context</h3>
+      <div class="checklist">
+        <label><input type="checkbox" checked disabled> Add failing protocol tests for <code>selected_text</code>, <code>area_snapshot</code>, <code>context_bundle</code>, geometry validation, capture-proof validation, viewport/proof equality, PNG image validation, image byte-length validation, required bundle metadata, bundle size, unique item IDs, untrusted trust markers, bundle source-kind matching, exact text length, strict-key rejection, and <code>selection_too_large</code>.</label>
+        <label><input type="checkbox" checked disabled> Add failing bridge tests proving text and image attachments are passed as ordered untrusted provider parts, including malicious selected text, a selected-area snapshot image with adversarial visible text inside the image, image metadata JSON with <code>dataBase64</code> omitted, and an assertion that image base64 is not serialized into a text prompt.</label>
+        <label><input type="checkbox" checked disabled> Add failing session-manager/coordinator marker tests for selected text, area snapshot, attachment bundles, page-capture-plus-attachment bundles, too-large selection, bundle metadata display-title selection, and provider-image rejection preservation.</label>
+        <label><input type="checkbox" checked disabled> Bump <code>PROTOCOL_VERSION</code> to <code>4</code> and update version literals through protocol, bridge, extension, and tests.</label>
+        <label><input type="checkbox" checked disabled> Extend <code>PageContext</code>, metadata-only reasons, parser helpers, image attachment helpers, bundle builders, and marker mapping.</label>
+        <label><input type="checkbox" checked disabled> Extend bridge/provider turn input to carry untrusted image attachments as provider parts. Add a <code>codex-app-server-provider.test.ts</code> contract test for the exact <code>turn/start.input</code> text/image item order. Add <code>tools/codex-smoke/image-input-smoke.mjs</code>, a Phase-1 manual smoke helper that sends a 1x1 PNG <code>image</code> item to the real installed Codex app-server. If the provider adapter rejects images, preserve attachments and surface a send failure.</label>
+      </div>
+    </div>
+
+    <div class="phase">
+      <h3>Phase 2: In-Page Selection Capture</h3>
+      <div class="checklist">
+        <label><input type="checkbox" checked disabled> Add failing <code>page-selection-content.test.ts</code> coverage for text-selection cursor, native text drag selection, all-frames text reporting, first non-empty frame result, duplicate/late frame result cleanup, inaccessible-frame failure, snapshot crosshair cursor, snapshot drag geometry, viewport proof, tiny rectangle rejection, Escape cancel, cleanup, Shadow DOM isolation, and idempotent startup.</label>
+        <label><input type="checkbox" checked disabled> Add failing <code>page-selection-service.test.ts</code> coverage that no script injects until the toolbar command, injected frame IDs are messaged deterministically, only frame 0 receives <code>topFrame: true</code>, request IDs are enforced, stale tab results are ignored, stale viewport proof is rejected, screenshot dimensions are validated against DPR, screenshot capture is serialized/rate-limited, timeouts clean listeners, side-panel shutdown cancels active overlay, screenshot capture is called only for snapshot mode, and injection/screenshot failures return unavailable.</label>
+        <label><input type="checkbox" checked disabled> Add <code>page-selection-content.ts</code> with Shadow DOM controls for <code>Text</code>, <code>Snapshot</code>, and <code>Cancel</code>.</label>
+        <label><input type="checkbox" checked disabled> Text mode must use native page selection and capture text on mouseup after click-hold-drag-release.</label>
+        <label><input type="checkbox" checked disabled> Snapshot mode must capture pointer events, draw the rectangle, return viewport proof, revalidate tab/window/URL/viewport/DPR/scroll before capture, call <code>chrome.tabs.captureVisibleTab</code> within the local rate limit, decode dimensions, and crop the PNG to the selected rectangle only after proof passes.</label>
+        <label><input type="checkbox" checked disabled> Add a Vite input for <code>page-selection-content.ts</code> that emits <code>page-selection-content.js</code> at the extension root.</label>
+        <label><input type="checkbox" checked disabled> Extend <code>chrome.d.ts</code> for <code>chrome.scripting.executeScript({ files })</code>, <code>chrome.tabs.sendMessage</code> including <code>frameId</code> options, <code>chrome.tabs.captureVisibleTab</code>, <code>chrome.runtime.sendMessage</code>, and <code>chrome.runtime.onMessage</code>.</label>
+      </div>
+    </div>
+
+    <div class="phase">
+      <h3>Phase 3: Capture Service and Session Integration</h3>
+      <div class="checklist">
+        <label><input type="checkbox" checked disabled> Add failing capture-service tests for building selected text, area snapshot image, too-large selected text context, image byte limit rejection, final serialized bundle payload rejection, context bundles with required bundle metadata, per-item metadata, geometry/proof, thumbnails, and limits.</label>
+        <label><input type="checkbox" checked disabled> Add failing url-session-store tests for attachment append, scoped attachments by page key, remove one, clear all, max attachment count, new-chat clear, plain-send consumption, capture-send consumption, rejected-send preservation, context-state labels, raw payload cleanup, and proof that snapshots never expose image base64 or full selected text.</label>
+        <label><input type="checkbox" checked disabled> Add failing side-panel-controller tests for start text selection, start snapshot selection, no provider send on selection, plain send with text/image attachments, capture send with attachments plus readable/full DOM capture, quick-action attachment inclusion, capture-failure preservation, oversized-bundle preservation, provider-image rejection preservation, provider-image rejection before attachment clearing, cancel, and stale active-page rejection.</label>
+        <label><input type="checkbox" checked disabled> Add <code>PageSelectionService</code> dependency to the controller factory next to <code>CaptureService</code>.</label>
+        <label><input type="checkbox" checked disabled> Change plain <code>sendPrompt</code> to include a context bundle when composer attachments exist. If none exist, keep current plain-send behavior.</label>
+        <label><input type="checkbox" checked disabled> Change <code>captureAndSendCommand</code> to include composer attachments plus the newly captured page context in one untrusted bundle. If capture fails, keep attachments and do not send.</label>
+      </div>
+    </div>
+
+    <div class="phase">
+      <h3>Phase 4: Composer Attachment UI</h3>
+      <div class="checklist">
+        <label><input type="checkbox" checked disabled> Add failing <code>side-panel-view.test.tsx</code> coverage for the toolbar button accessible name, click handler, disabled state, active <code>aria-pressed</code>, and <code>Selecting</code> label.</label>
+        <label><input type="checkbox" checked disabled> Add failing UI tests for mode controls, composer text attachment rows, composer image thumbnail rows, page title or domain display, remove-one action, clear-all action, too-large text attachment state, unsupported-frame error, stale-snapshot error, snapshot byte-limit error, image send-failure preservation, and attachment persistence after rejected send.</label>
+        <label><input type="checkbox" checked disabled> Add a <code>scan-text</code> or equivalent selection icon to <code>SidraIcon</code> using Lucide.</label>
+        <label><input type="checkbox" checked disabled> Add a header toolbar button before Settings. Inactive state is icon-only with title <code>Select page context</code>. Active state is accent-tinted and expands to show <code>Selecting</code>.</label>
+        <label><input type="checkbox" checked disabled> Add an attachment tray inside the composer box above the textarea. Text rows show text preview. Snapshot rows show thumbnail and dimensions. Use remove icon buttons with accessible labels.</label>
+        <label><input type="checkbox" checked disabled> Ensure attachment rows, thumbnails, and active toolbar text fit at mobile-width side-panel sizes without overlapping composer controls.</label>
+      </div>
+    </div>
+
+    <div class="phase">
+      <h3>Phase 5: Documentation and Manual Validation</h3>
+      <div class="checklist">
+        <label><input type="checkbox" checked disabled> Update <code>UBIQUITOUS_LANGUAGE.md</code> with <code>Page Selection Capture</code>, <code>Composer Context Attachment</code>, <code>Selected Text Attachment</code>, and <code>Area Snapshot Attachment</code>.</label>
+        <label><input type="checkbox" checked disabled> Update <code>README.md</code> and <code>docs/prd-v1.md</code> to state that selected text and area image snapshots are explicit, visible in the composer, removable, untrusted, and attached to the next accepted send.</label>
+        <label><input type="checkbox" checked disabled> Read <code>MANUAL-E2E-RUNBOOK.md</code> before browser validation.</label>
+        <label><input type="checkbox" checked disabled> Manually validate text drag selection, area snapshot drag capture, thumbnail preview, multiple attachments, remove-one, clear-all, plain send with text and image attachments, capture send with attachments plus page capture, rejected-send preservation, a long text selection over the limit, a too-small snapshot rectangle, tab switch during selection, page scroll/zoom during snapshot, cross-origin iframe text failure, cross-origin iframe snapshot success, quick-action attachment inclusion, unsupported page handling, file URL handling, screenshot rate-limit behavior, and provider image rejection behavior.</label>
+      </div>
+    </div>
+  </section>
+
+  <section id="test-map">
+    <h2>Phase Test Map</h2>
+    <p>Each phase starts RED with the named tests below, then turns GREEN with only the implementation in that phase. Global validation does not replace these phase-local checks.</p>
+    <table>
+      <thead>
+        <tr><th>Phase</th><th>Test file</th><th>Named tests to add</th><th>Behavior covered</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td><code>packages/protocol/src/protocol.test.ts</code></td>
+          <td><code>parses_selected_text_context_with_capture_proof</code><br><code>parses_area_snapshot_context_with_png_image</code><br><code>rejects_area_snapshot_with_invalid_byte_length</code><br><code>rejects_selection_when_viewport_and_proof_differ</code><br><code>parses_context_bundle_with_required_metadata</code><br><code>rejects_recursive_context_bundle</code><br><code>rejects_bundle_item_source_kind_mismatch</code></td>
+          <td>Protocol schema, strict parser, image/base64, capture proof, bundle metadata, untrusted trust markers.</td>
+        </tr>
+        <tr>
+          <td>1</td>
+          <td><code>apps/bridge/src/context-prompt.test.ts</code>, <code>apps/bridge/src/session-manager.test.ts</code>, <code>apps/bridge/src/codex-app-server-provider.test.ts</code></td>
+          <td><code>builds_ordered_untrusted_parts_for_text_and_image_context</code><br><code>does_not_embed_image_base64_in_text_prompt</code><br><code>redacts_image_data_from_context_json_part</code><br><code>uses_bundle_metadata_for_display_title_source</code><br><code>passes_multimodal_parts_to_codex_turn_start</code><br><code>fails_before_turn_start_when_provider_rejects_images</code></td>
+          <td>Provider-neutral part model, Codex app-server image contract, prompt-injection boundary, title metadata.</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td><code>apps/extension/src/page-selection-content.test.ts</code>, <code>apps/extension/src/page-selection-service.test.ts</code></td>
+          <td><code>starts_text_mode_with_text_cursor_and_native_selection</code><br><code>messages_each_injected_frame_with_one_top_frame</code><br><code>accepts_first_non_empty_frame_selection_and_ignores_duplicates</code><br><code>reports_text_selection_from_permitted_frame</code><br><code>fails_text_selection_from_inaccessible_frame</code><br><code>returns_snapshot_viewport_proof_on_mouseup</code><br><code>rejects_snapshot_when_viewport_proof_changes</code><br><code>rate_limits_capture_visible_tab_calls</code><br><code>rejects_screenshot_dimension_mismatch</code></td>
+          <td>Selection UX, frame support, stale crop prevention, screenshot API rate limit.</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td><code>apps/extension/src/capture-service.test.ts</code>, <code>apps/extension/src/url-session-store.test.ts</code>, <code>apps/extension/src/side-panel-controller.test.ts</code></td>
+          <td><code>builds_context_bundle_with_active_page_metadata</code><br><code>rejects_image_attachment_over_payload_budget</code><br><code>rejects_final_bundle_over_native_message_budget</code><br><code>snapshot_excludes_raw_image_base64_and_full_text</code><br><code>clears_raw_payloads_after_accepted_send</code><br><code>preserves_attachments_when_provider_image_send_fails</code><br><code>capture_send_preserves_attachments_when_capture_fails</code></td>
+          <td>Attachment state, raw payload lifecycle, bundle construction, send/capture behavior.</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td><code>apps/extension/src/side-panel-view.test.tsx</code>, <code>apps/extension/src/styles.test.ts</code></td>
+          <td><code>renders_select_page_context_toolbar_button_states</code><br><code>renders_text_attachment_with_preview_and_remove</code><br><code>renders_snapshot_attachment_with_thumbnail_dimensions_and_remove</code><br><code>renders_clear_all_for_multiple_attachments</code><br><code>keeps_attachment_rows_within_mobile_width</code><br><code>shows_selection_error_without_mutating_attachments</code></td>
+          <td>Composer attachment UX, accessibility, responsive layout, local selection errors.</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td><code>apps/extension/src/manifest.test.ts</code>, manual runbook</td>
+          <td><code>documents_capture_visible_tab_permission_matrix</code><br><code>keeps_normal_page_snapshot_capture_without_active_tab_permission</code></td>
+          <td>Documentation, manifest permission contract, manual browser validation.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="validation">
+    <h2>Validation</h2>
+    <table>
+      <thead>
+        <tr><th>Command</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>pnpm --filter @sidra/protocol test -- src/protocol.test.ts -t "selected|snapshot|bundle|image"</code></td>
+          <td>Protocol selected-text, area-snapshot image, and context-bundle parser coverage.</td>
+        </tr>
+        <tr>
+          <td><code>pnpm --filter @sidra/bridge test -- src/context-prompt.test.ts src/session-manager.test.ts src/codex-app-server-provider.test.ts -t "selected|snapshot|image|bundle|untrusted|multimodal|display title"</code></td>
+          <td>Bridge provider-part construction, image app-server mapping, display-title metadata, provider rejection, and untrusted-context coverage.</td>
+        </tr>
+        <tr>
+          <td><code>SIDRA_CODEX_WORKSPACE_ROOT="$(pwd)" node tools/codex-smoke/image-input-smoke.mjs</code></td>
+          <td>Confirms the real installed Codex app-server accepts the <code>image</code> item shape before UI work depends on it.</td>
+        </tr>
+        <tr>
+          <td><code>pnpm --filter @sidra/extension test -- src/page-selection-content.test.ts src/page-selection-service.test.ts</code></td>
+          <td>In-page overlay, cursor modes, native/all-frame text selection, screenshot capture, stale crop rejection, rate limiting, and service orchestration coverage.</td>
+        </tr>
+        <tr>
+          <td><code>pnpm --filter @sidra/extension test -- src/capture-service.test.ts src/url-session-store.test.ts src/side-panel-controller.test.ts src/side-panel-view.test.tsx src/manifest.test.ts src/styles.test.ts</code></td>
+          <td>Capture building, text/image attachment state, volatile raw payload lifecycle, send behavior, UI, permissions, and responsive coverage.</td>
+        </tr>
+        <tr>
+          <td><code>pnpm check</code></td>
+          <td>Full repository typecheck/lint gate.</td>
+        </tr>
+        <tr>
+          <td><code>pnpm --filter @sidra/extension build</code></td>
+          <td>Confirms the new content-script bundle is emitted and manifest assets resolve.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="references">
+    <h2>References</h2>
+    <ul>
+      <li>Chrome tabs API: host permissions allow matching-tab calls including <code>tabs.captureVisibleTab()</code> and <code>scripting.executeScript()</code>; <code>activeTab</code> grants temporary host permission after user invocation.</li>
+      <li>Chrome tabs API: <code>captureVisibleTab()</code> captures the visible area of the active tab and is gated by <code>&lt;all_urls&gt;</code> or <code>activeTab</code>, with sensitive-page and file-URL caveats.</li>
+      <li>Chrome tabs API: <code>MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND</code> is 2, so snapshot capture must be serialized and rate-limited.</li>
+      <li>Real Codex app-server smoke validation accepts <code>{ type: "image", url }</code> for data URL image input.</li>
+    </ul>
+  </section>
+
+  <section id="non-goals">
+    <h2>Non-Goals</h2>
+    <ul>
+      <li>No OCR or text extraction from area snapshot images.</li>
+      <li>No passive page content reading or screenshots on side-panel open, tab change, hover, or page load.</li>
+      <li>No persistent content scripts in <code>manifest.json</code>; injection remains user-command driven.</li>
+      <li>No attempt to bypass browser restrictions on Chrome pages or extension pages.</li>
+      <li>No transcript dump of raw selected text or base64 image data before send. Composer previews and thumbnails are allowed because they are the user-controlled pending context UI.</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

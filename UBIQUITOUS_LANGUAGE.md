@@ -46,6 +46,10 @@
 | **Content Size Limit** | A configurable maximum for readable content or full DOM payloads. | Context limit, payload limit |
 | **Hard Safety Ceiling** | A bridge-enforced maximum payload size independent of extension settings. | Hard limit, bridge limit |
 | **Untrusted Reference Material** | Captured page content presented to the provider as data, not instructions. | Untrusted content, reference context |
+| **Page Selection Capture** | The explicit user action that injects a temporary page overlay so the user can select text or drag an area snapshot from the current page. | Inline capture, selection mode, page picker |
+| **Composer Context Attachment** | Pending selected-page context shown in the Prompt Composer and attached to the next accepted send, then cleared. | Pending context, composer attachment, selected context |
+| **Selected Text Attachment** | A Composer Context Attachment containing user-selected page text, or metadata only when the selection is too large. | Text selection, selected text context |
+| **Area Snapshot Attachment** | A Composer Context Attachment containing a user-selected page image snapshot with a visible thumbnail and dimensions. | Screenshot attachment, image attachment, area capture |
 
 ## Bridge and provider
 
@@ -93,6 +97,9 @@
 - **New Chat** resets exactly one visible **URL Session** and does not affect other URL sessions.
 - **Capture + Send** creates **Page Context** and sends it with a prompt.
 - **Send** sends a prompt without performing a new **Capture**.
+- **Page Selection Capture** creates **Composer Context Attachments** only after the user chooses a selection mode and completes the selection.
+- **Composer Context Attachments** are visible in the **Prompt Composer**, removable before send, treated as **Untrusted Reference Material**, and attached to the next accepted send.
+- **Selected Text Attachments** and **Area Snapshot Attachments** are cleared after an accepted send and preserved when a send is rejected before it starts.
 - **Page Context** contains **Metadata** and either **Readable Content**, **Full DOM**, or neither when only **Metadata-only Context** is available.
 - **Readable Content** and **Full DOM** are mutually exclusive **Capture Modes**.
 - A **Context Marker** belongs to a **Transcript** and summarizes the page context sent or skipped for a turn.
@@ -119,6 +126,7 @@
 
 - "session" is overloaded across browser state, bridge state, and provider state. Use **URL Session**, **Bridge Session ID**, and **Provider Session** explicitly.
 - "context" can mean the current page card state, the payload sent to the provider, or a transcript marker. Use **Context State**, **Page Context**, and **Context Marker**.
+- "attachment" can mean selected page context or an arbitrary uploaded file. Use **Composer Context Attachment** for selected page context. V1 does not support arbitrary file upload.
 - "chat session" should be avoided because it hides URL scoping. Use **URL Session** unless discussing generic UI copy.
 - "page" can mean the active browser tab, the normalized identity, or captured data. Use **active tab**, **Page Key**, or **Page Context** as appropriate.
 - "DOM" should not be used interchangeably with readable text or HTML snippets. Use **Full DOM** only for the optional capture mode.

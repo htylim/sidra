@@ -2,8 +2,9 @@ import type { BridgeToExtension, ExtensionToBridge, PageContext } from "@sidra/p
 import { describe, expect, it, vi } from "vitest";
 import { BridgeSessionCoordinator, type ProtocolTransport } from "./bridge/session-coordinator";
 import type { ProtocolTransportPostResult } from "./bridge/session-coordinator";
+import type { ComposerContextAttachment } from "./capture-service";
 import type { PageIdentity, PageKey } from "./page-key";
-import { UrlSessionStore } from "./url-session-store";
+import { COMPOSER_CONTEXT_ATTACHMENT_LIMIT, UrlSessionStore } from "./url-session-store";
 
 class FakeTransport implements ProtocolTransport {
   readonly postedMessages: ExtensionToBridge[] = [];
@@ -58,7 +59,7 @@ function pageIdentity(pageKey: string): PageIdentity {
 function agentTextDelta(clientSessionId: string, text: string): BridgeToExtension {
   return {
     type: "agent.event",
-    version: 3,
+    version: 4,
     clientSessionId,
     event: { type: "assistant.text.delta", text }
   };
@@ -67,7 +68,7 @@ function agentTextDelta(clientSessionId: string, text: string): BridgeToExtensio
 function permissionRequest(clientSessionId: string, requestId = "permission-1", permissionKey = "shell:ls"): BridgeToExtension {
   return {
     type: "permission.request",
-    version: 3,
+    version: 4,
     clientSessionId,
     request: {
       requestId,
@@ -80,7 +81,7 @@ function permissionRequest(clientSessionId: string, requestId = "permission-1", 
 function assistantCancelled(clientSessionId: string): BridgeToExtension {
   return {
     type: "agent.event",
-    version: 3,
+    version: 4,
     clientSessionId,
     event: { type: "assistant.cancelled" }
   };
@@ -89,7 +90,7 @@ function assistantCancelled(clientSessionId: string): BridgeToExtension {
 function sessionStarted(clientSessionId: string): BridgeToExtension {
   return {
     type: "session.started",
-    version: 3,
+    version: 4,
     clientSessionId,
     bridgeSessionId: `${clientSessionId}-bridge`
   };
@@ -157,6 +158,114 @@ function fullDomTooLargePageContext(): PageContext {
     },
     reason: "full_dom_too_large"
   };
+}
+
+function selectedTextAttachment(input: { id: string; text?: string } = { id: "selected-1" }): ComposerContextAttachment {
+  const text = input.text ?? "Selected text from the page.";
+  return {
+    id: input.id,
+    pageContext: {
+      kind: "selected_text",
+      metadata: {
+        url: "https://example.com/selected",
+        title: "Selected page",
+        capturedAt: "2026-05-10T12:00:00.000Z"
+      },
+      text,
+      textLength: text.length,
+      selection: textSelectionGeometry()
+    },
+    display: {
+      source: "selected_text",
+      label: "Selected text",
+      pageTitle: "Selected page",
+      url: "https://example.com/selected",
+      preview: text.slice(0, 24),
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    }
+  };
+}
+
+function areaSnapshotAttachment(input: { id: string; dataBase64?: string }): ComposerContextAttachment {
+  const dataBase64 = input.dataBase64 ?? pngBase64();
+  return {
+    id: input.id,
+    pageContext: {
+      kind: "area_snapshot",
+      metadata: {
+        url: "https://example.com/snapshot",
+        title: "Snapshot page",
+        capturedAt: "2026-05-10T12:00:00.000Z"
+      },
+      image: {
+        mimeType: "image/png",
+        dataBase64,
+        byteLength: atob(dataBase64).length,
+        width: 1,
+        height: 1
+      },
+      selection: snapshotSelectionGeometry()
+    },
+    display: {
+      source: "area_snapshot",
+      label: "Area snapshot",
+      pageTitle: "Snapshot page",
+      url: "https://example.com/snapshot",
+      preview: "Selected page area",
+      thumbnailDataUrl: "data:image/png;base64,thumbnail",
+      imageDimensions: { width: 1, height: 1 },
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    }
+  };
+}
+
+function textSelectionGeometry() {
+  const viewport = selectionViewport();
+  return {
+    mode: "text_selection" as const,
+    viewport,
+    boundingRect: { x: 10, y: 20, width: 100, height: 30 },
+    textRects: [{ x: 10, y: 20, width: 100, height: 30 }],
+    captureProof: {
+      requestId: "selection-1",
+      tabId: 7,
+      windowId: 3,
+      documentUrl: "https://example.com/selected",
+      viewport
+    }
+  };
+}
+
+function snapshotSelectionGeometry() {
+  const viewport = selectionViewport();
+  return {
+    mode: "area_snapshot" as const,
+    viewport,
+    boundingRect: { x: 20, y: 30, width: 80, height: 60 },
+    captureProof: {
+      requestId: "selection-1",
+      tabId: 7,
+      windowId: 3,
+      documentUrl: "https://example.com/snapshot",
+      viewport,
+      screenshotWidth: 1600,
+      screenshotHeight: 1200
+    }
+  };
+}
+
+function selectionViewport() {
+  return {
+    width: 800,
+    height: 600,
+    devicePixelRatio: 2,
+    scrollX: 0,
+    scrollY: 0
+  };
+}
+
+function pngBase64(): string {
+  return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 }
 
 describe("UrlSessionStore", () => {
@@ -234,12 +343,12 @@ describe("UrlSessionStore", () => {
 
     expect(transport.postedMessages).toContainEqual({
       type: "session.cancel",
-      version: 3,
+      version: 4,
       clientSessionId: "client-2"
     });
     expect(transport.postedMessages).not.toContainEqual({
       type: "session.cancel",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1"
     });
   });
@@ -271,7 +380,7 @@ describe("UrlSessionStore", () => {
 
     expect(transport.postedMessages).toContainEqual({
       type: "permission.respond",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       requestId: "permission-1",
       decision: "deny"
@@ -326,7 +435,7 @@ describe("UrlSessionStore", () => {
 
     expect(transport.postedMessages).toContainEqual({
       type: "permission.respond",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       requestId: "permission-1",
       decision: "allow_for_session"
@@ -362,7 +471,7 @@ describe("UrlSessionStore", () => {
 
     expect(transport.postedMessages).not.toContainEqual({
       type: "permission.respond",
-      version: 3,
+      version: 4,
       clientSessionId: "client-2",
       requestId: "permission-1",
       decision: "allow_for_session"
@@ -441,7 +550,7 @@ describe("UrlSessionStore", () => {
     harness.transport.emitMessage(agentTextDelta("client-1", "inactive text"));
     harness.transport.emitMessage({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       message: "Inactive failure",
       code: "provider_error"
@@ -460,7 +569,7 @@ describe("UrlSessionStore", () => {
     harness.transport.emitMessage(agentTextDelta("client-1", "inactive text"));
     harness.transport.emitMessage({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       message: "Inactive failure",
       code: "provider_error"
@@ -526,12 +635,12 @@ describe("UrlSessionStore", () => {
     harness.store.newChat();
     expect(harness.transport.postedMessages).toContainEqual({
       type: "session.reset",
-      version: 3,
+      version: 4,
       clientSessionId: "client-2"
     });
     expect(harness.transport.postedMessages).not.toContainEqual({
       type: "session.reset",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1"
     });
   });
@@ -606,7 +715,7 @@ describe("UrlSessionStore", () => {
     );
     expect(transport.postedMessages).not.toContainEqual({
       type: "session.reset",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1"
     });
   });
@@ -914,6 +1023,138 @@ describe("UrlSessionStore context state", () => {
     store.recordCaptureUnavailable({ message: "Could not capture this page." });
 
     expect(store.getSnapshot().activeSession.sendMode).toBe("capture");
+  });
+});
+
+describe("UrlSessionStore composer context attachments", () => {
+  it("appends_scopes_removes_and_clears_context_attachments_without_exposing_raw_payloads", () => {
+    const { store } = createStoreHarness({ clientSessionIds: ["client-a", "client-b"] });
+    const rawText = "secret selected text ".repeat(20);
+    const rawImageBase64 = pngBase64();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    expect(store.appendActiveContextAttachment(selectedTextAttachment({ id: "selected-1", text: rawText }))).toBe(true);
+    expect(store.appendActiveContextAttachment(areaSnapshotAttachment({ id: "snapshot-1", dataBase64: rawImageBase64 }))).toBe(true);
+
+    const snapshotJson = JSON.stringify(store.getSnapshot().activeSession);
+    expect(store.getSnapshot().activeSession.contextAttachments).toEqual([
+      expect.objectContaining({ id: "selected-1", source: "selected_text", preview: expect.any(String) }),
+      expect.objectContaining({ id: "snapshot-1", source: "area_snapshot", thumbnailDataUrl: "data:image/png;base64,thumbnail" })
+    ]);
+    expect(snapshotJson).not.toContain(rawText);
+    expect(snapshotJson).not.toContain(rawImageBase64);
+
+    store.selectPage(pageIdentity("https://example.com/b"));
+    expect(store.getSnapshot().activeSession.contextAttachments).toEqual([]);
+
+    store.selectPage(pageIdentity("https://example.com/a"));
+    expect(store.removeActiveContextAttachment("selected-1")).toBe(true);
+    expect(store.getSnapshot().activeSession.contextAttachments.map((attachment) => attachment.id)).toEqual(["snapshot-1"]);
+    expect(store.clearActiveContextAttachments()).toBe(true);
+    expect(store.getSnapshot().activeSession.contextAttachments).toEqual([]);
+    expect(store.listActiveContextAttachments()).toEqual([]);
+  });
+
+  it("limits_context_attachments_per_url_session", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+
+    for (let index = 0; index < COMPOSER_CONTEXT_ATTACHMENT_LIMIT; index += 1) {
+      expect(store.appendActiveContextAttachment(selectedTextAttachment({ id: `selected-${index}` }))).toBe(true);
+    }
+
+    expect(store.appendActiveContextAttachment(selectedTextAttachment({ id: "too-many" }))).toBe(false);
+    expect(store.getSnapshot().activeSession.contextAttachments).toHaveLength(COMPOSER_CONTEXT_ATTACHMENT_LIMIT);
+  });
+
+  it("new_chat_clears_active_context_attachments_only", () => {
+    const { store } = createStoreHarness({ clientSessionIds: ["client-a", "client-b"] });
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.appendActiveContextAttachment(selectedTextAttachment({ id: "selected-a" }));
+    store.selectPage(pageIdentity("https://example.com/b"));
+    store.appendActiveContextAttachment(selectedTextAttachment({ id: "selected-b" }));
+
+    store.newChat();
+
+    expect(store.getSnapshot().activeSession.contextAttachments).toEqual([]);
+    store.selectPage(pageIdentity("https://example.com/a"));
+    expect(store.getSnapshot().activeSession.contextAttachments.map((attachment) => attachment.id)).toEqual(["selected-a"]);
+  });
+
+  it("plain_send_consumes_attachments_as_context_bundle_after_acceptance", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.appendActiveContextAttachment(selectedTextAttachment({ id: "selected-1" }));
+
+    expect(store.sendPrompt("ask about this")).toBe(true);
+    expect(store.getSnapshot().activeSession.contextAttachments).toEqual([]);
+    expect(store.getSnapshot().activeSession.contextState).toMatchObject({
+      status: "context_attachments_attached",
+      label: "Context attachments attached"
+    });
+
+    transport.emitMessage(sessionStarted("client-1"));
+    expect(transport.postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        prompt: "ask about this",
+        pageContext: expect.objectContaining({
+          kind: "context_bundle",
+          items: [expect.objectContaining({ id: "selected-1", source: "selected_text" })]
+        })
+      })
+    );
+  });
+
+  it("capture_send_consumes_attachments_and_page_capture_in_one_bundle", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.appendActiveContextAttachment(selectedTextAttachment({ id: "selected-1" }));
+
+    expect(store.sendPromptWithContext({ prompt: "summarize", pageContext: readablePageContext() })).toBe(true);
+    expect(store.getSnapshot().activeSession.contextAttachments).toEqual([]);
+    expect(store.getSnapshot().activeSession.contextState).toMatchObject({
+      status: "page_capture_and_attachments_attached",
+      label: "Page capture and attachments attached"
+    });
+
+    transport.emitMessage(sessionStarted("client-1"));
+    expect(transport.postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        pageContext: expect.objectContaining({
+          kind: "context_bundle",
+          items: [
+            expect.objectContaining({ source: "selected_text" }),
+            expect.objectContaining({ source: "page_capture", context: expect.objectContaining({ kind: "readable" }) })
+          ]
+        })
+      })
+    );
+  });
+
+  it("rejected_send_preserves_draft_and_context_attachments", () => {
+    const { store, transport } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.updateActiveDraftPrompt("keep draft");
+    store.appendActiveContextAttachment(selectedTextAttachment({ id: "selected-1" }));
+    transport.postResult = { ok: false, error: "post failed" };
+
+    expect(store.sendPrompt()).toBe(false);
+
+    expect(store.getSnapshot().activeSession.draftPrompt).toBe("keep draft");
+    expect(store.getSnapshot().activeSession.contextAttachments.map((attachment) => attachment.id)).toEqual(["selected-1"]);
+  });
+
+  it("mark_bridge_disconnected_clears_volatile_context_attachments", () => {
+    const { store } = createStoreHarness();
+    store.selectPage(pageIdentity("https://example.com/a"));
+    store.appendActiveContextAttachment(selectedTextAttachment({ id: "selected-1" }));
+
+    store.markBridgeDisconnected();
+
+    expect(store.getSnapshot().activeSession.contextAttachments).toEqual([]);
+    expect(store.listActiveContextAttachments()).toEqual([]);
   });
 });
 

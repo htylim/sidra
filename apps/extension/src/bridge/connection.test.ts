@@ -39,7 +39,7 @@ class FakePort implements NativeBridgePort {
 function startMessage(): ExtensionToBridge {
   return {
     type: "session.start",
-    version: 3,
+    version: 4,
     clientSessionId: "client-1",
     providerId: "codex"
   };
@@ -81,7 +81,7 @@ describe("BridgeConnection", () => {
     const { connection, ports } = createHarness();
 
     connection.connect();
-    ports[0].emitMessage({ type: "bridge.ready", version: 3 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 4 });
 
     expect(connection.getSnapshot()).toMatchObject({
       connected: true,
@@ -126,7 +126,7 @@ describe("BridgeConnection", () => {
     const { connection, ports } = createHarness();
 
     connection.connect();
-    ports[0].emitMessage({ type: "bridge.ready", version: 3 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 4 });
     ports[0].emitDisconnect();
 
     expect(connection.getSnapshot()).toMatchObject({
@@ -155,7 +155,7 @@ describe("BridgeConnection", () => {
 
     expect(connection.connect()).toEqual({ ok: false, error: "missing host" });
     expect(connection.retry()).toEqual({ ok: true });
-    ports[0].emitMessage({ type: "bridge.ready", version: 3 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 4 });
 
     expect(connectNative).toHaveBeenCalledTimes(2);
     expect(connection.getSnapshot()).toMatchObject({
@@ -169,10 +169,10 @@ describe("BridgeConnection", () => {
     const { connection, connectNative, ports } = createHarness();
 
     connection.connect();
-    ports[0].emitMessage({ type: "bridge.error", version: 3, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 4, message: "bridge failed" });
     expect(connection.retry()).toEqual({ ok: true });
-    ports[0].emitMessage({ type: "bridge.ready", version: 3 });
-    ports[1].emitMessage({ type: "bridge.ready", version: 3 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 4 });
+    ports[1].emitMessage({ type: "bridge.ready", version: 4 });
 
     expect(connectNative).toHaveBeenCalledTimes(2);
     expect(connection.getSnapshot()).toMatchObject({
@@ -190,7 +190,7 @@ describe("BridgeConnection", () => {
     connection.connect();
     ports[0].emitMessage({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       event: { type: "assistant.text.delta" }
     });
@@ -219,7 +219,7 @@ describe("BridgeConnection", () => {
     const { connection, connectNative, ports } = createHarness();
 
     connection.post(startMessage());
-    connection.post({ type: "session.send", version: 3, clientSessionId: "client-1", prompt: "hi" });
+    connection.post({ type: "session.send", version: 4, clientSessionId: "client-1", prompt: "hi" });
 
     expect(connectNative).toHaveBeenCalledTimes(1);
     expect(ports[0].postedMessages).toHaveLength(2);
@@ -229,7 +229,7 @@ describe("BridgeConnection", () => {
     const { connection, ports } = createHarness();
 
     connection.post(startMessage());
-    ports[0].emitMessage({ type: "bridge.ready", version: 3 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 4 });
 
     expect(connection.getSnapshot()).toMatchObject({ connected: true, ready: true });
   });
@@ -244,7 +244,7 @@ describe("BridgeConnection", () => {
     expect(() =>
       ports[0].emitMessage({
         type: "agent.event",
-        version: 3,
+        version: 4,
         clientSessionId: "client-1",
         event: { type: "assistant.text.delta" }
       })
@@ -263,7 +263,7 @@ describe("BridgeConnection", () => {
     const { connection, ports } = createHarness();
 
     connection.post(startMessage());
-    ports[0].emitMessage({ type: "bridge.ready", version: 3 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 4 });
     ports[0].emitDisconnect();
 
     expect(connection.getSnapshot()).toMatchObject({
@@ -280,11 +280,11 @@ describe("BridgeConnection", () => {
     ports[0].emitDisconnect();
     connection.post({
       type: "session.send",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       prompt: "after"
     });
-    ports[0].emitMessage({ type: "bridge.ready", version: 3 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 4 });
 
     expect(connection.getSnapshot()).toMatchObject({ connected: true, ready: false });
   });
@@ -328,7 +328,7 @@ describe("BridgeConnection", () => {
     connection.connect();
     vi.advanceTimersByTime(10_000);
 
-    expect(ports[0].postedMessages).toContainEqual({ type: "heartbeat", version: 3 });
+    expect(ports[0].postedMessages).toContainEqual({ type: "heartbeat", version: 4 });
   });
 
   it("posts_heartbeat_only_to_the_current_native_port", () => {
@@ -340,7 +340,7 @@ describe("BridgeConnection", () => {
     vi.advanceTimersByTime(10_000);
 
     expect(ports[0].postedMessages).toEqual([]);
-    expect(ports[1].postedMessages).toEqual([{ type: "heartbeat", version: 3 }]);
+    expect(ports[1].postedMessages).toEqual([{ type: "heartbeat", version: 4 }]);
   });
 
   it("stops_heartbeat_loop_when_native_port_disconnects", () => {
@@ -363,8 +363,8 @@ describe("BridgeConnection", () => {
     connection.retry();
     vi.advanceTimersByTime(10_000);
 
-    expect(ports[0].postedMessages).toEqual([{ type: "heartbeat", version: 3 }]);
-    expect(ports[1].postedMessages).toEqual([{ type: "heartbeat", version: 3 }]);
+    expect(ports[0].postedMessages).toEqual([{ type: "heartbeat", version: 4 }]);
+    expect(ports[1].postedMessages).toEqual([{ type: "heartbeat", version: 4 }]);
   });
 
   it("disconnect_stops_heartbeat_loop_before_closing_port", () => {

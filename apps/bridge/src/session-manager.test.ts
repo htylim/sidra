@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentEvent, BridgeToExtension } from "@sidra/protocol";
+import type { AgentEvent, BridgeToExtension, PageContext } from "@sidra/protocol";
 
 const promptFormatterTrace = vi.hoisted(() => ({
   events: [] as string[]
@@ -38,13 +38,13 @@ describe("BridgeSessionManager", () => {
     expect(emitted).toEqual([
       {
         type: "session.started",
-        version: 3,
+        version: 4,
         clientSessionId: "page-1",
         bridgeSessionId: expect.any(String)
       },
       {
         type: "session.started",
-        version: 3,
+        version: 4,
         clientSessionId: "page-2",
         bridgeSessionId: expect.any(String)
       }
@@ -99,7 +99,7 @@ describe("BridgeSessionManager", () => {
     expect(emitted).toEqual([
       {
         type: "session.error",
-        version: 3,
+        version: 4,
         clientSessionId: "page-1",
         message: "Session has not been started",
         code: "session_not_started"
@@ -120,13 +120,13 @@ describe("BridgeSessionManager", () => {
     expect(emitted.slice(1)).toEqual([
       {
         type: "agent.event",
-        version: 3,
+        version: 4,
         clientSessionId: "page-1",
         event: { type: "assistant.text.delta", text: "hello" }
       },
       {
         type: "agent.event",
-        version: 3,
+        version: 4,
         clientSessionId: "page-1",
         event: { type: "assistant.done" }
       }
@@ -143,7 +143,7 @@ describe("BridgeSessionManager", () => {
 
     expect(emitted).toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       event: { type: "assistant.done" }
     });
@@ -168,7 +168,7 @@ describe("BridgeSessionManager", () => {
     expect(provider.createdSessions[0]?.sentInputs).toEqual([providerInput("First"), providerInput("Second")]);
     expect(emitted).toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       event: { type: "assistant.done" }
     });
@@ -201,7 +201,7 @@ describe("BridgeSessionManager", () => {
     expect(provider.createdSessions[0]?.sentInputs).toEqual([providerInput("First"), providerInput("Second")]);
     expect(emitted).not.toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "A turn is already in flight for this session",
       code: "turn_in_flight"
@@ -218,13 +218,13 @@ describe("BridgeSessionManager", () => {
 
     expect(emitted).toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       event: { type: "assistant.done" }
     });
     expect(emitted).not.toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Provider send failed",
       code: "provider_error"
@@ -241,14 +241,14 @@ describe("BridgeSessionManager", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Provider emitted an unsafe event.",
       code: "unsafe_provider_event"
     });
     expect(emitted).not.toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       event: { type: "assistant.done", reasoning: "private" }
     });
@@ -266,7 +266,7 @@ describe("BridgeSessionManager", () => {
 
     expect(emitted).toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       event: { type: "assistant.activity", activity: { kind: "reasoning_summary_delta", text: "Checked files." } }
     });
@@ -292,14 +292,14 @@ describe("BridgeSessionManager", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Provider emitted an unsafe event.",
       code: "unsafe_provider_event"
     });
     expect(emitted).not.toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       event
     });
@@ -320,7 +320,7 @@ describe("BridgeSessionManager", () => {
     expect(provider.createdSessions[0]?.sendSignals[0]?.aborted).toBe(true);
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Provider emitted an unsafe event.",
       code: "unsafe_provider_event"
@@ -344,26 +344,26 @@ describe("BridgeSessionManager", () => {
 
     expect(emitted).toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       event: { type: "assistant.text.delta", text: "before" }
     });
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Provider emitted an unsafe event.",
       code: "unsafe_provider_event"
     });
     expect(emitted).not.toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       event: { type: "assistant.text.delta", text: "after" }
     });
     expect(emitted).not.toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       event: { type: "assistant.done" }
     });
@@ -381,7 +381,7 @@ describe("BridgeSessionManager", () => {
     expect(emitted).toEqual([
       {
         type: "session.error",
-        version: 3,
+        version: 4,
         clientSessionId: "page-1",
         message: "Provider session failed to start.",
         code: "provider_start_failed"
@@ -407,14 +407,14 @@ describe("BridgeSessionManager", () => {
     expect(provider.createdSessions[0]?.closeCount).toBe(1);
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Provider session failed to start.",
       code: "provider_start_failed"
     });
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -431,7 +431,7 @@ describe("BridgeSessionManager", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Provider send failed",
       code: "provider_error"
@@ -452,7 +452,7 @@ describe("BridgeSessionManager", () => {
 
     expect(emitted).not.toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Provider send failed",
       code: "provider_error"
@@ -476,7 +476,7 @@ describe("BridgeSessionManager", () => {
     expect(session?.sentInputs).toEqual([providerInput("First")]);
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "A turn is already in flight for this session",
       code: "turn_in_flight"
@@ -511,7 +511,7 @@ describe("BridgeSessionManager", () => {
 
     expect(emitted).toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-2",
       event: { type: "assistant.text.delta", text: "second" }
     });
@@ -540,7 +540,7 @@ describe("BridgeSessionManager", () => {
     expect(provider.createdSessions[0]?.sendSignals[0]?.aborted).toBe(true);
     expect(emitted).not.toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       event: { type: "assistant.text.delta", text: "stale" }
     });
@@ -559,7 +559,7 @@ describe("BridgeSessionManager permission requests", () => {
 
     expect(emitted).toContainEqual({
       type: "permission.request",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       request: {
         requestId: expect.any(String),
@@ -586,7 +586,7 @@ describe("BridgeSessionManager permission requests", () => {
 
     expect(emitted).not.toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       event: { type: "assistant.text.delta", text: expect.any(String) }
     });
@@ -596,7 +596,7 @@ describe("BridgeSessionManager permission requests", () => {
 
     expect(emitted).toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       event: { type: "assistant.text.delta", text: "allowed:allow_once" }
     });
@@ -618,7 +618,7 @@ describe("BridgeSessionManager permission requests", () => {
       expect(provider.createdSessions[0]?.permissionDecisions).toEqual([{ decision }]);
       expect(emitted).toContainEqual({
         type: "agent.event",
-        version: 3,
+        version: 4,
         clientSessionId: "page-1",
         event: { type: "assistant.done" }
       });
@@ -634,7 +634,7 @@ describe("BridgeSessionManager permission requests", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Permission request was not found.",
       code: "permission_not_found"
@@ -651,7 +651,7 @@ describe("BridgeSessionManager permission requests", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Provider send failed",
       code: "provider_error"
@@ -675,7 +675,7 @@ describe("BridgeSessionManager permission requests", () => {
 
     expect(emitted).toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-2",
       event: { type: "assistant.text.delta", text: "second" }
     });
@@ -698,7 +698,7 @@ describe("BridgeSessionManager permission requests", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Permission request was not found.",
       code: "permission_not_found"
@@ -721,7 +721,7 @@ describe("BridgeSessionManager permission requests", () => {
     expect(provider.createdSessions[0]?.permissionDecisions).toEqual([]);
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Permission request was not found.",
       code: "permission_not_found"
@@ -742,7 +742,7 @@ describe("BridgeSessionManager permission requests", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Permission request was not found.",
       code: "permission_not_found"
@@ -776,7 +776,7 @@ describe("BridgeSessionManager permission requests", () => {
 
     expect(emitted).toContainEqual({
       type: "permission.request",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       request: {
         requestId: expect.any(String),
@@ -808,7 +808,7 @@ describe("BridgeSessionManager permission requests", () => {
     expect(provider.createdSessions[0]?.permissionDecisions).toEqual([]);
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Permission request was not found.",
       code: "permission_not_found"
@@ -830,6 +830,7 @@ describe("BridgeSessionManager page context prompt formatting", () => {
     expect(provider.createdSessions[0]?.sentInputs).toEqual([
       {
         prompt: expect.stringContaining("Untrusted page context JSON:"),
+        parts: [{ kind: "text", text: expect.stringContaining("Untrusted page context JSON:") }],
         displayTitleSource: {
           prompt: "Summarize this",
           pageMetadata: {
@@ -872,6 +873,26 @@ describe("BridgeSessionManager provider history title source", () => {
       pageMetadata: {
         title: "Example article",
         url: "https://example.com/article"
+      }
+    });
+  });
+
+  it("uses_bundle_metadata_for_display_title_source", async () => {
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", {
+      prompt: "Summarize this",
+      pageContext: contextBundleWithDifferentItemMetadata()
+    });
+
+    expect(provider.createdSessions[0]?.sentInputs[0]?.displayTitleSource).toEqual({
+      prompt: "Summarize this",
+      pageMetadata: {
+        title: "Bundle page title",
+        canonicalUrl: "https://example.com/bundle-canonical",
+        url: "https://example.com/bundle"
       }
     });
   });
@@ -944,6 +965,7 @@ describe("BridgeSessionManager provider history title source", () => {
     expect(provider.createdSessions[0]?.sentInputs).toEqual([
       {
         prompt: "First",
+        parts: [{ kind: "text", text: "First" }],
         displayTitleSource: {
           prompt: "First"
         }
@@ -989,7 +1011,7 @@ describe("BridgeSessionManager cancellation", () => {
 
     expect(emitted).toContainEqual({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       event: { type: "assistant.cancelled" }
     });
@@ -1048,7 +1070,7 @@ describe("BridgeSessionManager cancellation", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "No in-flight turn to cancel",
       code: "no_in_flight_turn"
@@ -1096,13 +1118,13 @@ describe("BridgeSessionManager reset and close", () => {
     expect(emitted).toEqual([
       {
         type: "session.started",
-        version: 3,
+        version: 4,
         clientSessionId: "page-1",
         bridgeSessionId: expect.any(String)
       },
       {
         type: "session.started",
-        version: 3,
+        version: 4,
         clientSessionId: "page-1",
         bridgeSessionId: expect.any(String)
       }
@@ -1159,7 +1181,7 @@ describe("BridgeSessionManager reset and close", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -1177,7 +1199,7 @@ describe("BridgeSessionManager reset and close", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -1248,7 +1270,7 @@ describe("BridgeSessionManager reset and close", () => {
     expect(secondSession.sentInputs).toEqual([]);
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -1309,7 +1331,7 @@ describe("BridgeSessionManager connection cleanup", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -1447,7 +1469,7 @@ describe("BridgeSessionManager connection cleanup", () => {
     expect(provider.createdSessions).toEqual([]);
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -1477,7 +1499,7 @@ describe("BridgeSessionManager connection cleanup", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -1496,7 +1518,7 @@ describe("BridgeSessionManager connection cleanup", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -1535,7 +1557,7 @@ describe("BridgeSessionManager connection cleanup", () => {
     expect(emitted).toEqual([
       {
         type: "session.error",
-        version: 3,
+        version: 4,
         clientSessionId: "page-1",
         message: "Session has not been started",
         code: "session_not_started"
@@ -1555,7 +1577,7 @@ describe("BridgeSessionManager connection cleanup", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -1576,7 +1598,7 @@ describe("BridgeSessionManager connection cleanup", () => {
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -1638,7 +1660,7 @@ describe("BridgeSessionManager connection cleanup", () => {
     expect(provider.createdSessions[0]?.sentInputs).toEqual([providerInput("First")]);
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "A turn is already in flight for this session",
       code: "turn_in_flight"
@@ -1752,6 +1774,7 @@ function unsafeAgentEvent(value: unknown): AgentEvent {
 function providerInput(prompt: string): AgentSendInput {
   return {
     prompt,
+    parts: [{ kind: "text", text: prompt }],
     displayTitleSource: {
       prompt
     }
@@ -2035,6 +2058,52 @@ function readablePageContext() {
     textLength: "Captured page text".length,
     extractionMethod: "readability" as const
   };
+}
+
+function contextBundleWithDifferentItemMetadata(): PageContext {
+  const itemText = "Selected text";
+  const itemMetadata = {
+    url: "https://example.com/old",
+    title: "Old item title",
+    capturedAt: "2026-06-20T12:00:00.000Z"
+  };
+  const viewport = { width: 800, height: 600, devicePixelRatio: 1, scrollX: 0, scrollY: 0 };
+  return {
+    kind: "context_bundle",
+    trust: "untrusted",
+    metadata: {
+      url: "https://example.com/bundle",
+      canonicalUrl: "https://example.com/bundle-canonical",
+      title: "Bundle page title",
+      capturedAt: "2026-06-20T12:01:00.000Z"
+    },
+    createdAt: "2026-06-20T12:01:00.000Z",
+    items: [
+      {
+        id: "attachment-1",
+        label: "Selected text",
+        trust: "untrusted",
+        source: "selected_text",
+        context: {
+          kind: "selected_text",
+          metadata: itemMetadata,
+          text: itemText,
+          textLength: itemText.length,
+          selection: {
+            mode: "text_selection",
+            viewport,
+            boundingRect: { x: 1, y: 2, width: 30, height: 10 },
+            textRects: [{ x: 1, y: 2, width: 30, height: 10 }],
+            captureProof: {
+              requestId: "selection-1",
+              documentUrl: itemMetadata.url,
+              viewport
+            }
+          }
+        }
+      }
+    ]
+  } as PageContext;
 }
 
 function pageContextWithMetadataAccessTrace(events: string[]) {

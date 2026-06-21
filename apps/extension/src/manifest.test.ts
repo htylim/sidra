@@ -11,6 +11,7 @@ type ExtensionManifest = {
   key?: string;
   minimum_chrome_version?: string;
   permissions: string[];
+  host_permissions?: string[];
   side_panel?: { default_path?: string };
   action?: { default_title?: string };
   background?: { service_worker?: string; type?: string };
@@ -93,5 +94,41 @@ describe("extension manifest", () => {
     expect(`chrome-extension://${derivedExtensionId}/`).toBe(
       `chrome-extension://${EXPECTED_DEVELOPMENT_EXTENSION_ID}/`
     );
+  });
+
+  it("documents_capture_visible_tab_permission_matrix", () => {
+    const manifest = readManifest();
+    const captureVisibleTabPermissionMatrix = [
+      {
+        pageKind: "normal http and https page",
+        requiredManifestGrant: "<all_urls>",
+        activeTabRequired: false
+      },
+      {
+        pageKind: "browser, extension, and restricted pages",
+        requiredManifestGrant: "browser blocks capture",
+        activeTabRequired: false
+      },
+      {
+        pageKind: "file URL",
+        requiredManifestGrant: "browser file access setting",
+        activeTabRequired: false
+      }
+    ];
+
+    expect(manifest.permissions).toEqual(expect.arrayContaining(["tabs", "scripting"]));
+    expect(manifest.host_permissions).toEqual(["<all_urls>"]);
+    expect(captureVisibleTabPermissionMatrix).toContainEqual({
+      pageKind: "normal http and https page",
+      requiredManifestGrant: "<all_urls>",
+      activeTabRequired: false
+    });
+  });
+
+  it("keeps_normal_page_snapshot_capture_without_active_tab_permission", () => {
+    const manifest = readManifest();
+
+    expect(manifest.permissions).not.toContain("activeTab");
+    expect(manifest.host_permissions).toContain("<all_urls>");
   });
 });

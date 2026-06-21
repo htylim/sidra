@@ -10,8 +10,17 @@ import { describe, expect, it, vi } from "vitest";
 import type { PageIdentity, PageKey } from "./page-key";
 import { type NativeBridgePort, SIDRA_NATIVE_HOST } from "./bridge/connection";
 import { createSidePanelController } from "./side-panel-controller";
-import type { CaptureDocumentResult, CaptureGateway, CaptureResult, CapturedTabDocument } from "./capture-service";
+import {
+  buildAreaSnapshotContextAttachment,
+  buildSelectedTextContextAttachment,
+  type BuildComposerAttachmentResult,
+  type CaptureDocumentResult,
+  type CaptureGateway,
+  type CaptureResult,
+  type CapturedTabDocument
+} from "./capture-service";
 import type { CaptureMode } from "./capture-mode";
+import type { PageSelectionCaptureResult, PageSelectionMode } from "./page-selection-service";
 import {
   DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT,
   DEFAULT_QUICK_ACTIONS_SETTINGS,
@@ -63,10 +72,12 @@ type HarnessOptions = {
   initialPage?: PageIdentity;
   clientSessionIds?: string[];
   captureService?: FakeCaptureService;
+  pageSelectionService?: FakePageSelectionService;
   captureGateway?: CaptureGateway;
   settingsStore?: Pick<SettingsStore, "start" | "getSnapshot" | "whenReady" | "subscribe">;
   createSpeechRequestId?: () => string;
   openOptionsPage?: () => void;
+  createContextAttachmentId?: () => string;
 };
 
 class FakeCaptureService {
@@ -106,6 +117,46 @@ class FakeCaptureService {
     this.buildCalls.push({ document, mode });
     this.onBuildPageContext?.();
     return this.nextBuiltPageContext ?? (this.nextResult.status === "captured" ? this.nextResult.pageContext : readablePageContext());
+  }
+
+  async buildContextAttachmentForSelection(input: {
+    id: string;
+    pageIdentity: Extract<PageIdentity, { status: "ready" }>;
+    selectionResult: Extract<PageSelectionCaptureResult, { status: "captured" }>;
+    capturedAt: string;
+  }): Promise<BuildComposerAttachmentResult> {
+    const selectionResult = input.selectionResult;
+    if (selectionResult.mode === "text") {
+      return buildSelectedTextContextAttachment({
+        id: input.id,
+        pageIdentity: input.pageIdentity,
+        selectionResult,
+        capturedAt: input.capturedAt,
+        readableContentLimitCharacters: 1_000
+      });
+    }
+
+    return buildAreaSnapshotContextAttachment({
+      id: input.id,
+      pageIdentity: input.pageIdentity,
+      selectionResult,
+      capturedAt: input.capturedAt
+    });
+  }
+}
+
+class FakePageSelectionService {
+  readonly startCalls: PageSelectionMode[] = [];
+  shutdownCalls = 0;
+  nextResult: PageSelectionCaptureResult | Promise<PageSelectionCaptureResult> = selectedTextPageSelectionResult();
+
+  async start(mode: PageSelectionMode): Promise<PageSelectionCaptureResult> {
+    this.startCalls.push(mode);
+    return await this.nextResult;
+  }
+
+  shutdown(): void {
+    this.shutdownCalls += 1;
   }
 }
 
@@ -158,10 +209,12 @@ function createHarnessWithOptions(options: HarnessOptions = {}) {
     },
     activePageTracker: activePage,
     captureService: options.captureService,
+    pageSelectionService: options.pageSelectionService,
     captureGateway: options.captureGateway,
     settingsStore: options.settingsStore,
     createSpeechRequestId: options.createSpeechRequestId,
-    openOptionsPage: options.openOptionsPage
+    openOptionsPage: options.openOptionsPage,
+    createContextAttachmentId: options.createContextAttachmentId
   });
 
   return { controller, connectNative, ports, activePage };
@@ -268,6 +321,83 @@ function fullDomTooLargePageContext() {
   };
 }
 
+function selectedTextPageSelectionResult(text = "Selected page text"): PageSelectionCaptureResult {
+  return {
+    status: "captured",
+    mode: "text",
+    frameDocumentUrl: "https://example.com/default",
+    text,
+    selection: textSelectionGeometry()
+  };
+}
+
+function snapshotPageSelectionResult(input: { dataBase64?: string; byteLength?: number } = {}): PageSelectionCaptureResult {
+  const dataBase64 = input.dataBase64 ?? pngBase64();
+  return {
+    status: "captured",
+    mode: "snapshot",
+    frameDocumentUrl: "https://example.com/default",
+    image: {
+      mimeType: "image/png",
+      dataBase64,
+      byteLength: input.byteLength ?? atob(dataBase64).length,
+      width: 1,
+      height: 1
+    },
+    thumbnailDataUrl: "data:image/png;base64,thumbnail",
+    selection: snapshotSelectionGeometry()
+  };
+}
+
+function textSelectionGeometry() {
+  const viewport = selectionViewport();
+  return {
+    mode: "text_selection" as const,
+    viewport,
+    boundingRect: { x: 10, y: 20, width: 100, height: 30 },
+    textRects: [{ x: 10, y: 20, width: 100, height: 30 }],
+    captureProof: {
+      requestId: "selection-1",
+      tabId: 7,
+      windowId: 3,
+      documentUrl: "https://example.com/default",
+      viewport
+    }
+  };
+}
+
+function snapshotSelectionGeometry() {
+  const viewport = selectionViewport();
+  return {
+    mode: "area_snapshot" as const,
+    viewport,
+    boundingRect: { x: 20, y: 30, width: 80, height: 60 },
+    captureProof: {
+      requestId: "selection-1",
+      tabId: 7,
+      windowId: 3,
+      documentUrl: "https://example.com/default",
+      viewport,
+      screenshotWidth: 1600,
+      screenshotHeight: 1200
+    }
+  };
+}
+
+function selectionViewport() {
+  return {
+    width: 800,
+    height: 600,
+    devicePixelRatio: 2,
+    scrollX: 0,
+    scrollY: 0
+  };
+}
+
+function pngBase64(): string {
+  return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+}
+
 function capturedDocument(overrides: Partial<CapturedTabDocument> = {}): CapturedTabDocument {
   return {
     documentUrl: "https://example.com/current",
@@ -294,6 +424,16 @@ function longText(seed: string) {
 
 function textOfLength(seed: string, length: number) {
   return seed.repeat(Math.ceil(length / seed.length)).slice(0, length);
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }
 
 class FakeControllerCaptureGateway implements CaptureGateway {
@@ -405,20 +545,20 @@ function unsupportedPageIdentity(url: string): PageIdentity {
 function sessionStarted(clientSessionId = "client-1"): BridgeToExtension {
   return {
     type: "session.started",
-    version: 3,
+    version: 4,
     clientSessionId,
     bridgeSessionId: "bridge-1"
   };
 }
 
 function bridgeReady(): BridgeToExtension {
-  return { type: "bridge.ready", version: 3 };
+  return { type: "bridge.ready", version: 4 };
 }
 
 function agentTextDelta(clientSessionId: string, text: string): BridgeToExtension {
   return {
     type: "agent.event",
-    version: 3,
+    version: 4,
     clientSessionId,
     event: { type: "assistant.text.delta", text }
   };
@@ -427,7 +567,7 @@ function agentTextDelta(clientSessionId: string, text: string): BridgeToExtensio
 function permissionRequest(clientSessionId = "client-1", requestId = "permission-1"): BridgeToExtension {
   return {
     type: "permission.request",
-    version: 3,
+    version: 4,
     clientSessionId,
     request: {
       requestId,
@@ -440,7 +580,7 @@ function permissionRequest(clientSessionId = "client-1", requestId = "permission
 function agentDone(clientSessionId = "client-1"): BridgeToExtension {
   return {
     type: "agent.event",
-    version: 3,
+    version: 4,
     clientSessionId,
     event: { type: "assistant.done" }
   };
@@ -449,7 +589,7 @@ function agentDone(clientSessionId = "client-1"): BridgeToExtension {
 function assistantCancelled(clientSessionId = "client-1"): BridgeToExtension {
   return {
     type: "agent.event",
-    version: 3,
+    version: 4,
     clientSessionId,
     event: { type: "assistant.cancelled" }
   };
@@ -513,7 +653,7 @@ describe("SidePanelController", () => {
   it("does not send prompts while bridge reports a blocking error", () => {
     const { controller, ports } = createHarness();
 
-    ports[0].emitMessage({ type: "bridge.error", version: 3, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 4, message: "bridge failed" });
 
     expect(controller.sendPrompt("hello")).toBe(false);
     expect(ports[0].postedMessages).toEqual([]);
@@ -523,7 +663,7 @@ describe("SidePanelController", () => {
   it("clears the blocking bridge error after retry succeeds", () => {
     const { controller, ports } = createHarness();
 
-    ports[0].emitMessage({ type: "bridge.error", version: 3, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 4, message: "bridge failed" });
     controller.retryBridge();
     ports[1].emitMessage(bridgeReady());
 
@@ -542,7 +682,7 @@ describe("SidePanelController", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage(permissionRequest("client-1", "permission-1"));
     controller.respondToPermission("permission-1", "allow_for_session");
-    ports[0].emitMessage({ type: "bridge.error", version: 3, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 4, message: "bridge failed" });
 
     controller.retryBridge();
     ports[1].emitMessage(bridgeReady());
@@ -552,7 +692,7 @@ describe("SidePanelController", () => {
 
     expect(ports[1].postedMessages).not.toContainEqual({
       type: "permission.respond",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       requestId: "permission-2",
       decision: "allow_for_session"
@@ -564,7 +704,7 @@ describe("SidePanelController", () => {
 
     ports[0].emitMessage(bridgeReady());
     expect(controller.sendPrompt("unsent")).toBe(true);
-    ports[0].emitMessage({ type: "bridge.error", version: 3, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 4, message: "bridge failed" });
 
     expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
 
@@ -574,7 +714,7 @@ describe("SidePanelController", () => {
     expect(controller.getSnapshot().activeSession.transcript).toEqual([]);
     expect(controller.sendPrompt("after retry")).toBe(true);
     expect(ports[1].postedMessages).toEqual([
-      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 4, clientSessionId: "client-1", providerId: "codex" }
     ]);
   });
 
@@ -595,7 +735,7 @@ describe("SidePanelController", () => {
 
     expect(controller.sendPrompt("second")).toBe(true);
     expect(ports[1].postedMessages).toEqual([
-      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 4, clientSessionId: "client-1", providerId: "codex" }
     ]);
   });
 
@@ -753,7 +893,7 @@ describe("SidePanelController", () => {
     expect(controller.sendPrompt("hello")).toBe(true);
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 4, clientSessionId: "client-1", providerId: "codex" }
     ]);
     expect(controller.getSnapshot().activeSession).toMatchObject({
       pendingPromptCount: 1,
@@ -764,8 +904,8 @@ describe("SidePanelController", () => {
     ports[0].emitMessage(sessionStarted());
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "hello" }
+      { type: "session.start", version: 4, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 4, clientSessionId: "client-1", prompt: "hello" }
     ]);
   });
 
@@ -778,14 +918,14 @@ describe("SidePanelController", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       event: { type: "assistant.done" }
     });
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first" }
+      { type: "session.start", version: 4, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 4, clientSessionId: "client-1", prompt: "first" }
     ]);
   });
 
@@ -833,7 +973,7 @@ describe("SidePanelController", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.cancel",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1"
     });
   });
@@ -885,7 +1025,7 @@ describe("SidePanelController", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "permission.respond",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       requestId: "permission-1",
       decision: "allow_once"
@@ -915,7 +1055,7 @@ describe("SidePanelController", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "permission.respond",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       requestId: "permission-2",
       decision: "allow_for_session"
@@ -952,7 +1092,7 @@ describe("SidePanelController", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.start",
-      version: 3,
+      version: 4,
       clientSessionId: "client-2",
       providerId: "codex"
     });
@@ -970,14 +1110,14 @@ describe("SidePanelController", () => {
     controller.sendPrompt("second");
 
     expect(ports[1].postedMessages).toEqual([
-      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" }
+      { type: "session.start", version: 4, clientSessionId: "client-1", providerId: "codex" }
     ]);
 
     ports[1].emitMessage(sessionStarted());
 
     expect(ports[1].postedMessages).toEqual([
-      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "second" }
+      { type: "session.start", version: 4, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 4, clientSessionId: "client-1", prompt: "second" }
     ]);
   });
 
@@ -989,7 +1129,7 @@ describe("SidePanelController", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       event: { type: "assistant.text.delta", text: "Hi" }
     });
@@ -1036,7 +1176,7 @@ describe("SidePanelController", () => {
 
     ports[0].emitMessage(bridgeReady());
     controller.sendPrompt("hello");
-    ports[0].emitMessage({ type: "bridge.error", version: 3, message: "bridge failed" });
+    ports[0].emitMessage({ type: "bridge.error", version: 4, message: "bridge failed" });
 
     expect(controller.getSnapshot().bridge).toEqual({
       connected: true,
@@ -1052,7 +1192,7 @@ describe("SidePanelController", () => {
 
     ports[0].emitMessage({
       type: "bridge.error",
-      version: 3,
+      version: 4,
       message: "Payload is too large.",
       code: BRIDGE_PAYLOAD_TOO_LARGE_CODE
     });
@@ -1085,8 +1225,8 @@ describe("SidePanelController newChat", () => {
       transcript: []
     });
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.reset", version: 3, clientSessionId: "client-1" }
+      { type: "session.start", version: 4, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.reset", version: 4, clientSessionId: "client-1" }
     ]);
   });
 
@@ -1100,7 +1240,7 @@ describe("SidePanelController newChat", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.reset",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1"
     });
   });
@@ -1117,7 +1257,7 @@ describe("SidePanelController newChat", () => {
   it("keeps bridge connection state when clearing local session state", () => {
     const { controller, ports } = createHarness();
 
-    ports[0].emitMessage({ type: "bridge.ready", version: 3 });
+    ports[0].emitMessage({ type: "bridge.ready", version: 4 });
     controller.sendPrompt("first");
     controller.newChat();
 
@@ -1140,18 +1280,18 @@ describe("SidePanelController newChat", () => {
     controller.sendPrompt("after reset");
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first" },
-      { type: "session.reset", version: 3, clientSessionId: "client-1" }
+      { type: "session.start", version: 4, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 4, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.reset", version: 4, clientSessionId: "client-1" }
     ]);
 
     ports[0].emitMessage(sessionStarted());
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first" },
-      { type: "session.reset", version: 3, clientSessionId: "client-1" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "after reset" }
+      { type: "session.start", version: 4, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 4, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.reset", version: 4, clientSessionId: "client-1" },
+      { type: "session.send", version: 4, clientSessionId: "client-1", prompt: "after reset" }
     ]);
   });
 
@@ -1215,7 +1355,7 @@ describe("SidePanelController newChat", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       event: { type: "assistant.done" }
     });
@@ -1224,16 +1364,16 @@ describe("SidePanelController newChat", () => {
     controller.sendPrompt("after reset");
 
     expect(ports[0].postedMessages).toEqual([
-      { type: "session.start", version: 3, clientSessionId: "client-1", providerId: "codex" },
-      { type: "session.send", version: 3, clientSessionId: "client-1", prompt: "first" },
-      { type: "session.reset", version: 3, clientSessionId: "client-1" }
+      { type: "session.start", version: 4, clientSessionId: "client-1", providerId: "codex" },
+      { type: "session.send", version: 4, clientSessionId: "client-1", prompt: "first" },
+      { type: "session.reset", version: 4, clientSessionId: "client-1" }
     ]);
 
     ports[0].emitMessage(sessionStarted());
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       prompt: "after reset"
     });
@@ -1276,7 +1416,7 @@ describe("SidePanelController newChat", () => {
     );
     expect(ports[0].postedMessages).not.toContainEqual({
       type: "session.reset",
-      version: 3,
+      version: 4,
       clientSessionId: "client-a"
     });
   });
@@ -1352,7 +1492,7 @@ describe("SidePanelController transcript speech", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "speech.synthesize",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       text: "Read this bubble.",
       options: {
@@ -1373,7 +1513,7 @@ describe("SidePanelController transcript speech", () => {
 
     controller.newChat();
 
-    expect(ports[0].postedMessages).toContainEqual({ type: "speech.cancel", version: 3, requestId: "speech-1" });
+    expect(ports[0].postedMessages).toContainEqual({ type: "speech.cancel", version: 4, requestId: "speech-1" });
     expect(controller.getSnapshot().speech).toMatchObject({ activeEntryId: undefined, status: "idle" });
   });
 
@@ -1385,7 +1525,7 @@ describe("SidePanelController transcript speech", () => {
     ports[0].disconnect();
 
     expect(ports).toHaveLength(1);
-    expect(ports[0].postedMessages).not.toContainEqual({ type: "speech.cancel", version: 3, requestId: "speech-1" });
+    expect(ports[0].postedMessages).not.toContainEqual({ type: "speech.cancel", version: 4, requestId: "speech-1" });
     expect(controller.getSnapshot().speech).toMatchObject({ activeEntryId: undefined, status: "idle" });
   });
 
@@ -1396,7 +1536,7 @@ describe("SidePanelController transcript speech", () => {
 
     activePage.emit(pageIdentity("https://example.com/other"));
 
-    expect(ports[0].postedMessages).toContainEqual({ type: "speech.cancel", version: 3, requestId: "speech-1" });
+    expect(ports[0].postedMessages).toContainEqual({ type: "speech.cancel", version: 4, requestId: "speech-1" });
     expect(controller.getSnapshot().speech).toMatchObject({ activeEntryId: undefined, status: "idle" });
   });
 });
@@ -1511,7 +1651,7 @@ describe("SidePanelController URL sessions", () => {
     controller.sendPrompt("hello");
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.start",
-      version: 3,
+      version: 4,
       clientSessionId: "client-a",
       providerId: "codex"
     });
@@ -1557,7 +1697,7 @@ describe("SidePanelController URL sessions", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.start",
-      version: 3,
+      version: 4,
       clientSessionId: "client-b",
       providerId: "codex"
     });
@@ -1633,12 +1773,12 @@ describe("SidePanelController URL sessions", () => {
     controller.newChat();
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.reset",
-      version: 3,
+      version: 4,
       clientSessionId: "client-b"
     });
     expect(ports[0].postedMessages).not.toContainEqual({
       type: "session.reset",
-      version: 3,
+      version: 4,
       clientSessionId: "client-a"
     });
   });
@@ -1719,7 +1859,7 @@ describe("SidePanelController Capture + Send", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       prompt: "summarize",
       pageContext: captureService.nextResult.status === "captured" ? captureService.nextResult.pageContext : undefined
@@ -1768,7 +1908,7 @@ describe("SidePanelController Capture + Send", () => {
     expect(captureService.buildCalls).toEqual([{ document, mode: "full_dom" }]);
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       prompt: "summarize",
       pageContext
@@ -1838,7 +1978,7 @@ describe("SidePanelController Capture + Send", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       event: { type: "assistant.done" }
     });
@@ -1933,13 +2073,13 @@ describe("SidePanelController Capture + Send", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.start",
-      version: 3,
+      version: 4,
       clientSessionId: "client-captured",
       providerId: "codex"
     });
     expect(ports[0].postedMessages).not.toContainEqual({
       type: "session.start",
-      version: 3,
+      version: 4,
       clientSessionId: "client-other",
       providerId: "codex"
     });
@@ -2068,7 +2208,7 @@ describe("SidePanelController Capture + Send", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       event: { type: "assistant.done" }
     });
@@ -2188,11 +2328,313 @@ describe("SidePanelController Capture + Send", () => {
 
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       prompt: "plain"
     });
     expect(captureService.captureCalls).toBe(0);
+  });
+});
+
+describe("SidePanelController page selection attachments", () => {
+  it("startPageSelection_text_appends_attachment_without_provider_send", async () => {
+    const pageSelectionService = new FakePageSelectionService();
+    const { controller, ports } = createHarnessWithOptions({
+      pageSelectionService,
+      createContextAttachmentId: () => "selected-1"
+    });
+
+    await expect(controller.startPageSelection("text")).resolves.toBe(true);
+
+    expect(pageSelectionService.startCalls).toEqual(["text"]);
+    expect(ports[0].postedMessages).toEqual([]);
+    expect(controller.getSnapshot().pageSelection).toEqual({ status: "idle" });
+    expect(controller.getSnapshot().activeSession.contextAttachments).toEqual([
+      expect.objectContaining({ id: "selected-1", source: "selected_text", preview: "Selected page text" })
+    ]);
+  });
+
+  it("startPageSelection_snapshot_appends_image_attachment_without_provider_send", async () => {
+    const pageSelectionService = new FakePageSelectionService();
+    pageSelectionService.nextResult = snapshotPageSelectionResult();
+    const { controller, ports } = createHarnessWithOptions({
+      pageSelectionService,
+      createContextAttachmentId: () => "snapshot-1"
+    });
+
+    await expect(controller.startPageSelection("snapshot")).resolves.toBe(true);
+
+    expect(pageSelectionService.startCalls).toEqual(["snapshot"]);
+    expect(ports[0].postedMessages).toEqual([]);
+    expect(controller.getSnapshot().activeSession.contextAttachments).toEqual([
+      expect.objectContaining({
+        id: "snapshot-1",
+        source: "area_snapshot",
+        thumbnailDataUrl: "data:image/png;base64,thumbnail",
+        imageDimensions: { width: 1, height: 1 }
+      })
+    ]);
+  });
+
+  it("plain_send_with_text_and_image_attachments_sends_context_bundle_and_clears_attachments", async () => {
+    const pageSelectionService = new FakePageSelectionService();
+    const attachmentIds = ["selected-1", "snapshot-1"];
+    const { controller, ports } = createHarnessWithOptions({
+      pageSelectionService,
+      createContextAttachmentId: () => attachmentIds.shift() ?? "extra"
+    });
+    ports[0].emitMessage(bridgeReady());
+
+    await controller.startPageSelection("text");
+    pageSelectionService.nextResult = snapshotPageSelectionResult();
+    await controller.startPageSelection("snapshot");
+
+    expect(controller.sendPrompt("ask about these")).toBe(true);
+    expect(controller.getSnapshot().activeSession.contextAttachments).toEqual([]);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        prompt: "ask about these",
+        pageContext: expect.objectContaining({
+          kind: "context_bundle",
+          items: [
+            expect.objectContaining({ id: "selected-1", source: "selected_text" }),
+            expect.objectContaining({ id: "snapshot-1", source: "area_snapshot" })
+          ]
+        })
+      })
+    );
+  });
+
+  it("captureAndSend_includes_attachments_plus_readable_page_capture", async () => {
+    const captureService = new FakeCaptureService();
+    const pageSelectionService = new FakePageSelectionService();
+    const { controller, ports } = createHarnessWithOptions({
+      captureService,
+      pageSelectionService,
+      createContextAttachmentId: () => "selected-1"
+    });
+    ports[0].emitMessage(bridgeReady());
+    await controller.startPageSelection("text");
+
+    await expect(controller.captureAndSend("summarize")).resolves.toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(controller.getSnapshot().activeSession.contextAttachments).toEqual([]);
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        prompt: "summarize",
+        pageContext: expect.objectContaining({
+          kind: "context_bundle",
+          items: [
+            expect.objectContaining({ source: "selected_text" }),
+            expect.objectContaining({ source: "page_capture", context: expect.objectContaining({ kind: "readable" }) })
+          ]
+        })
+      })
+    );
+  });
+
+  it("captureAndSend_does_not_include_stale_attachments_from_existing_canonical_session", async () => {
+    const captureService = new FakeCaptureService();
+    const pageSelectionService = new FakePageSelectionService();
+    const canonicalDocument = capturedDocument({ html: "<html>Canonical page</html>" });
+    captureService.nextDocumentResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/canonical"),
+      capturedDocument: canonicalDocument
+    };
+    captureService.nextBuiltPageContext = readablePageContext("Readable canonical page text.");
+    const attachmentIds = ["old-canonical", "current-selection"];
+    const { controller, ports, activePage } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/canonical"),
+      clientSessionIds: ["client-canonical", "client-current"],
+      captureService,
+      pageSelectionService,
+      createContextAttachmentId: () => attachmentIds.shift() ?? "extra"
+    });
+    ports[0].emitMessage(bridgeReady());
+
+    await controller.startPageSelection("text");
+    activePage.emit(pageIdentity("https://example.com/current"));
+    await controller.startPageSelection("text");
+
+    await controller.captureAndSend("summarize");
+    ports[0].emitMessage(sessionStarted("client-canonical"));
+
+    const sendMessage = ports[0].postedMessages.find((message) => message.type === "session.send");
+    expect(sendMessage).toEqual(
+      expect.objectContaining({
+        pageContext: expect.objectContaining({
+          kind: "context_bundle",
+          items: [
+            expect.objectContaining({ id: "current-selection", source: "selected_text" }),
+            expect.objectContaining({ source: "page_capture" })
+          ]
+        })
+      })
+    );
+    expect(JSON.stringify(sendMessage)).not.toContain("old-canonical");
+    expect(controller.getSnapshot().activeSession.contextAttachments.map((attachment) => attachment.id)).toEqual([
+      "old-canonical"
+    ]);
+  });
+
+  it("captureAndSend_includes_attachments_plus_full_dom_page_capture", async () => {
+    const captureService = new FakeCaptureService();
+    const pageSelectionService = new FakePageSelectionService();
+    const document = capturedDocument({ html: "<html><body>Full DOM</body></html>" });
+    captureService.nextDocumentResult = {
+      status: "captured",
+      pageIdentity: pageIdentity("https://example.com/full-dom"),
+      capturedDocument: document
+    };
+    captureService.nextBuiltPageContext = fullDomPageContext(document.html);
+    const { controller, ports } = createHarnessWithOptions({
+      captureService,
+      pageSelectionService,
+      createContextAttachmentId: () => "selected-1"
+    });
+    ports[0].emitMessage(bridgeReady());
+    await controller.startPageSelection("text");
+    controller.updateCaptureMode("full_dom");
+
+    await controller.captureAndSend("summarize");
+    ports[0].emitMessage(sessionStarted());
+
+    expect(captureService.buildCalls.at(-1)).toEqual({ document, mode: "full_dom" });
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        pageContext: expect.objectContaining({
+          kind: "context_bundle",
+          items: [
+            expect.objectContaining({ source: "selected_text" }),
+            expect.objectContaining({ source: "page_capture", context: expect.objectContaining({ kind: "full_dom" }) })
+          ]
+        })
+      })
+    );
+  });
+
+  it("sendQuickAction_includes_composer_attachments", async () => {
+    const captureService = new FakeCaptureService();
+    const pageSelectionService = new FakePageSelectionService();
+    const { controller, ports } = createHarnessWithOptions({
+      captureService,
+      pageSelectionService,
+      createContextAttachmentId: () => "selected-1"
+    });
+    ports[0].emitMessage(bridgeReady());
+    await waitForControllerSettings();
+    await controller.startPageSelection("text");
+
+    await expect(controller.sendQuickAction("summarize-page")).resolves.toBe(true);
+    ports[0].emitMessage(sessionStarted());
+
+    expect(ports[0].postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: "session.send",
+        prompt: DEFAULT_SUMMARIZE_PAGE_QUICK_ACTION_PROMPT,
+        pageContext: expect.objectContaining({
+          kind: "context_bundle",
+          items: [
+            expect.objectContaining({ source: "selected_text" }),
+            expect.objectContaining({ source: "page_capture" })
+          ]
+        })
+      })
+    );
+  });
+
+  it("capture_failure_preserves_composer_attachments_and_draft", async () => {
+    const captureService = new FakeCaptureService();
+    captureService.nextResult = {
+      status: "unavailable",
+      pageIdentity: pageIdentity("https://example.com/default"),
+      message: "Could not capture this page."
+    };
+    const pageSelectionService = new FakePageSelectionService();
+    const { controller, ports } = createHarnessWithOptions({
+      captureService,
+      pageSelectionService,
+      createContextAttachmentId: () => "selected-1"
+    });
+    ports[0].emitMessage(bridgeReady());
+    await controller.startPageSelection("text");
+    controller.updateDraftPrompt("keep draft");
+
+    await expect(controller.captureAndSend("keep draft")).resolves.toBe(false);
+
+    expect(controller.getSnapshot().activeSession.draftPrompt).toBe("keep draft");
+    expect(controller.getSnapshot().activeSession.contextAttachments.map((attachment) => attachment.id)).toEqual([
+      "selected-1"
+    ]);
+  });
+
+  it("oversized_bundle_rejection_preserves_composer_attachments_and_draft", async () => {
+    const pageSelectionService = new FakePageSelectionService();
+    pageSelectionService.nextResult = snapshotPageSelectionResult({
+      dataBase64: "A".repeat(1_100_000),
+      byteLength: 1
+    });
+    const { controller, ports } = createHarnessWithOptions({
+      pageSelectionService,
+      createContextAttachmentId: () => "snapshot-1"
+    });
+    ports[0].emitMessage(bridgeReady());
+    await controller.startPageSelection("snapshot");
+    controller.updateDraftPrompt("keep draft");
+
+    expect(controller.sendPrompt("keep draft")).toBe(false);
+
+    expect(controller.getSnapshot().activeSession.draftPrompt).toBe("keep draft");
+    expect(controller.getSnapshot().activeSession.contextAttachments.map((attachment) => attachment.id)).toEqual([
+      "snapshot-1"
+    ]);
+    expect(ports[0].postedMessages).not.toContainEqual(expect.objectContaining({ type: "session.send" }));
+  });
+
+  it("cancelPageSelection_cancels_in_flight_selection_without_mutating_attachments", async () => {
+    const pageSelectionService = new FakePageSelectionService();
+    const pendingSelection = deferred<PageSelectionCaptureResult>();
+    pageSelectionService.nextResult = pendingSelection.promise;
+    const { controller } = createHarnessWithOptions({ pageSelectionService });
+
+    const selection = controller.startPageSelection("text");
+    await Promise.resolve();
+    expect(controller.cancelPageSelection()).toBe(true);
+    pendingSelection.resolve(selectedTextPageSelectionResult("late text"));
+
+    await expect(selection).resolves.toBe(false);
+    expect(pageSelectionService.shutdownCalls).toBe(1);
+    expect(controller.getSnapshot().activeSession.contextAttachments).toEqual([]);
+  });
+
+  it("stale_active_page_rejects_selection_result_without_mutating_new_page", async () => {
+    const pageSelectionService = new FakePageSelectionService();
+    const pendingSelection = deferred<PageSelectionCaptureResult>();
+    pageSelectionService.nextResult = pendingSelection.promise;
+    const { controller, activePage } = createHarnessWithOptions({
+      initialPage: pageIdentity("https://example.com/default"),
+      clientSessionIds: ["client-a", "client-b"],
+      pageSelectionService
+    });
+
+    const selection = controller.startPageSelection("text");
+    await Promise.resolve();
+    activePage.emit(pageIdentity("https://example.com/other"));
+    pendingSelection.resolve(selectedTextPageSelectionResult("late text"));
+
+    await expect(selection).resolves.toBe(false);
+    expect(controller.getSnapshot().pageSelection).toEqual({
+      status: "failed",
+      message: "The page changed before selection completed."
+    });
+    expect(controller.getSnapshot().activeSession.contextAttachments).toEqual([]);
   });
 });
 
@@ -2224,7 +2666,7 @@ describe("SidePanelController send mode", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       event: { type: "assistant.done" }
     });
@@ -2234,7 +2676,7 @@ describe("SidePanelController send mode", () => {
     expect(captureService.captureCalls).toBe(1);
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       prompt: "follow up"
     });
@@ -2249,7 +2691,7 @@ describe("SidePanelController send mode", () => {
     ports[0].emitMessage(sessionStarted());
     ports[0].emitMessage({
       type: "agent.event",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       event: { type: "assistant.done" }
     });
@@ -2280,7 +2722,7 @@ describe("SidePanelController send mode", () => {
     expect(captureService.captureCalls).toBe(0);
     expect(ports[0].postedMessages).toContainEqual({
       type: "session.send",
-      version: 3,
+      version: 4,
       clientSessionId: "client-1",
       prompt: "plain first"
     });

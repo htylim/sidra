@@ -75,7 +75,12 @@ export type ContextAttachmentMarker =
   | { kind: "full_dom_attached"; text: "Full DOM attached" }
   | { kind: "full_dom_too_large"; text: "Full DOM skipped; content too large" }
   | { kind: "page_metadata_attached"; text: "Page metadata attached" }
-  | { kind: "page_metadata_content_too_large"; text: "Page metadata attached; content too large" };
+  | { kind: "page_metadata_content_too_large"; text: "Page metadata attached; content too large" }
+  | { kind: "selected_text_attached"; text: "Selected text attached" }
+  | { kind: "selected_text_too_large"; text: "Selected text skipped; content too large" }
+  | { kind: "area_snapshot_attached"; text: "Area snapshot attached" }
+  | { kind: "context_attachments_attached"; text: "Context attachments attached" }
+  | { kind: "page_capture_and_attachments_attached"; text: "Page capture and attachments attached" };
 
 export function addUserPrompt(
   transcript: TranscriptEntry[],

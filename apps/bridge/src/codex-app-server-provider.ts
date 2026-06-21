@@ -29,6 +29,13 @@ type TextUserInput = {
   text_elements: [];
 };
 
+type ImageUserInput = {
+  type: "image";
+  url: string;
+};
+
+type CodexUserInput = TextUserInput | ImageUserInput;
+
 type QueuedTurnEvent =
   | { kind: "event"; event: SafeProviderTurnEvent }
   | { kind: "error"; error: Error };
@@ -146,7 +153,7 @@ class CodexAppServerTurn {
     try {
       const turnStartResponse = await this.appServer.request("turn/start", {
         threadId: this.threadId,
-        input: [toTextUserInput(input.prompt)],
+        input: toCodexUserInput(input),
         cwd: this.workingDirectory,
         approvalPolicy: "on-request",
         approvalsReviewer: "user",
@@ -356,6 +363,17 @@ class CodexAppServerTurn {
 
 function toTextUserInput(text: string): TextUserInput {
   return { type: "text", text, text_elements: [] };
+}
+
+function toCodexUserInput(input: AgentSendInput): CodexUserInput[] {
+  const parts = input.parts ?? [{ kind: "text" as const, text: input.prompt }];
+  return parts.map((part) => {
+    if (part.kind === "text") return toTextUserInput(part.text);
+    return {
+      type: "image",
+      url: `data:${part.mimeType};base64,${part.dataBase64}`
+    };
+  });
 }
 
 function extractThreadId(response: unknown): string {

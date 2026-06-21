@@ -20,7 +20,7 @@ Sidra has no cloud backend in V1.
 
 - No persistent chat history.
 - No session resume after closing the side panel.
-- No file or media attachments.
+- No arbitrary file uploads or media attachments. Explicit selected text and area snapshots from the current page are page context, not file upload.
 - No Sidra backend or external telemetry.
 - No injected in-page sidebar fallback.
 - No support for unsupported browser schemes such as `chrome://`, extension pages, PDFs, or `file://`.
@@ -253,6 +253,30 @@ There is:
 - No pre-send content preview.
 
 The first prompt in a new session defaults to **Capture + Send**. After a successful context send, the default action changes to **Send**. The user can manually select **Capture + Send** again later.
+
+## Page Selection Capture
+
+The header toolbar includes **Select page context**. It is a user-triggered page selection mode, not passive capture.
+
+The user can choose:
+
+- selected text from the current page
+- an area snapshot image from the visible page
+
+Selected text and area snapshots become composer context attachments. They are:
+
+- visible above the prompt textarea before send
+- removable one at a time or clearable as a group
+- treated as untrusted reference material
+- attached to the next accepted send
+- cleared after an accepted send
+- preserved when a send is rejected before the provider turn starts
+
+Selected text attachments show a short text preview. If the selected text is over the configured readable content limit, Sidra attaches metadata only and shows a clear warning row.
+
+Area snapshot attachments show a thumbnail and image dimensions. Sidra does not run OCR on snapshots. Snapshot image input may be rejected before a turn starts if the provider cannot accept images or if the payload is too large.
+
+Page selection capture is unavailable on unsupported pages such as browser pages and extension pages. Snapshot capture on normal pages uses the manifest's `<all_urls>` host permission and does not require `activeTab`. File URLs can still be blocked by browser settings.
 
 Users may explicitly choose **Send** in a new session before any page context is attached.
 
@@ -602,16 +626,16 @@ When the bridge is unavailable:
 
 ## Extension Permissions
 
-Likely V1 permissions:
+V1 permissions:
 
 - `sidePanel`
 - `scripting`
 - `storage`
 - `nativeMessaging`
 - `tabs`
-- host permissions for `http://*/*` and `https://*/*`
+- host permission `<all_urls>`
 
-Broad host permissions are acceptable for V1 because capture is still explicit and user-triggered.
+Broad host permission is acceptable for V1 because capture is still explicit and user-triggered. It lets normal-page `captureVisibleTab()` and dynamic selection-script injection work without relying on `activeTab`. Browser pages, extension pages, PDFs, and file URLs remain subject to browser restrictions and settings.
 
 ## Native Messaging Install
 

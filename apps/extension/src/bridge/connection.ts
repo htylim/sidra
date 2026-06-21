@@ -1,4 +1,4 @@
-import { parseBridgeToExtension, type BridgeToExtension, type ExtensionToBridge } from "@sidra/protocol";
+import { PROTOCOL_VERSION, parseBridgeToExtension, type BridgeToExtension, type ExtensionToBridge } from "@sidra/protocol";
 
 export const SIDRA_NATIVE_HOST = "com.sidra.agent_bridge";
 export const BRIDGE_HEARTBEAT_INTERVAL_MS = 10_000;
@@ -185,7 +185,7 @@ export class BridgeConnection {
     this.heartbeatTimer = setInterval(() => {
       if (this.port !== port) return;
       try {
-        port.postMessage({ type: "heartbeat", version: 3 } satisfies ExtensionToBridge);
+        port.postMessage({ type: "heartbeat", version: PROTOCOL_VERSION } satisfies ExtensionToBridge);
       } catch (error) {
         const message = errorMessage(error, "Bridge heartbeat failed");
         if (this.port === port) this.port = null;

@@ -1,14 +1,22 @@
 // @vitest-environment jsdom
 
 import { Readability } from "@mozilla/readability";
+import { BRIDGE_PAYLOAD_TOO_LARGE_MESSAGE, type PageContextImage, type PageContextSelectionGeometry } from "@sidra/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  PAGE_SELECTION_IMAGE_BYTE_LIMIT,
   CaptureService,
+  buildAreaSnapshotContextAttachment,
+  buildContextBundle,
+  buildSelectedTextContextAttachment,
+  metadataFromPageIdentity,
+  validateSessionSendPayloadSize,
   type CaptureGateway,
   type CaptureSettingsSource,
   type CapturedTabDocument
 } from "./capture-service";
 import { captureCurrentDocumentSnapshot } from "./capture-script";
+import type { PageIdentity, PageKey } from "./page-key";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -709,6 +717,185 @@ describe("CaptureService", () => {
   });
 });
 
+describe("CaptureService page selection attachments", () => {
+  it("builds_selected_text_context_attachment_with_geometry_and_preview", () => {
+    const result = buildSelectedTextContextAttachment({
+      id: "attachment-1",
+      pageIdentity: selectionPageIdentity(),
+      selectionResult: selectedTextSelectionResult("First line\n  indented selected text"),
+      capturedAt: "2026-05-10T12:00:00.000Z",
+      readableContentLimitCharacters: 1_000
+    });
+
+    expect(result.status).toBe("attached");
+    if (result.status !== "attached") throw new Error("expected attachment");
+    expect(result.attachment).toMatchObject({
+      id: "attachment-1",
+      pageContext: {
+        kind: "selected_text",
+        metadata: {
+          url: "https://example.com/frame",
+          title: "Selection page",
+          capturedAt: "2026-05-10T12:00:00.000Z"
+        },
+        text: "First line\n  indented selected text",
+        textLength: "First line\n  indented selected text".length,
+        selection: textSelectionGeometry()
+      },
+      display: {
+        source: "selected_text",
+        label: "Selected text",
+        pageTitle: "Selection page",
+        preview: "First line indented selected text"
+      }
+    });
+  });
+
+  it("builds_too_large_selected_text_as_metadata_only_attachment", () => {
+    const result = buildSelectedTextContextAttachment({
+      id: "attachment-1",
+      pageIdentity: selectionPageIdentity(),
+      selectionResult: selectedTextSelectionResult("selected text beyond limit"),
+      capturedAt: "2026-05-10T12:00:00.000Z",
+      readableContentLimitCharacters: 5
+    });
+
+    expect(result.status).toBe("attached");
+    if (result.status !== "attached") throw new Error("expected attachment");
+    expect(result.attachment.pageContext).toEqual({
+      kind: "metadata_only",
+      metadata: {
+        url: "https://example.com/frame",
+        title: "Selection page",
+        capturedAt: "2026-05-10T12:00:00.000Z"
+      },
+      reason: "selection_too_large"
+    });
+    expect(result.attachment.display.tone).toBe("warning");
+    expect(JSON.stringify(result.attachment.display)).not.toContain("selected text beyond limit");
+  });
+
+  it("builds_area_snapshot_attachment_with_image_metadata_and_thumbnail", () => {
+    const image = pngImage();
+    const result = buildAreaSnapshotContextAttachment({
+      id: "attachment-2",
+      pageIdentity: selectionPageIdentity(),
+      selectionResult: snapshotSelectionResult({ image, thumbnailDataUrl: "data:image/png;base64,thumbnail" }),
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    });
+
+    expect(result.status).toBe("attached");
+    if (result.status !== "attached") throw new Error("expected attachment");
+    expect(result.attachment).toMatchObject({
+      id: "attachment-2",
+      pageContext: {
+        kind: "area_snapshot",
+        metadata: {
+          url: "https://example.com/frame",
+          title: "Selection page",
+          capturedAt: "2026-05-10T12:00:00.000Z"
+        },
+        image,
+        selection: snapshotSelectionGeometry()
+      },
+      display: {
+        source: "area_snapshot",
+        label: "Area snapshot",
+        thumbnailDataUrl: "data:image/png;base64,thumbnail",
+        imageDimensions: { width: 1, height: 1 }
+      }
+    });
+  });
+
+  it("rejects_area_snapshot_attachment_when_image_exceeds_byte_limit", () => {
+    const result = buildAreaSnapshotContextAttachment({
+      id: "attachment-2",
+      pageIdentity: selectionPageIdentity(),
+      selectionResult: snapshotSelectionResult({
+        image: { ...pngImage(), byteLength: PAGE_SELECTION_IMAGE_BYTE_LIMIT + 1 }
+      }),
+      capturedAt: "2026-05-10T12:00:00.000Z"
+    });
+
+    expect(result).toEqual({ status: "rejected", message: "Selected image is too large to attach." });
+  });
+
+  it("builds_context_bundle_with_bundle_metadata_item_metadata_and_sources", () => {
+    const selected = buildSelectedTextContextAttachment({
+      id: "selected-1",
+      pageIdentity: selectionPageIdentity(),
+      selectionResult: selectedTextSelectionResult("Selected text"),
+      capturedAt: "2026-05-10T12:00:00.000Z",
+      readableContentLimitCharacters: 1_000
+    });
+    const snapshot = buildAreaSnapshotContextAttachment({
+      id: "snapshot-1",
+      pageIdentity: selectionPageIdentity({ url: "https://example.com/other" }),
+      selectionResult: snapshotSelectionResult({ image: pngImage() }),
+      capturedAt: "2026-05-10T12:01:00.000Z"
+    });
+    if (selected.status !== "attached" || snapshot.status !== "attached") throw new Error("expected attachments");
+    const pageCapture = {
+      kind: "readable" as const,
+      metadata: {
+        url: "https://example.com/article",
+        title: "Captured page",
+        capturedAt: "2026-05-10T12:02:00.000Z"
+      },
+      text: "Readable capture",
+      textLength: "Readable capture".length,
+      extractionMethod: "readability" as const
+    };
+
+    const bundle = buildContextBundle({
+      attachments: [selected.attachment, snapshot.attachment],
+      metadata: pageCapture.metadata,
+      createdAt: "2026-05-10T12:03:00.000Z",
+      pageCaptureContext: pageCapture
+    });
+
+    expect(bundle).toMatchObject({
+      kind: "context_bundle",
+      trust: "untrusted",
+      metadata: pageCapture.metadata,
+      createdAt: "2026-05-10T12:03:00.000Z",
+      items: [
+        expect.objectContaining({ id: "selected-1", source: "selected_text", trust: "untrusted" }),
+        expect.objectContaining({ id: "snapshot-1", source: "area_snapshot", trust: "untrusted" }),
+        expect.objectContaining({ id: "page-capture", source: "page_capture", trust: "untrusted" })
+      ]
+    });
+    expect(bundle.kind).toBe("context_bundle");
+    if (bundle.kind !== "context_bundle") throw new Error("expected bundle");
+    expect(bundle.items[1].context.metadata.url).toBe("https://example.com/frame");
+    expect(bundle.items[2].context).toBe(pageCapture);
+  });
+
+  it("validates_final_session_send_payload_size_for_bundles", () => {
+    const bundle = buildContextBundle({
+      attachments: [],
+      metadata: metadataFromPageIdentity(selectionPageIdentity(), "2026-05-10T12:00:00.000Z"),
+      createdAt: "2026-05-10T12:00:00.000Z",
+      pageCaptureContext: {
+        kind: "readable",
+        metadata: metadataFromPageIdentity(selectionPageIdentity(), "2026-05-10T12:00:00.000Z"),
+        text: "Readable text",
+        textLength: "Readable text".length,
+        extractionMethod: "readability"
+      }
+    });
+
+    expect(
+      validateSessionSendPayloadSize({
+        clientSessionId: "client-1",
+        prompt: "summarize",
+        pageContext: bundle,
+        limitBytes: 20
+      })
+    ).toEqual({ ok: false, message: BRIDGE_PAYLOAD_TOO_LARGE_MESSAGE });
+  });
+});
+
 class FakeCaptureGateway implements CaptureGateway {
   queryCount = 0;
   readCount = 0;
@@ -804,6 +991,96 @@ function capturedDocument(overrides: Partial<CapturedTabDocument> = {}): Capture
     byline: "Captured Author",
     language: "en",
     ...overrides
+  };
+}
+
+function selectionPageIdentity(
+  overrides: Partial<Extract<PageIdentity, { status: "ready" }>> = {}
+): Extract<PageIdentity, { status: "ready" }> {
+  return {
+    status: "ready",
+    pageKey: "https://example.com/article" as PageKey,
+    url: "https://example.com/article",
+    title: "Selection page",
+    displayTitle: "Selection page",
+    ...overrides
+  };
+}
+
+function selectedTextSelectionResult(text: string) {
+  return {
+    status: "captured" as const,
+    mode: "text" as const,
+    frameDocumentUrl: "https://example.com/frame",
+    text,
+    selection: textSelectionGeometry()
+  };
+}
+
+function snapshotSelectionResult(input: { image: PageContextImage; thumbnailDataUrl?: string }) {
+  return {
+    status: "captured" as const,
+    mode: "snapshot" as const,
+    frameDocumentUrl: "https://example.com/frame",
+    image: input.image,
+    thumbnailDataUrl: input.thumbnailDataUrl,
+    selection: snapshotSelectionGeometry()
+  };
+}
+
+function textSelectionGeometry(): PageContextSelectionGeometry & { mode: "text_selection" } {
+  return {
+    mode: "text_selection",
+    viewport,
+    boundingRect: { x: 10, y: 20, width: 300, height: 60 },
+    textRects: [
+      { x: 10, y: 20, width: 120, height: 24 },
+      { x: 10, y: 48, width: 300, height: 32 }
+    ],
+    captureProof: {
+      requestId: "selection-1",
+      tabId: 7,
+      windowId: 3,
+      documentUrl: "https://example.com/frame",
+      viewport
+    }
+  };
+}
+
+function snapshotSelectionGeometry(): PageContextSelectionGeometry & { mode: "area_snapshot" } {
+  return {
+    mode: "area_snapshot",
+    viewport,
+    boundingRect: { x: 20, y: 30, width: 100, height: 80 },
+    captureProof: {
+      requestId: "selection-1",
+      tabId: 7,
+      windowId: 3,
+      documentUrl: "https://example.com/frame",
+      viewport,
+      screenshotWidth: 1600,
+      screenshotHeight: 1200
+    }
+  };
+}
+
+const viewport = {
+  width: 800,
+  height: 600,
+  devicePixelRatio: 2,
+  scrollX: 0,
+  scrollY: 100
+};
+
+function pngImage(): PageContextImage {
+  const dataBase64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+  return {
+    mimeType: "image/png",
+    dataBase64,
+    byteLength: atob(dataBase64).length,
+    width: 1,
+    height: 1
   };
 }
 

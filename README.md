@@ -2,7 +2,7 @@
 
 Sidra is a Chromium side panel extension for chatting with Codex about the current page.
 
-V1 targets article and text-heavy pages on macOS. The extension captures page content only when the user chooses **Capture + Send**, then sends the prompt and page context to a local Native Messaging bridge. The bridge starts `codex app-server` and uses the user's existing Codex auth.
+V1 targets article and text-heavy pages on macOS. The extension captures page content only when the user chooses **Capture + Send**, starts a quick action, or explicitly selects page text or an area snapshot from the page toolbar. Selected text and area image snapshots are visible in the composer, removable before send, treated as untrusted reference material, and attached only to the next accepted send. The bridge starts `codex app-server` and uses the user's existing Codex auth.
 
 ## Current status
 
@@ -133,7 +133,12 @@ panel.
 that the bridge and Codex provider are ready. Raw page content should not appear
 in the transcript.
 
-7. Open an unsupported page such as `chrome://extensions`. Confirm capture is
+7. Use the **Select page context** toolbar button on a normal page to choose
+selected text or an area snapshot. Confirm the attachment appears above the
+composer textarea, shows a preview or thumbnail, can be removed, and is cleared
+after the next accepted send.
+
+8. Open an unsupported page such as `chrome://extensions`. Confirm capture is
 unavailable and the prompt controls are disabled.
 
 If the bridge does not connect, check:
@@ -153,6 +158,10 @@ If the bridge does not connect, check:
 - `pnpm build` has produced `apps/bridge/dist/cli.js`;
 - the browser was restarted or the extension was reloaded after installing the host manifest.
 - Codex CLI is authenticated for the current user.
+- area snapshot capture on normal pages uses the manifest's `<all_urls>` host
+  permission. Sidra does not rely on `activeTab` for normal page snapshots.
+  Browser pages, extension pages, and file URLs can still be blocked by the
+  browser.
 - If Codex setup fails, the bridge emits `bridge.error` with code
   `codex_setup_failed`. `bridge.ready` is not expected until setup succeeds.
 - If the side panel misses heartbeats long enough for the bridge to clean up

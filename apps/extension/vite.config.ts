@@ -14,11 +14,16 @@ export default defineConfig({
       input: {
         sidePanel: fileURLToPath(new URL("side-panel.html", import.meta.url)),
         options: fileURLToPath(new URL("options.html", import.meta.url)),
-        background: fileURLToPath(new URL("src/background.ts", import.meta.url))
+        background: fileURLToPath(new URL("src/background.ts", import.meta.url)),
+        pageSelectionContent: fileURLToPath(new URL("src/page-selection-content.ts", import.meta.url))
       },
       output: {
         entryFileNames: (chunkInfo) =>
-          chunkInfo.name === "background" ? "background.js" : "assets/[name]-[hash].js"
+          chunkInfo.name === "background"
+            ? "background.js"
+            : chunkInfo.name === "pageSelectionContent"
+              ? "page-selection-content.js"
+              : "assets/[name]-[hash].js"
       }
     }
   }

@@ -3,12 +3,18 @@ import { createChromeActivePageTracker } from "./active-page";
 import {
   CaptureService,
   createChromeCaptureService,
+  type BuildComposerAttachmentResult,
   type CaptureDocumentResult,
   type CaptureGateway,
   type CapturedTabDocument
 } from "./capture-service";
 import type { CaptureMode } from "./capture-mode";
 import type { PageIdentity } from "./page-key";
+import {
+  createChromePageSelectionService,
+  type PageSelectionCaptureResult,
+  type PageSelectionMode
+} from "./page-selection-service";
 import { BridgeConnection, type BridgeAvailability, type NativeBridgePort } from "./bridge/connection";
 import { BridgeSessionCoordinator } from "./bridge/session-coordinator";
 import {
@@ -25,7 +31,17 @@ import {
   type TranscriptSpeechPlaybackGateway,
   type TranscriptSpeechSnapshot
 } from "./transcript-speech-controller";
-import { UrlSessionStore, type ContextState, type SendMode } from "./url-session-store";
+import {
+  UrlSessionStore,
+  type ContextState,
+  type SendMode,
+  type UrlSessionSnapshot
+} from "./url-session-store";
+
+export type PageSelectionCaptureState =
+  | { status: "idle" }
+  | { status: "selecting"; requestId: string; mode: PageSelectionMode }
+  | { status: "failed"; message: string };
 
 export type SidePanelSnapshot = {
   bridge: {
@@ -41,6 +57,7 @@ export type SidePanelSnapshot = {
     responseFontSizePx: number;
   };
   speech: TranscriptSpeechSnapshot;
+  pageSelection: PageSelectionCaptureState;
   activePage: PageIdentity;
   activeSession: {
     pageKey: string;
@@ -49,6 +66,7 @@ export type SidePanelSnapshot = {
     sendMode: SendMode;
     draftPrompt: string;
     contextState: ContextState;
+    contextAttachments: UrlSessionSnapshot["contextAttachments"];
     transcript: TranscriptEntry[];
     pendingPromptCount: number;
     sessionStarted: boolean;
@@ -70,6 +88,10 @@ export type SidePanelController = {
   sendPrompt(prompt: string): boolean;
   captureAndSend(prompt: string): Promise<boolean>;
   sendQuickAction(actionId: string): Promise<boolean>;
+  startPageSelection(mode: PageSelectionMode): Promise<boolean>;
+  cancelPageSelection(): boolean;
+  removeContextAttachment(attachmentId: string): boolean;
+  clearContextAttachments(): boolean;
   cancelTurn(): boolean;
   respondToPermission(requestId: string, decision: PermissionDecision): boolean;
   updateCaptureMode(captureMode: CaptureMode): void;
@@ -94,6 +116,17 @@ type CaptureServiceLike = {
     capturedDocument: CapturedTabDocument,
     mode?: CaptureMode
   ): Promise<PageContext>;
+  buildContextAttachmentForSelection(input: {
+    id: string;
+    pageIdentity: Extract<PageIdentity, { status: "ready" }>;
+    selectionResult: Extract<PageSelectionCaptureResult, { status: "captured" }>;
+    capturedAt: string;
+  }): Promise<BuildComposerAttachmentResult>;
+};
+
+type PageSelectionServiceLike = {
+  start(mode: PageSelectionMode): Promise<PageSelectionCaptureResult>;
+  shutdown(): void;
 };
 
 type SidePanelControllerOptions = {
@@ -101,12 +134,14 @@ type SidePanelControllerOptions = {
   createClientSessionId(): string;
   activePageTracker?: ActivePageSource;
   captureService?: CaptureServiceLike;
+  pageSelectionService?: PageSelectionServiceLike;
   captureGateway?: CaptureGateway;
   settingsStore?: Pick<SettingsStore, "start" | "getSnapshot" | "whenReady" | "subscribe">;
   speechPlaybackGateway?: TranscriptSpeechPlaybackGateway;
   createSpeechRequestId?: () => string;
   openOptionsPage?: () => void;
   providerId?: ProviderId;
+  createContextAttachmentId?: () => string;
 };
 
 type ControllerSettingsSource = Pick<SettingsStore, "start" | "getSnapshot" | "whenReady" | "subscribe">;
@@ -132,6 +167,8 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     (options.captureGateway
       ? new CaptureService({ gateway: options.captureGateway, settings: settingsStore })
       : createChromeCaptureService(settingsStore));
+  const pageSelectionService = options.pageSelectionService ?? createChromePageSelectionService();
+  const createContextAttachmentId = options.createContextAttachmentId ?? (() => `attachment-${crypto.randomUUID()}`);
   const urlSessionStore = new UrlSessionStore({
     createClientSessionId: options.createClientSessionId,
     createCoordinator: (clientSessionId) =>
@@ -153,13 +190,24 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     createRequestId: options.createSpeechRequestId
   });
   let settingsReady = false;
+  let pageSelectionState: PageSelectionCaptureState = { status: "idle" };
+  let nextPageSelectionStateId = 0;
   urlSessionStore.selectPage(activePageSnapshot);
   let urlSessionSnapshot = urlSessionStore.getSnapshot();
   let speechSnapshot = speechController.getSnapshot();
-  let snapshot = createSnapshot(bridgeSnapshot, activePageSnapshot, urlSessionSnapshot, settingsSnapshot, settingsReady, speechSnapshot);
+  let snapshot = createSnapshot(
+    bridgeSnapshot,
+    activePageSnapshot,
+    urlSessionSnapshot,
+    settingsSnapshot,
+    settingsReady,
+    speechSnapshot,
+    pageSelectionState
+  );
   let snapshotSettingsSnapshot = settingsSnapshot;
   let snapshotSettingsReady = settingsReady;
   let snapshotSpeechSnapshot = speechSnapshot;
+  let snapshotPageSelectionState: PageSelectionCaptureState = pageSelectionState;
   let shutdownStarted = false;
 
   const refreshSnapshot = () => {
@@ -172,7 +220,8 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       snapshotsMatch(nextUrlSessionSnapshot, urlSessionSnapshot) &&
       settingsSnapshot === snapshotSettingsSnapshot &&
       settingsReady === snapshotSettingsReady &&
-      nextSpeechSnapshot === snapshotSpeechSnapshot
+      nextSpeechSnapshot === snapshotSpeechSnapshot &&
+      pageSelectionState === snapshotPageSelectionState
     ) {
       return;
     }
@@ -180,15 +229,29 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     bridgeSnapshot = nextBridgeSnapshot;
     urlSessionSnapshot = nextUrlSessionSnapshot;
     speechSnapshot = nextSpeechSnapshot;
-    snapshot = createSnapshot(bridgeSnapshot, activePageSnapshot, urlSessionSnapshot, settingsSnapshot, settingsReady, speechSnapshot);
+    snapshot = createSnapshot(
+      bridgeSnapshot,
+      activePageSnapshot,
+      urlSessionSnapshot,
+      settingsSnapshot,
+      settingsReady,
+      speechSnapshot,
+      pageSelectionState
+    );
     snapshotSettingsSnapshot = settingsSnapshot;
     snapshotSettingsReady = settingsReady;
     snapshotSpeechSnapshot = speechSnapshot;
+    snapshotPageSelectionState = pageSelectionState;
   };
 
   const emit = () => {
     refreshSnapshot();
     for (const listener of listeners) listener();
+  };
+
+  const setPageSelectionState = (state: PageSelectionCaptureState) => {
+    pageSelectionState = state;
+    emit();
   };
 
   const unsubscribeConnection = connection.subscribe(() => {
@@ -208,6 +271,10 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     activePageSnapshot = activePageTracker.getSnapshot();
     if (!activePageIdentityMatches(previousActivePageSnapshot, activePageSnapshot)) {
       speechController.stopActiveSpeech();
+      if (pageSelectionState.status === "selecting") {
+        pageSelectionService.shutdown();
+        pageSelectionState = { status: "failed", message: "The page changed before selection completed." };
+      }
     }
     urlSessionStore.selectPage(activePageSnapshot);
     emit();
@@ -242,6 +309,8 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
 
     const preCaptureMode = snapshot.activeSession.captureMode;
     const preCaptureSendMode = snapshot.activeSession.sendMode;
+    const preCaptureAttachmentPageKey = activePageSnapshot.status === "ready" ? activePageSnapshot.pageKey : undefined;
+    const preCaptureAttachments = urlSessionStore.listActiveContextAttachments();
     const captureResult = await captureService.captureActivePageDocument();
     if (shutdownStarted) return false;
     if (captureResult.status === "captured") {
@@ -258,11 +327,23 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       if (shutdownStarted) return false;
       activePageSnapshot = captureResult.pageIdentity;
       urlSessionStore.selectPage(captureResult.pageIdentity);
-      const accepted = urlSessionStore.sendPromptWithContext({
-        prompt: normalizedPrompt,
-        pageContext,
-        userPromptDisplay
-      });
+      const usePreCaptureAttachments =
+        preCaptureAttachmentPageKey !== undefined && preCaptureAttachmentPageKey !== captureResult.pageIdentity.pageKey;
+      const accepted = usePreCaptureAttachments
+        ? urlSessionStore.sendPromptWithExternalContextAttachments({
+            prompt: normalizedPrompt,
+            pageContext,
+            attachments: preCaptureAttachments,
+            userPromptDisplay
+          })
+        : urlSessionStore.sendPromptWithContext({
+            prompt: normalizedPrompt,
+            pageContext,
+            userPromptDisplay
+          });
+      if (accepted && preCaptureAttachmentPageKey && usePreCaptureAttachments) {
+        urlSessionStore.clearContextAttachmentsForPage(preCaptureAttachmentPageKey);
+      }
       emit();
       return accepted;
     }
@@ -275,6 +356,54 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
     }
     emit();
     return false;
+  };
+
+  const startPageSelectionCommand = async (mode: PageSelectionMode): Promise<boolean> => {
+    refreshSnapshot();
+    if (shutdownStarted) return false;
+    if (activeSessionIsBusy(snapshot.activeSession)) return false;
+    if (activePageSnapshot.status !== "ready") {
+      setPageSelectionState({ status: "failed", message: "Page selection is unavailable on this page." });
+      return false;
+    }
+
+    const selectionPage = activePageSnapshot;
+    const requestId = `page-selection-${++nextPageSelectionStateId}`;
+    setPageSelectionState({ status: "selecting", requestId, mode });
+
+    const result = await pageSelectionService.start(mode);
+    if (shutdownStarted) return false;
+    if (pageSelectionState.status !== "selecting" || pageSelectionState.requestId !== requestId) return false;
+
+    if (result.status === "unavailable") {
+      setPageSelectionState({ status: "failed", message: result.message });
+      return false;
+    }
+
+    if (!activePageIdentityMatches(selectionPage, activePageSnapshot) || activePageSnapshot.status !== "ready") {
+      setPageSelectionState({ status: "failed", message: "The page changed before selection completed." });
+      return false;
+    }
+
+    const attachmentResult = buildContextAttachmentForSelection({
+      captureService,
+      result,
+      pageIdentity: activePageSnapshot,
+      attachmentId: createContextAttachmentId()
+    });
+    const resolvedAttachmentResult = await attachmentResult;
+    if (resolvedAttachmentResult.status === "rejected") {
+      setPageSelectionState({ status: "failed", message: resolvedAttachmentResult.message });
+      return false;
+    }
+
+    if (!urlSessionStore.appendActiveContextAttachment(resolvedAttachmentResult.attachment)) {
+      setPageSelectionState({ status: "failed", message: "Remove an attachment before adding another." });
+      return false;
+    }
+
+    setPageSelectionState({ status: "idle" });
+    return true;
   };
 
   return {
@@ -303,6 +432,15 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       if (!action || !visible) return false;
       return await captureAndSendCommand(action.prompt, { kind: "quick_action", label: action.label });
     },
+    startPageSelection: startPageSelectionCommand,
+    cancelPageSelection: () => {
+      if (pageSelectionState.status !== "selecting") return false;
+      pageSelectionService.shutdown();
+      setPageSelectionState({ status: "idle" });
+      return true;
+    },
+    removeContextAttachment: (attachmentId) => urlSessionStore.removeActiveContextAttachment(attachmentId),
+    clearContextAttachments: () => urlSessionStore.clearActiveContextAttachments(),
     cancelTurn: () => {
       const cancelled = urlSessionStore.cancelActiveTurn();
       emit();
@@ -334,6 +472,7 @@ export function createSidePanelController(options: SidePanelControllerOptions): 
       unsubscribeUrlSessionStore();
       unsubscribeSettingsStore();
       unsubscribeSpeechController();
+      pageSelectionService.shutdown();
       urlSessionStore.clearAllSessions();
       speechController.dispose();
       connection.disconnect();
@@ -349,7 +488,8 @@ function createSnapshot(
   urlSessions: ReturnType<UrlSessionStore["getSnapshot"]>,
   settings: SidraSettings,
   settingsReady: boolean,
-  speech: TranscriptSpeechSnapshot
+  speech: TranscriptSpeechSnapshot,
+  pageSelection: PageSelectionCaptureState
 ): SidePanelSnapshot {
   const activeSession = urlSessions.activeSession;
   const canUseChat = bridge.availability.status === "ready" && activePage.status === "ready";
@@ -367,6 +507,7 @@ function createSnapshot(
       responseFontSizePx: settings.responseFontSizePx
     },
     speech,
+    pageSelection,
     activePage,
     activeSession: {
       pageKey: activeSession.pageKey,
@@ -375,6 +516,7 @@ function createSnapshot(
       sendMode: activeSession.sendMode,
       draftPrompt: activeSession.draftPrompt,
       contextState: activeSession.contextState,
+      contextAttachments: activeSession.contextAttachments,
       transcript: activeSession.transcript,
       pendingPromptCount: activeSession.pendingPromptCount,
       sessionStarted: activeSession.sessionStarted,
@@ -390,6 +532,20 @@ function createSnapshot(
       })
     }
   };
+}
+
+function buildContextAttachmentForSelection(input: {
+  captureService: CaptureServiceLike;
+  result: Extract<PageSelectionCaptureResult, { status: "captured" }>;
+  pageIdentity: Extract<PageIdentity, { status: "ready" }>;
+  attachmentId: string;
+}): Promise<BuildComposerAttachmentResult> {
+  return input.captureService.buildContextAttachmentForSelection({
+    id: input.attachmentId,
+    pageIdentity: input.pageIdentity,
+    selectionResult: input.result,
+    capturedAt: new Date().toISOString()
+  });
 }
 
 function activeSessionIsBusy(input: {

@@ -1,7 +1,9 @@
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 export const BRIDGE_PAYLOAD_TOO_LARGE_CODE = "payload_too_large";
 export const BRIDGE_PAYLOAD_TOO_LARGE_MESSAGE = "Payload is too large.";
 export const BRIDGE_HARD_PAYLOAD_BYTE_LIMIT = 1_000_000;
+
+export type ProtocolVersion = typeof PROTOCOL_VERSION;
 
 export type SerializedJsonByteLengthResult =
   | { ok: true; byteLength: number }
@@ -62,9 +64,51 @@ export type PageContextMetadata = {
 export type MetadataOnlyPageContextReason =
   | "no_usable_text"
   | "content_too_large"
-  | "full_dom_too_large";
+  | "full_dom_too_large"
+  | "selection_too_large";
 
-export type PageContext =
+export type PageContextRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type PageContextViewport = {
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+  scrollX: number;
+  scrollY: number;
+};
+
+export type PageContextCaptureProof = {
+  requestId: string;
+  tabId?: number;
+  windowId?: number;
+  documentUrl: string;
+  viewport: PageContextViewport;
+  screenshotWidth?: number;
+  screenshotHeight?: number;
+};
+
+export type PageContextSelectionGeometry = {
+  mode: "text_selection" | "area_snapshot";
+  viewport: PageContextViewport;
+  boundingRect: PageContextRect;
+  textRects?: PageContextRect[];
+  captureProof: PageContextCaptureProof;
+};
+
+export type PageContextImage = {
+  mimeType: "image/png";
+  dataBase64: string;
+  byteLength: number;
+  width: number;
+  height: number;
+};
+
+export type PageContextBase =
   | {
       kind: "readable";
       metadata: PageContextMetadata;
@@ -82,45 +126,76 @@ export type PageContext =
       kind: "metadata_only";
       metadata: PageContextMetadata;
       reason: MetadataOnlyPageContextReason;
+    }
+  | {
+      kind: "selected_text";
+      metadata: PageContextMetadata;
+      text: string;
+      textLength: number;
+      selection: PageContextSelectionGeometry & { mode: "text_selection" };
+    }
+  | {
+      kind: "area_snapshot";
+      metadata: PageContextMetadata;
+      image: PageContextImage;
+      selection: PageContextSelectionGeometry & { mode: "area_snapshot" };
+    };
+
+export type PageContextBundleItem = {
+  id: string;
+  label: string;
+  trust: "untrusted";
+  source: "selected_text" | "area_snapshot" | "page_capture";
+  context: PageContextBase;
+};
+
+export type PageContext =
+  | PageContextBase
+  | {
+      kind: "context_bundle";
+      trust: "untrusted";
+      metadata: PageContextMetadata;
+      createdAt: string;
+      items: PageContextBundleItem[];
     };
 
 export type ExtensionToBridge =
   | {
       type: "session.start";
-      version: 3;
+      version: ProtocolVersion;
       clientSessionId: string;
       providerId: ProviderId;
     }
   | {
       type: "session.send";
-      version: 3;
+      version: ProtocolVersion;
       clientSessionId: string;
       prompt: string;
       pageContext?: PageContext;
     }
-  | { type: "session.cancel"; version: 3; clientSessionId: string }
-  | { type: "session.reset"; version: 3; clientSessionId: string }
-  | { type: "session.close"; version: 3; clientSessionId: string }
+  | { type: "session.cancel"; version: ProtocolVersion; clientSessionId: string }
+  | { type: "session.reset"; version: ProtocolVersion; clientSessionId: string }
+  | { type: "session.close"; version: ProtocolVersion; clientSessionId: string }
   | {
       type: "permission.respond";
-      version: 3;
+      version: ProtocolVersion;
       clientSessionId: string;
       requestId: string;
       decision: PermissionDecision;
     }
   | {
       type: "speech.synthesize";
-      version: 3;
+      version: ProtocolVersion;
       requestId: string;
       text: string;
       options: SpeechSynthesisOptions;
     }
-  | { type: "speech.cancel"; version: 3; requestId: string }
-  | { type: "speech.credentials.status"; version: 3 }
-  | { type: "speech.credentials.save"; version: 3; apiKey: string }
-  | { type: "speech.credentials.test"; version: 3; apiKey?: string }
-  | { type: "speech.credentials.remove"; version: 3 }
-  | { type: "heartbeat"; version: 3 };
+  | { type: "speech.cancel"; version: ProtocolVersion; requestId: string }
+  | { type: "speech.credentials.status"; version: ProtocolVersion }
+  | { type: "speech.credentials.save"; version: ProtocolVersion; apiKey: string }
+  | { type: "speech.credentials.test"; version: ProtocolVersion; apiKey?: string }
+  | { type: "speech.credentials.remove"; version: ProtocolVersion }
+  | { type: "heartbeat"; version: ProtocolVersion };
 
 export type PermissionRequestMetadata = {
   toolName?: string;
@@ -189,34 +264,34 @@ export type BridgeErrorCode =
 export type BridgeToExtension =
   | {
       type: "session.started";
-      version: 3;
+      version: ProtocolVersion;
       clientSessionId: string;
       bridgeSessionId: string;
     }
   | {
       type: "agent.event";
-      version: 3;
+      version: ProtocolVersion;
       clientSessionId: string;
       event: AgentEvent;
     }
   | {
       type: "permission.request";
-      version: 3;
+      version: ProtocolVersion;
       clientSessionId: string;
       request: PermissionRequest;
     }
-  | { type: "session.error"; version: 3; clientSessionId: string; message: string; code?: SessionErrorCode }
-  | { type: "bridge.ready"; version: 3 }
-  | { type: "bridge.error"; version: 3; message: string; code?: BridgeErrorCode }
-  | { type: "speech.started"; version: 3; requestId: string; mimeType: string }
-  | { type: "speech.chunk"; version: 3; requestId: string; sequence: number; audioBase64: string }
-  | { type: "speech.done"; version: 3; requestId: string }
-  | { type: "speech.error"; version: 3; requestId: string; message: string; code?: SpeechErrorCode }
-  | ({ type: "speech.credentials.status"; version: 3 } & SpeechCredentialStatus)
-  | ({ type: "speech.credentials.saved"; version: 3 } & Extract<SpeechCredentialStatus, { configured: true }>)
-  | { type: "speech.credentials.tested"; version: 3; ok: true }
-  | ({ type: "speech.credentials.removed"; version: 3 } & SpeechCredentialStatus)
-  | { type: "speech.credentials.error"; version: 3; message: string; code?: SpeechCredentialErrorCode };
+  | { type: "session.error"; version: ProtocolVersion; clientSessionId: string; message: string; code?: SessionErrorCode }
+  | { type: "bridge.ready"; version: ProtocolVersion }
+  | { type: "bridge.error"; version: ProtocolVersion; message: string; code?: BridgeErrorCode }
+  | { type: "speech.started"; version: ProtocolVersion; requestId: string; mimeType: string }
+  | { type: "speech.chunk"; version: ProtocolVersion; requestId: string; sequence: number; audioBase64: string }
+  | { type: "speech.done"; version: ProtocolVersion; requestId: string }
+  | { type: "speech.error"; version: ProtocolVersion; requestId: string; message: string; code?: SpeechErrorCode }
+  | ({ type: "speech.credentials.status"; version: ProtocolVersion } & SpeechCredentialStatus)
+  | ({ type: "speech.credentials.saved"; version: ProtocolVersion } & Extract<SpeechCredentialStatus, { configured: true }>)
+  | { type: "speech.credentials.tested"; version: ProtocolVersion; ok: true }
+  | ({ type: "speech.credentials.removed"; version: ProtocolVersion } & SpeechCredentialStatus)
+  | { type: "speech.credentials.error"; version: ProtocolVersion; message: string; code?: SpeechCredentialErrorCode };
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -613,6 +688,14 @@ function parsePageContext(value: unknown): PageContext | null {
   const metadata = parsePageContextMetadata(value.metadata);
   if (!metadata) return null;
 
+  if (value.kind === "context_bundle") {
+    return parseContextBundle(value, metadata);
+  }
+
+  return parsePageContextBase(value, metadata);
+}
+
+function parsePageContextBase(value: Record<string, unknown>, metadata: PageContextMetadata): PageContextBase | null {
   switch (value.kind) {
     case "readable":
       if (!hasOnlyKeys(value, ["kind", "metadata", "text", "textLength", "extractionMethod"])) return null;
@@ -646,13 +729,249 @@ function parsePageContext(value: unknown): PageContext | null {
         metadata,
         reason: value.reason
       };
+    case "selected_text":
+      if (!hasOnlyKeys(value, ["kind", "metadata", "text", "textLength", "selection"])) return null;
+      if (!isNonEmptyString(value.text)) return null;
+      if (typeof value.textLength !== "number" || !Number.isInteger(value.textLength)) return null;
+      if (value.textLength !== value.text.length) return null;
+      {
+        const selection = parseSelectionGeometry(value.selection, "text_selection");
+        if (!selection) return null;
+        return {
+          kind: "selected_text",
+          metadata,
+          text: value.text,
+          textLength: value.textLength,
+          selection
+        };
+      }
+    case "area_snapshot":
+      if (!hasOnlyKeys(value, ["kind", "metadata", "image", "selection"])) return null;
+      {
+        const image = parsePageContextImage(value.image);
+        const selection = parseSelectionGeometry(value.selection, "area_snapshot");
+        if (!image || !selection) return null;
+        return {
+          kind: "area_snapshot",
+          metadata,
+          image,
+          selection
+        };
+      }
     default:
       return null;
   }
 }
 
 function isMetadataOnlyPageContextReason(value: unknown): value is MetadataOnlyPageContextReason {
-  return value === "no_usable_text" || value === "content_too_large" || value === "full_dom_too_large";
+  return (
+    value === "no_usable_text" ||
+    value === "content_too_large" ||
+    value === "full_dom_too_large" ||
+    value === "selection_too_large"
+  );
+}
+
+function parseContextBundle(value: Record<string, unknown>, metadata: PageContextMetadata): PageContext | null {
+  if (!hasOnlyKeys(value, ["kind", "trust", "metadata", "createdAt", "items"])) return null;
+  if (value.trust !== "untrusted") return null;
+  if (!isNonEmptyString(value.createdAt)) return null;
+  if (!Array.isArray(value.items) || value.items.length === 0 || value.items.length > 12) return null;
+
+  const ids = new Set<string>();
+  const items: PageContextBundleItem[] = [];
+  for (const item of value.items) {
+    const parsedItem = parseContextBundleItem(item);
+    if (!parsedItem || ids.has(parsedItem.id)) return null;
+    ids.add(parsedItem.id);
+    items.push(parsedItem);
+  }
+
+  return {
+    kind: "context_bundle",
+    trust: "untrusted",
+    metadata,
+    createdAt: value.createdAt,
+    items
+  };
+}
+
+function parseContextBundleItem(value: unknown): PageContextBundleItem | null {
+  if (!isRecord(value)) return null;
+  if (!hasOnlyKeys(value, ["id", "label", "trust", "source", "context"])) return null;
+  if (!isNonEmptyString(value.id) || !isNonEmptyString(value.label)) return null;
+  if (value.trust !== "untrusted") return null;
+  if (!isPageContextBundleItemSource(value.source)) return null;
+  if (!isRecord(value.context) || !isRecord(value.context.metadata)) return null;
+
+  const itemMetadata = parsePageContextMetadata(value.context.metadata);
+  if (!itemMetadata) return null;
+  const context = parsePageContextBase(value.context, itemMetadata);
+  if (!context || !bundleSourceMatchesContext(value.source, context)) return null;
+
+  return {
+    id: value.id,
+    label: value.label,
+    trust: "untrusted",
+    source: value.source,
+    context
+  };
+}
+
+function isPageContextBundleItemSource(value: unknown): value is PageContextBundleItem["source"] {
+  return value === "selected_text" || value === "area_snapshot" || value === "page_capture";
+}
+
+function bundleSourceMatchesContext(source: PageContextBundleItem["source"], context: PageContextBase): boolean {
+  if (source === "selected_text") {
+    return context.kind === "selected_text" || (context.kind === "metadata_only" && context.reason === "selection_too_large");
+  }
+  if (source === "area_snapshot") return context.kind === "area_snapshot";
+  return (
+    context.kind === "readable" ||
+    context.kind === "full_dom" ||
+    (context.kind === "metadata_only" && context.reason !== "selection_too_large")
+  );
+}
+
+function parseSelectionGeometry<Mode extends "text_selection" | "area_snapshot">(
+  value: unknown,
+  expectedMode: Mode
+): (PageContextSelectionGeometry & { mode: Mode }) | null {
+  if (!isRecord(value)) return null;
+  if (!hasOnlyKeys(value, ["mode", "viewport", "boundingRect", "textRects", "captureProof"])) return null;
+  if (value.mode !== expectedMode) return null;
+  const viewport = parseViewport(value.viewport);
+  const boundingRect = parseRect(value.boundingRect);
+  const captureProof = parseCaptureProof(value.captureProof);
+  if (!viewport || !boundingRect || !captureProof) return null;
+  if (!sameViewport(viewport, captureProof.viewport)) return null;
+
+  const selection: PageContextSelectionGeometry & { mode: Mode } = {
+    mode: expectedMode,
+    viewport,
+    boundingRect,
+    captureProof
+  };
+
+  if (value.textRects !== undefined) {
+    if (!Array.isArray(value.textRects)) return null;
+    const textRects: PageContextRect[] = [];
+    for (const rect of value.textRects) {
+      const parsedRect = parseRect(rect);
+      if (!parsedRect) return null;
+      textRects.push(parsedRect);
+    }
+    selection.textRects = textRects;
+  }
+
+  return selection;
+}
+
+function parseCaptureProof(value: unknown): PageContextCaptureProof | null {
+  if (!isRecord(value)) return null;
+  if (!hasOnlyKeys(value, ["requestId", "tabId", "windowId", "documentUrl", "viewport", "screenshotWidth", "screenshotHeight"])) {
+    return null;
+  }
+  if (!isNonEmptyString(value.requestId) || !isNonEmptyString(value.documentUrl)) return null;
+  if (!optionalNonNegativeInteger(value.tabId) || !optionalNonNegativeInteger(value.windowId)) return null;
+  if (!optionalPositiveInteger(value.screenshotWidth) || !optionalPositiveInteger(value.screenshotHeight)) return null;
+  const viewport = parseViewport(value.viewport);
+  if (!viewport) return null;
+
+  const proof: PageContextCaptureProof = {
+    requestId: value.requestId,
+    documentUrl: value.documentUrl,
+    viewport
+  };
+  if (value.tabId !== undefined) proof.tabId = value.tabId;
+  if (value.windowId !== undefined) proof.windowId = value.windowId;
+  if (value.screenshotWidth !== undefined) proof.screenshotWidth = value.screenshotWidth;
+  if (value.screenshotHeight !== undefined) proof.screenshotHeight = value.screenshotHeight;
+  return proof;
+}
+
+function parseViewport(value: unknown): PageContextViewport | null {
+  if (!isRecord(value)) return null;
+  if (!hasOnlyKeys(value, ["width", "height", "devicePixelRatio", "scrollX", "scrollY"])) return null;
+  if (!isPositiveFiniteNumber(value.width) || !isPositiveFiniteNumber(value.height)) return null;
+  if (!isPositiveFiniteNumber(value.devicePixelRatio)) return null;
+  if (!isFiniteNumber(value.scrollX) || !isFiniteNumber(value.scrollY)) return null;
+  return {
+    width: value.width,
+    height: value.height,
+    devicePixelRatio: value.devicePixelRatio,
+    scrollX: value.scrollX,
+    scrollY: value.scrollY
+  };
+}
+
+function parseRect(value: unknown): PageContextRect | null {
+  if (!isRecord(value)) return null;
+  if (!hasOnlyKeys(value, ["x", "y", "width", "height"])) return null;
+  if (!isFiniteNumber(value.x) || !isFiniteNumber(value.y)) return null;
+  if (!isPositiveFiniteNumber(value.width) || !isPositiveFiniteNumber(value.height)) return null;
+  return { x: value.x, y: value.y, width: value.width, height: value.height };
+}
+
+function parsePageContextImage(value: unknown): PageContextImage | null {
+  if (!isRecord(value)) return null;
+  if (!hasOnlyKeys(value, ["mimeType", "dataBase64", "byteLength", "width", "height"])) return null;
+  if (value.mimeType !== "image/png") return null;
+  if (!isNonEmptyString(value.dataBase64)) return null;
+  if (!isPositiveInteger(value.byteLength) || !isPositiveInteger(value.width) || !isPositiveInteger(value.height)) return null;
+  const decodedBytes = decodeBase64Bytes(value.dataBase64);
+  if (decodedBytes === null || decodedBytes.byteLength !== value.byteLength) return null;
+  if (!isPngWithDimensions(decodedBytes, value.width, value.height)) return null;
+  return {
+    mimeType: "image/png",
+    dataBase64: value.dataBase64,
+    byteLength: value.byteLength,
+    width: value.width,
+    height: value.height
+  };
+}
+
+function sameViewport(left: PageContextViewport, right: PageContextViewport): boolean {
+  return (
+    left.width === right.width &&
+    left.height === right.height &&
+    left.devicePixelRatio === right.devicePixelRatio &&
+    left.scrollX === right.scrollX &&
+    left.scrollY === right.scrollY
+  );
+}
+
+function decodeBase64Bytes(value: string): Uint8Array | null {
+  if (value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return null;
+  try {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+function isPngWithDimensions(bytes: Uint8Array, width: number, height: number): boolean {
+  const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (bytes.length < 33) return false;
+  for (let index = 0; index < pngSignature.length; index += 1) {
+    if (bytes[index] !== pngSignature[index]) return false;
+  }
+
+  const ihdrLength = readUint32(bytes, 8);
+  const ihdrType = String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15]);
+  if (ihdrLength !== 13 || ihdrType !== "IHDR") return false;
+
+  return readUint32(bytes, 16) === width && readUint32(bytes, 20) === height;
+}
+
+function readUint32(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] * 0x1000000 + bytes[offset + 1] * 0x10000 + bytes[offset + 2] * 0x100 + bytes[offset + 3];
 }
 
 function parsePageContextMetadata(value: Record<string, unknown>): PageContextMetadata | null {
@@ -934,6 +1253,26 @@ function isSpeechCredentialErrorCode(value: unknown): value is SpeechCredentialE
 
 function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function optionalNonNegativeInteger(value: unknown): value is number | undefined {
+  return value === undefined || isNonNegativeInteger(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function optionalPositiveInteger(value: unknown): value is number | undefined {
+  return value === undefined || isPositiveInteger(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isPositiveFiniteNumber(value: unknown): value is number {
+  return isFiniteNumber(value) && value > 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

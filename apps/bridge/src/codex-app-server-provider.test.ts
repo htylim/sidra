@@ -59,6 +59,56 @@ describe("createCodexAppServerProvider", () => {
     await expect(events).resolves.toEqual([{ type: "assistant.text.delta", text: "Hello" }, { type: "assistant.done" }]);
   });
 
+  it("passes_multimodal_parts_to_codex_turn_start", async () => {
+    const appServer = createFakeAppServer();
+    appServer.nextResponse = { thread: { id: "thread-1" } };
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+    const session = await provider.createSession();
+    appServer.nextResponse = { turn: { id: "turn-1" } };
+
+    const events = collectAsync(session.send(multimodalSendInput(), new AbortController().signal, ignoredPermissions()));
+    await vi.waitFor(() => expect(appServer.requests.some((request) => request.method === "turn/start")).toBe(true));
+    appServer.emitNotification({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+    await events;
+
+    expect(appServer.requests).toContainEqual({
+      method: "turn/start",
+      params: {
+        threadId: "thread-1",
+        input: [
+          { type: "text", text: "Context boundary before image.", text_elements: [] },
+          { type: "image", url: `data:image/png;base64,${pngBase64}` },
+          { type: "text", text: "User request:\nDescribe this selected area.", text_elements: [] }
+        ],
+        cwd: "/tmp/sidra-workspace",
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+        sandboxPolicy: { type: "readOnly", networkAccess: false }
+      }
+    });
+  });
+
+  it("fails_before_turn_start_when_provider_rejects_images", async () => {
+    const appServer = createFakeAppServer();
+    appServer.nextResponse = { thread: { id: "thread-1" } };
+    const provider = createCodexAppServerProvider({ appServer, workingDirectory: "/tmp/sidra-workspace" });
+    const session = await provider.createSession();
+    appServer.rejectNextRequest = new Error("Invalid params: image input is unsupported");
+
+    await expect(collectAsync(session.send(multimodalSendInput(), new AbortController().signal, ignoredPermissions()))).rejects.toThrow(
+      "image input is unsupported"
+    );
+
+    expect(appServer.requests).toContainEqual({
+      method: "turn/start",
+      params: expect.objectContaining({
+        threadId: "thread-1",
+        input: expect.arrayContaining([{ type: "image", url: `data:image/png;base64,${pngBase64}` }])
+      })
+    });
+    expect(appServer.requests.some((request) => request.method === "turn/interrupt")).toBe(false);
+  });
+
   it("inserts_markdown_paragraph_boundary_between_agent_message_items", async () => {
     const { appServer, events } = await startProviderTurn("Summarize");
 
@@ -815,6 +865,29 @@ function ignoredPermissions() {
       return { decision: "deny" as const };
     }
   };
+}
+
+const pngBase64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lw9q9wAAAABJRU5ErkJggg==";
+
+function multimodalSendInput() {
+  return {
+    prompt: "legacy text must not be used for multimodal turns",
+    parts: [
+      { kind: "text", text: "Context boundary before image." },
+      {
+        kind: "image",
+        mimeType: "image/png",
+        dataBase64: pngBase64,
+        byteLength: Buffer.from(pngBase64, "base64").byteLength,
+        width: 1,
+        height: 1,
+        untrustedBoundaryText: "Context boundary before image."
+      },
+      { kind: "text", text: "User request:\nDescribe this selected area." }
+    ],
+    displayTitleSource: { prompt: "Describe this selected area." }
+  } as Parameters<Awaited<ReturnType<ReturnType<typeof createCodexAppServerProvider>["createSession"]>>["send"]>[0];
 }
 
 async function startProviderTurn(prompt: string) {

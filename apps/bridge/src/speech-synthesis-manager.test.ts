@@ -14,7 +14,7 @@ describe("SpeechSynthesisManager", () => {
 
     await manager.synthesize({
       type: "speech.synthesize",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       text: "Read this.",
       options: { model: "gpt-4o-mini-tts", voice: "alloy", format: "mp3", speed: 1 }
@@ -23,7 +23,7 @@ describe("SpeechSynthesisManager", () => {
     expect(gateway.requests).toHaveLength(0);
     expect(emitted).toContainEqual({
       type: "speech.error",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       message: "OpenAI API key is missing.",
       code: "openai_api_key_missing"
@@ -50,20 +50,20 @@ describe("SpeechSynthesisManager", () => {
       { speech: manager } as unknown as Parameters<typeof createBridge>[2]
     );
 
-    await bridge.handleMessage({ type: "speech.credentials.save", version: 3, apiKey: "sk-test-secret" });
-    await bridge.handleMessage({ type: "speech.credentials.test", version: 3 });
-    await bridge.handleMessage({ type: "speech.credentials.remove", version: 3 });
+    await bridge.handleMessage({ type: "speech.credentials.save", version: 4, apiKey: "sk-test-secret" });
+    await bridge.handleMessage({ type: "speech.credentials.test", version: 4 });
+    await bridge.handleMessage({ type: "speech.credentials.remove", version: 4 });
 
     expect(gateway.testedApiKeys).toEqual(["sk-test-secret"]);
     expect(emitted).toContainEqual({
       type: "speech.credentials.saved",
-      version: 3,
+      version: 4,
       configured: true,
       source: "keychain",
       redactedKey: "sk-...cret"
     });
-    expect(emitted).toContainEqual({ type: "speech.credentials.tested", version: 3, ok: true });
-    expect(emitted).toContainEqual({ type: "speech.credentials.removed", version: 3, configured: false });
+    expect(emitted).toContainEqual({ type: "speech.credentials.tested", version: 4, ok: true });
+    expect(emitted).toContainEqual({ type: "speech.credentials.removed", version: 4, configured: false });
     expect(JSON.stringify(emitted)).not.toContain("sk-test-secret");
   });
 
@@ -85,7 +85,7 @@ describe("SpeechSynthesisManager", () => {
 
     expect(emitted).toContainEqual({
       type: "speech.credentials.removed",
-      version: 3,
+      version: 4,
       configured: true,
       source: "environment",
       redactedKey: "sk-...cret"
@@ -104,7 +104,7 @@ describe("SpeechSynthesisManager", () => {
 
     await manager.synthesize({
       type: "speech.synthesize",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       text: `${"a".repeat(4_090)} ${"b".repeat(600)}`,
       options: { model: "gpt-4o-mini-tts", voice: "alloy", format: "mp3", speed: 1 }
@@ -129,17 +129,17 @@ describe("SpeechSynthesisManager", () => {
 
     await manager.synthesize({
       type: "speech.synthesize",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       text: "Read this.",
       options: { model: "gpt-4o-mini-tts", voice: "alloy", format: "mp3", speed: 1 }
     });
 
     expect(emitted).toEqual([
-      { type: "speech.started", version: 3, requestId: "speech-1", mimeType: "audio/mpeg" },
-      { type: "speech.chunk", version: 3, requestId: "speech-1", sequence: 0, audioBase64: "AQ==" },
-      { type: "speech.chunk", version: 3, requestId: "speech-1", sequence: 1, audioBase64: "AgM=" },
-      { type: "speech.done", version: 3, requestId: "speech-1" }
+      { type: "speech.started", version: 4, requestId: "speech-1", mimeType: "audio/mpeg" },
+      { type: "speech.chunk", version: 4, requestId: "speech-1", sequence: 0, audioBase64: "AQ==" },
+      { type: "speech.chunk", version: 4, requestId: "speech-1", sequence: 1, audioBase64: "AgM=" },
+      { type: "speech.done", version: 4, requestId: "speech-1" }
     ]);
   });
 
@@ -200,7 +200,7 @@ describe("SpeechSynthesisManager", () => {
 
     await manager.synthesize({
       type: "speech.synthesize",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       text: "Read this.",
       options: { model: "gpt-4o-mini-tts", voice: "marin", format: "mp3", speed: 1 }
@@ -208,7 +208,7 @@ describe("SpeechSynthesisManager", () => {
 
     expect(emitted).toContainEqual({
       type: "speech.error",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       message:
         "OpenAI speech request failed (429 insufficient_quota): You exceeded your current quota, please check your plan and billing details.",
@@ -228,20 +228,20 @@ describe("SpeechSynthesisManager", () => {
 
     const synthesizePromise = manager.synthesize({
       type: "speech.synthesize",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       text: "Read this.",
       options: { model: "gpt-4o-mini-tts", voice: "alloy", format: "mp3", speed: 1 }
     });
 
     await gateway.started;
-    await manager.cancel({ type: "speech.cancel", version: 3, requestId: "speech-1" });
+    await manager.cancel({ type: "speech.cancel", version: 4, requestId: "speech-1" });
     await synthesizePromise;
 
     expect(gateway.abortCount).toBe(1);
     expect(emitted).toContainEqual({
       type: "speech.error",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       message: "Speech request was cancelled.",
       code: "speech_cancelled"
@@ -261,13 +261,13 @@ describe("SpeechSynthesisManager", () => {
 
     const synthesizePromise = manager.synthesize({
       type: "speech.synthesize",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       text: "Read this.",
       options: { model: "gpt-4o-mini-tts", voice: "alloy", format: "mp3", speed: 1 }
     });
 
-    await manager.cancel({ type: "speech.cancel", version: 3, requestId: "speech-1" });
+    await manager.cancel({ type: "speech.cancel", version: 4, requestId: "speech-1" });
     credentialStore.resolve();
     await synthesizePromise;
 
@@ -275,7 +275,7 @@ describe("SpeechSynthesisManager", () => {
     expect(emitted).toEqual([
       {
         type: "speech.error",
-        version: 3,
+        version: 4,
         requestId: "speech-1",
         message: "Speech request was cancelled.",
         code: "speech_cancelled"
@@ -294,7 +294,7 @@ describe("SpeechSynthesisManager", () => {
 
     const synthesizePromise = manager.synthesize({
       type: "speech.synthesize",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       text: "Read this.",
       options: { model: "gpt-4o-mini-tts", voice: "alloy", format: "mp3", speed: 1 }

@@ -109,6 +109,21 @@ describe("extension UI interaction state CSS", () => {
     expectRule(".composer-context-hint span:first-child", ["color: #17201f", "font-weight: 650"]);
   });
 
+  it("keeps_attachment_rows_within_mobile_width", () => {
+    expectRule(".selection-toolbar-button.active", ["width: min(116px, 34vw)"]);
+    expectRule(".selection-toolbar-button span", ["overflow: hidden", "text-overflow: ellipsis", "white-space: nowrap"]);
+    expectRule(".composer-attachment-tray", ["display: grid", "min-width: 0"]);
+    expectRule(".attachment-row", ["grid-template-columns: 30px minmax(0, 1fr) 28px", "min-width: 0"]);
+    expectRule(".attachment-icon", ["width: 30px", "height: 30px", "overflow: hidden"]);
+    expectRule(".attachment-copy", ["min-width: 0"]);
+    expectRule(".attachment-title,\n.attachment-source,\n.attachment-preview", [
+      "overflow: hidden",
+      "text-overflow: ellipsis",
+      "white-space: nowrap"
+    ]);
+    expectRule(".attachment-remove-button", ["width: 28px", "height: 28px"]);
+  });
+
   it("keeps_transcript_actions_quietly_discoverable_without_hover", () => {
     expectRule(".transcript-action-rail", ["opacity: 0.44", "pointer-events: auto"]);
   });

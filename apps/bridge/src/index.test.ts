@@ -21,7 +21,7 @@ describe("createBridge speech dispatch", () => {
 
     await bridge.handleMessage({
       type: "speech.synthesize",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       text: "Read this.",
       options: { model: "gpt-4o-mini-tts", voice: "alloy", format: "mp3", speed: 1 }
@@ -29,7 +29,7 @@ describe("createBridge speech dispatch", () => {
 
     expect(speech.synthesize).toHaveBeenCalledWith({
       type: "speech.synthesize",
-      version: 3,
+      version: 4,
       requestId: "speech-1",
       text: "Read this.",
       options: { model: "gpt-4o-mini-tts", voice: "alloy", format: "mp3", speed: 1 }
@@ -42,11 +42,11 @@ describe("createBridge connection heartbeat cleanup", () => {
     const emitted: BridgeToExtension[] = [];
     const bridge = createBridge({ emit: (message) => emitted.push(message) });
 
-    await bridge.handleMessage({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex" });
+    await bridge.handleMessage({ type: "session.start", version: 4, clientSessionId: "page-1", providerId: "codex" });
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Provider is not available",
       code: "provider_unavailable"
@@ -58,9 +58,9 @@ describe("createBridge connection heartbeat cleanup", () => {
     const provider = createRecordingProvider();
     const bridge = createBridge({ emit: () => {} }, provider, { heartbeatTimeoutMs: 30_000 });
 
-    await bridge.handleMessage({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex" });
+    await bridge.handleMessage({ type: "session.start", version: 4, clientSessionId: "page-1", providerId: "codex" });
     vi.advanceTimersByTime(20_000);
-    await bridge.handleMessage({ type: "heartbeat", version: 3 });
+    await bridge.handleMessage({ type: "heartbeat", version: 4 });
     vi.advanceTimersByTime(20_000);
 
     expect(provider.createdSessions[0]?.closeCount).toBe(0);
@@ -72,7 +72,7 @@ describe("createBridge connection heartbeat cleanup", () => {
     const provider = createRecordingProvider();
     const bridge = createBridge({ emit: () => {} }, provider, { heartbeatTimeoutMs: 30_000 });
 
-    await bridge.handleMessage({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex" });
+    await bridge.handleMessage({ type: "session.start", version: 4, clientSessionId: "page-1", providerId: "codex" });
     vi.advanceTimersByTime(30_000);
     await Promise.resolve();
 
@@ -87,13 +87,13 @@ describe("createBridge connection heartbeat cleanup", () => {
       heartbeatTimeoutMs: 30_000
     });
 
-    await bridge.handleMessage({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex" });
+    await bridge.handleMessage({ type: "session.start", version: 4, clientSessionId: "page-1", providerId: "codex" });
     vi.advanceTimersByTime(30_000);
     await Promise.resolve();
 
     expect(emitted).toContainEqual({
       type: "bridge.error",
-      version: 3,
+      version: 4,
       message: "Bridge heartbeat timed out. Retry to reconnect.",
       code: "heartbeat_timeout"
     });
@@ -107,14 +107,14 @@ describe("createBridge connection heartbeat cleanup", () => {
       heartbeatTimeoutMs: 30_000
     });
 
-    await bridge.handleMessage({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex" });
+    await bridge.handleMessage({ type: "session.start", version: 4, clientSessionId: "page-1", providerId: "codex" });
     vi.advanceTimersByTime(30_000);
     await Promise.resolve();
-    await bridge.handleMessage({ type: "session.send", version: 3, clientSessionId: "page-1", prompt: "After timeout" });
+    await bridge.handleMessage({ type: "session.send", version: 4, clientSessionId: "page-1", prompt: "After timeout" });
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -129,14 +129,14 @@ describe("createBridge connection heartbeat cleanup", () => {
       heartbeatTimeoutMs: 30_000
     });
 
-    await bridge.handleMessage({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex" });
+    await bridge.handleMessage({ type: "session.start", version: 4, clientSessionId: "page-1", providerId: "codex" });
     vi.advanceTimersByTime(30_000);
     await Promise.resolve();
-    await bridge.handleMessage({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex" });
+    await bridge.handleMessage({ type: "session.start", version: 4, clientSessionId: "page-1", providerId: "codex" });
 
     expect(emitted).toContainEqual({
       type: "session.error",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       message: "Session has not been started",
       code: "session_not_started"
@@ -151,10 +151,10 @@ describe("createBridge connection heartbeat cleanup", () => {
       heartbeatTimeoutMs: 30_000
     });
 
-    await bridge.handleMessage({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex" });
+    await bridge.handleMessage({ type: "session.start", version: 4, clientSessionId: "page-1", providerId: "codex" });
     await bridge.handleMessage({
       type: "session.send",
-      version: 3,
+      version: 4,
       clientSessionId: "page-1",
       prompt: "Sensitive prompt",
       pageContext: {
@@ -191,7 +191,7 @@ describe("createBridge connection heartbeat cleanup", () => {
       { heartbeatTimeoutMs: 30_000 }
     );
 
-    await bridge.handleMessage({ type: "session.start", version: 3, clientSessionId: "page-1", providerId: "codex" });
+    await bridge.handleMessage({ type: "session.start", version: 4, clientSessionId: "page-1", providerId: "codex" });
     vi.advanceTimersByTime(30_000);
     await Promise.resolve();
 

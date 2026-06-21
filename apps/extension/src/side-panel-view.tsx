@@ -2,6 +2,7 @@ import { type CSSProperties, useEffect, useState } from "react";
 import type { PermissionDecision } from "@sidra/protocol";
 import type { CaptureMode } from "./capture-mode";
 import { CurrentPageCard } from "./current-page-card";
+import type { PageSelectionMode } from "./page-selection-service";
 import { SidraIcon } from "./sidra-icon";
 import type { SidePanelSnapshot } from "./side-panel-controller";
 import type { SendMode } from "./url-session-store";
@@ -17,6 +18,10 @@ export function SidePanelView(props: {
   onQuickAction(actionId: string): boolean | Promise<boolean>;
   onCancelTurn(): boolean;
   onRespondToPermission(requestId: string, decision: PermissionDecision): boolean;
+  onStartPageSelection?(mode: PageSelectionMode): boolean | Promise<boolean>;
+  onCancelPageSelection?(): boolean;
+  onRemoveContextAttachment?(attachmentId: string): boolean;
+  onClearContextAttachments?(): boolean;
   onDraftPromptChange(text: string): void;
   onCaptureModeChange(captureMode: CaptureMode): void;
   onSendModeChange(sendMode: SendMode): void;
@@ -27,13 +32,16 @@ export function SidePanelView(props: {
   clipboard?: TranscriptClipboardGateway;
 }) {
   const [sendModeMenuOpen, setSendModeMenuOpen] = useState(false);
+  const [selectionMenuOpen, setSelectionMenuOpen] = useState(false);
   const bridgeBlocked = props.snapshot.bridge.availability.status !== "ready";
   const pageUnsupported = props.snapshot.activePage.status === "unsupported";
   const chatUnavailable = !props.snapshot.bridge.canUseChat || pageUnsupported;
   const chatWorkState = getChatWorkState(props.snapshot.activeSession);
+  const selectionActive = props.snapshot.pageSelection.status === "selecting";
   const showCancelButton =
     chatWorkState === "turn_running" || chatWorkState === "cancel_requested";
-  const promptEntryDisabled = chatUnavailable || chatWorkState !== "idle";
+  const promptEntryDisabled = chatUnavailable || chatWorkState !== "idle" || selectionActive;
+  const selectionToolbarDisabled = !selectionActive && (pageUnsupported || chatWorkState !== "idle");
   const cancelDisabled = chatWorkState !== "turn_running";
   const waitingState = chatUnavailable
     ? { kind: "idle" } satisfies ChatWaitingState
@@ -49,6 +57,12 @@ export function SidePanelView(props: {
       setSendModeMenuOpen(false);
     }
   }, [promptEntryDisabled]);
+
+  useEffect(() => {
+    if (selectionToolbarDisabled || selectionActive) {
+      setSelectionMenuOpen(false);
+    }
+  }, [selectionToolbarDisabled, selectionActive]);
 
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
@@ -80,6 +94,20 @@ export function SidePanelView(props: {
     setSendModeMenuOpen(false);
   }
 
+  function startPageSelection(mode: PageSelectionMode) {
+    setSelectionMenuOpen(false);
+    void props.onStartPageSelection?.(mode);
+  }
+
+  function toggleSelectionMenu() {
+    if (selectionToolbarDisabled) return;
+    if (selectionActive) {
+      props.onCancelPageSelection?.();
+      return;
+    }
+    setSelectionMenuOpen((open) => !open);
+  }
+
   const pageCard = getPageCardDisplay(props.snapshot);
 
   return (
@@ -87,6 +115,34 @@ export function SidePanelView(props: {
       <header className="header">
         <div className="brand-mark">S</div>
         <h1>Sidra</h1>
+        <div className="selection-toolbar">
+          <button
+            type="button"
+            className={`toolbar-button selection-toolbar-button${selectionActive ? " active" : ""}`}
+            aria-label="Select page context"
+            aria-pressed={selectionActive}
+            aria-expanded={selectionMenuOpen}
+            aria-controls="page-selection-mode-menu"
+            title="Select page context"
+            disabled={selectionToolbarDisabled}
+            onClick={toggleSelectionMenu}
+          >
+            <SidraIcon name="scan-text" />
+            {selectionActive ? <span>Selecting</span> : null}
+          </button>
+          {selectionMenuOpen ? (
+            <div className="selection-mode-menu" id="page-selection-mode-menu" role="group" aria-label="Page selection mode">
+              <button type="button" onClick={() => startPageSelection("text")}>
+                <SidraIcon name="file-text" />
+                <span>Text</span>
+              </button>
+              <button type="button" onClick={() => startPageSelection("snapshot")}>
+                <SidraIcon name="image" />
+                <span>Snapshot</span>
+              </button>
+            </div>
+          ) : null}
+        </div>
         <button
           type="button"
           className="toolbar-button"
@@ -153,6 +209,12 @@ export function SidePanelView(props: {
       </section>
 
       <footer className="composer">
+        <ComposerAttachmentTray
+          attachments={props.snapshot.activeSession.contextAttachments}
+          selectionState={props.snapshot.pageSelection}
+          onRemoveContextAttachment={props.onRemoveContextAttachment}
+          onClearContextAttachments={props.onClearContextAttachments}
+        />
         <textarea
           value={draftPrompt}
           placeholder="Ask about this page"
@@ -244,6 +306,69 @@ export function SidePanelView(props: {
   );
 }
 
+function ComposerAttachmentTray(props: {
+  attachments: SidePanelSnapshot["activeSession"]["contextAttachments"];
+  selectionState: SidePanelSnapshot["pageSelection"];
+  onRemoveContextAttachment?: (attachmentId: string) => boolean;
+  onClearContextAttachments?: () => boolean;
+}) {
+  const hasAttachments = props.attachments.length > 0;
+  const hasSelectionError = props.selectionState.status === "failed";
+  const selectionErrorMessage = props.selectionState.status === "failed" ? props.selectionState.message : undefined;
+  if (!hasAttachments && !hasSelectionError) return null;
+
+  return (
+    <section className="composer-attachment-tray" aria-label="Context attachments">
+      <div className="attachment-tray-header">
+        <span>Context attachments</span>
+        {hasAttachments ? (
+          <button type="button" className="attachment-clear-button" onClick={() => props.onClearContextAttachments?.()}>
+            Clear all
+          </button>
+        ) : null}
+      </div>
+      {hasSelectionError ? (
+        <div className="selection-error" role="alert">
+          {selectionErrorMessage}
+        </div>
+      ) : null}
+      {hasAttachments ? (
+        <div className="attachment-list">
+          {props.attachments.map((attachment) => (
+            <div
+              className={`attachment-row${attachment.tone === "warning" ? " warning" : ""}`}
+              key={attachment.id}
+            >
+              <div className="attachment-icon">
+                {attachment.source === "area_snapshot" && attachment.thumbnailDataUrl ? (
+                  <img src={attachment.thumbnailDataUrl} alt="Area snapshot thumbnail" />
+                ) : (
+                  <SidraIcon name={attachment.source === "area_snapshot" ? "image" : "file-text"} />
+                )}
+              </div>
+              <div className="attachment-copy">
+                <div className="attachment-title-row">
+                  <span className="attachment-title">{attachment.label}</span>
+                  <span className="attachment-source">{attachmentSourceText(attachment)}</span>
+                </div>
+                <div className="attachment-preview">{attachmentPreviewText(attachment)}</div>
+              </div>
+              <button
+                type="button"
+                className="attachment-remove-button"
+                aria-label={`Remove ${attachment.label} attachment`}
+                onClick={() => props.onRemoveContextAttachment?.(attachment.id)}
+              >
+                <SidraIcon name="x" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function getChatWorkState(session: SidePanelSnapshot["activeSession"]): ChatWorkState {
   if (session.pendingPromptCount > 0) return "queued_startup_prompt";
   if (!session.turnInFlight) return "idle";
@@ -268,6 +393,17 @@ function hasPendingPermissionRequest(sessionTranscript: SidePanelSnapshot["activ
 }
 
 function getComposerContextHint(activeSession: SidePanelSnapshot["activeSession"]): { label: string; detail: string } {
+  if (activeSession.contextAttachments.length > 0) {
+    const count = activeSession.contextAttachments.length;
+    return {
+      label: "Context attachments",
+      detail:
+        activeSession.sendMode === "capture"
+          ? `${count} ${count === 1 ? "attachment" : "attachments"} will be sent with the page capture.`
+          : `${count} ${count === 1 ? "attachment" : "attachments"} will be sent.`
+    };
+  }
+
   if (activeSession.sendMode === "send") {
     return {
       label: activeSession.contextState.label,
@@ -286,6 +422,27 @@ function getComposerContextHint(activeSession: SidePanelSnapshot["activeSession"
     label: activeSession.contextState.label,
     detail: "Capture + Send will include readable page text."
   };
+}
+
+function attachmentSourceText(
+  attachment: SidePanelSnapshot["activeSession"]["contextAttachments"][number]
+): string {
+  const pageTitle = attachment.pageTitle?.trim();
+  if (pageTitle) return pageTitle;
+  try {
+    return new URL(attachment.url).hostname;
+  } catch {
+    return attachment.url;
+  }
+}
+
+function attachmentPreviewText(
+  attachment: SidePanelSnapshot["activeSession"]["contextAttachments"][number]
+): string {
+  if (attachment.source === "area_snapshot" && attachment.imageDimensions) {
+    return `${attachment.preview}, ${attachment.imageDimensions.width} x ${attachment.imageDimensions.height}`;
+  }
+  return attachment.preview;
 }
 
 function getPageCardDisplay(snapshot: SidePanelSnapshot): { title: string; statusLabel?: string; favIconUrl?: string } {

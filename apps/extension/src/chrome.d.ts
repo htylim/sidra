@@ -15,6 +15,16 @@ declare namespace chrome {
       windowId?: number;
     };
 
+    type CaptureVisibleTabOptions = {
+      format?: "jpeg" | "png";
+      quality?: number;
+    };
+
+    type MessageSendOptions = {
+      frameId?: number;
+      documentId?: string;
+    };
+
     type TabActiveInfo = {
       tabId: number;
       windowId: number;
@@ -27,6 +37,8 @@ declare namespace chrome {
     };
 
     function query(queryInfo: QueryInfo): Promise<Tab[]>;
+    function sendMessage<T = unknown>(tabId: number, message: unknown, options?: MessageSendOptions): Promise<T>;
+    function captureVisibleTab(windowId: number, options?: CaptureVisibleTabOptions): Promise<string>;
 
     const onActivated: {
       addListener(listener: (info: TabActiveInfo) => void): void;
@@ -67,25 +79,52 @@ declare namespace chrome {
       onDisconnect: { addListener(listener: () => void): void };
     };
 
+    type MessageSender = {
+      tab?: tabs.Tab;
+      frameId?: number;
+      id?: string;
+      url?: string;
+    };
+
     function connectNative(application: string): Port;
     function openOptionsPage(): void;
+    function sendMessage<T = unknown>(message: unknown): Promise<T>;
+
+    const onMessage: {
+      addListener(
+        listener: (message: unknown, sender: MessageSender, sendResponse: (response?: unknown) => void) => boolean | void
+      ): void;
+      removeListener(
+        listener: (message: unknown, sender: MessageSender, sendResponse: (response?: unknown) => void) => boolean | void
+      ): void;
+    };
   }
 
   namespace scripting {
     type InjectionTarget = {
       tabId: number;
+      allFrames?: boolean;
+      frameIds?: number[];
     };
 
     type InjectionResult<T> = {
+      frameId?: number;
+      documentId?: string;
       result?: T;
     };
 
-    type ScriptInjection<T> = {
+    type FunctionInjection<T> = {
       target: InjectionTarget;
       func: () => T;
     };
 
-    function executeScript<T>(injection: ScriptInjection<T>): Promise<Array<InjectionResult<T>>>;
+    type FileInjection = {
+      target: InjectionTarget;
+      files: string[];
+    };
+
+    function executeScript<T>(injection: FunctionInjection<T>): Promise<Array<InjectionResult<T>>>;
+    function executeScript(injection: FileInjection): Promise<Array<InjectionResult<undefined>>>;
   }
 
   namespace storage {

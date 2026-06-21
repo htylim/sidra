@@ -1,6 +1,13 @@
 import type { PageContext, PermissionDecision } from "@sidra/protocol";
 import type { BridgeSessionCoordinatorSnapshot } from "./bridge/session-coordinator";
 import type { CaptureMode } from "./capture-mode";
+import {
+  buildContextBundle,
+  isPageContextBase,
+  metadataFromPageIdentity,
+  type ComposerAttachmentSnapshot,
+  type ComposerContextAttachment
+} from "./capture-service";
 import type { PageIdentity, PageKey } from "./page-key";
 import type { TranscriptEntry, UserPromptDisplay } from "./transcript";
 
@@ -18,6 +25,20 @@ export type ContextState =
       label: "Content too large";
       capturedAt: string;
       reason: "content_too_large";
+    }
+  | {
+      status: "selection_too_large";
+      label: "Selection too large";
+      capturedAt: string;
+      reason: "selection_too_large";
+    }
+  | { status: "selected_text_attached"; label: "Selected text attached"; capturedAt: string }
+  | { status: "area_snapshot_attached"; label: "Area snapshot attached"; capturedAt: string }
+  | { status: "context_attachments_attached"; label: "Context attachments attached"; capturedAt: string }
+  | {
+      status: "page_capture_and_attachments_attached";
+      label: "Page capture and attachments attached";
+      capturedAt: string;
     }
   | { status: "full_dom_attached"; label: "Full DOM attached"; capturedAt: string }
   | {
@@ -37,6 +58,7 @@ export type UrlSessionSnapshot = {
   sendMode: SendMode;
   draftPrompt: string;
   contextState: ContextState;
+  contextAttachments: ComposerAttachmentSnapshot[];
   transcript: TranscriptEntry[];
   pendingPromptCount: number;
   sessionStarted: boolean;
@@ -65,6 +87,7 @@ type UrlSessionRecord = {
   sendMode: SendMode;
   draftPrompt: string;
   contextState: ContextState;
+  contextAttachments: ComposerContextAttachment[];
   approvals: SessionApprovalState;
   autoApprovalRequestIds: Set<string>;
   coordinator: UrlSessionCoordinator;
@@ -98,6 +121,7 @@ type Listener = () => void;
 
 const EMPTY_PAGE_KEY = "" as PageKey;
 const INITIAL_CONTEXT_STATE: ContextState = { status: "none", label: "No context sent yet" };
+export const COMPOSER_CONTEXT_ATTACHMENT_LIMIT = 10;
 
 export class UrlSessionStore {
   private readonly createClientSessionId: () => string;
@@ -191,10 +215,25 @@ export class UrlSessionStore {
     if (!activeRecord) return false;
 
     const promptToSend = prompt ?? activeRecord.draftPrompt;
-    const accepted = activeRecord.coordinator.sendPrompt(promptToSend);
+    const createdAt = new Date().toISOString();
+    const pageContext =
+      activeRecord.contextAttachments.length > 0
+        ? buildContextBundle({
+            attachments: activeRecord.contextAttachments,
+            metadata: metadataFromPageIdentity(activeRecord.pageIdentity, createdAt),
+            createdAt
+          })
+        : undefined;
+    const accepted = pageContext
+      ? activeRecord.coordinator.sendPrompt({ prompt: promptToSend, pageContext })
+      : activeRecord.coordinator.sendPrompt(promptToSend);
     if (!accepted) return false;
 
     activeRecord.draftPrompt = "";
+    if (pageContext) {
+      activeRecord.contextAttachments = [];
+      activeRecord.contextState = contextStateForPageContext(pageContext);
+    }
     this.emit();
     return true;
   }
@@ -203,12 +242,101 @@ export class UrlSessionStore {
     const activeRecord = this.getActiveRecord();
     if (!activeRecord) return false;
 
-    const accepted = activeRecord.coordinator.sendPrompt(input);
+    const createdAt = new Date().toISOString();
+    const pageContext =
+      activeRecord.contextAttachments.length > 0 && isPageContextBase(input.pageContext)
+        ? buildContextBundle({
+            attachments: activeRecord.contextAttachments,
+            metadata: input.pageContext.metadata,
+            createdAt,
+            pageCaptureContext: input.pageContext
+          })
+        : input.pageContext;
+
+    const accepted = activeRecord.coordinator.sendPrompt({ ...input, pageContext });
     if (!accepted) return false;
 
     activeRecord.draftPrompt = "";
-    activeRecord.contextState = contextStateForPageContext(input.pageContext);
+    activeRecord.contextAttachments = [];
+    activeRecord.contextState = contextStateForPageContext(pageContext);
     activeRecord.sendMode = "send";
+    this.emit();
+    return true;
+  }
+
+  sendPromptWithExternalContextAttachments(input: {
+    prompt: string;
+    pageContext: PageContext;
+    attachments: ComposerContextAttachment[];
+    userPromptDisplay?: UserPromptDisplay;
+  }): boolean {
+    const activeRecord = this.getActiveRecord();
+    if (!activeRecord) return false;
+
+    const createdAt = new Date().toISOString();
+    const pageContext =
+      input.attachments.length > 0 && isPageContextBase(input.pageContext)
+        ? buildContextBundle({
+            attachments: input.attachments,
+            metadata: input.pageContext.metadata,
+            createdAt,
+            pageCaptureContext: input.pageContext
+          })
+        : input.pageContext;
+    const accepted = activeRecord.coordinator.sendPrompt({
+      prompt: input.prompt,
+      pageContext,
+      userPromptDisplay: input.userPromptDisplay
+    });
+    if (!accepted) return false;
+
+    activeRecord.draftPrompt = "";
+    activeRecord.contextState = contextStateForPageContext(pageContext);
+    activeRecord.sendMode = "send";
+    this.emit();
+    return true;
+  }
+
+  appendActiveContextAttachment(attachment: ComposerContextAttachment): boolean {
+    const activeRecord = this.getActiveRecord();
+    if (!activeRecord) return false;
+    if (activeRecord.contextAttachments.length >= COMPOSER_CONTEXT_ATTACHMENT_LIMIT) return false;
+    if (activeRecord.contextAttachments.some((existingAttachment) => existingAttachment.id === attachment.id)) return false;
+
+    activeRecord.contextAttachments = [...activeRecord.contextAttachments, attachment];
+    this.emit();
+    return true;
+  }
+
+  removeActiveContextAttachment(attachmentId: string): boolean {
+    const activeRecord = this.getActiveRecord();
+    if (!activeRecord) return false;
+    const nextAttachments = activeRecord.contextAttachments.filter((attachment) => attachment.id !== attachmentId);
+    if (nextAttachments.length === activeRecord.contextAttachments.length) return false;
+
+    activeRecord.contextAttachments = nextAttachments;
+    this.emit();
+    return true;
+  }
+
+  clearActiveContextAttachments(): boolean {
+    const activeRecord = this.getActiveRecord();
+    if (!activeRecord || activeRecord.contextAttachments.length === 0) return false;
+
+    activeRecord.contextAttachments = [];
+    this.emit();
+    return true;
+  }
+
+  listActiveContextAttachments(): ComposerContextAttachment[] {
+    return [...(this.getActiveRecord()?.contextAttachments ?? [])];
+  }
+
+  clearContextAttachmentsForPage(pageKey: PageKey): boolean {
+    const record = this.recordsByPageKey.get(pageKey);
+    if (!record || record.contextAttachments.length === 0) return false;
+
+    record.contextAttachments = [];
     this.emit();
     return true;
   }
@@ -272,6 +400,7 @@ export class UrlSessionStore {
     if (!activeRecord) return;
 
     activeRecord.draftPrompt = "";
+    activeRecord.contextAttachments = [];
     activeRecord.contextState = INITIAL_CONTEXT_STATE;
     activeRecord.captureMode = "readable";
     activeRecord.sendMode = "capture";
@@ -283,6 +412,7 @@ export class UrlSessionStore {
   markBridgeDisconnected(): void {
     for (const record of this.recordsByPageKey.values()) {
       record.approvals.clear();
+      record.contextAttachments = [];
       if (!coordinatorMayHaveProviderState(record.coordinator)) continue;
       record.coordinator.markBridgeDisconnected();
     }
@@ -319,6 +449,7 @@ export class UrlSessionStore {
       sendMode: options.sendMode ?? "capture",
       draftPrompt: "",
       contextState: INITIAL_CONTEXT_STATE,
+      contextAttachments: [],
       approvals: new InMemorySessionApprovalState(),
       autoApprovalRequestIds: new Set(),
       coordinator,
@@ -360,6 +491,7 @@ export class UrlSessionStore {
       sendMode: record.sendMode,
       draftPrompt: record.draftPrompt,
       contextState: record.contextState,
+      contextAttachments: record.contextAttachments.map(snapshotFromAttachment),
       transcript: coordinatorSnapshot.transcript,
       pendingPromptCount: coordinatorSnapshot.pendingPromptCount,
       sessionStarted: coordinatorSnapshot.sessionStarted,
@@ -424,6 +556,7 @@ function createEmptySessionSnapshot(): UrlSessionSnapshot {
     sendMode: "capture",
     draftPrompt: "",
     contextState: INITIAL_CONTEXT_STATE,
+    contextAttachments: [],
     transcript: [],
     pendingPromptCount: 0,
     sessionStarted: false,
@@ -433,7 +566,45 @@ function createEmptySessionSnapshot(): UrlSessionSnapshot {
   };
 }
 
+function snapshotFromAttachment(attachment: ComposerContextAttachment): ComposerAttachmentSnapshot {
+  return {
+    id: attachment.id,
+    ...attachment.display
+  };
+}
+
 function contextStateForPageContext(pageContext: PageContext): ContextState {
+  if (pageContext.kind === "context_bundle") {
+    const includesPageCapture = pageContext.items.some((item) => item.source === "page_capture");
+    return includesPageCapture
+      ? {
+          status: "page_capture_and_attachments_attached",
+          label: "Page capture and attachments attached",
+          capturedAt: pageContext.metadata.capturedAt
+        }
+      : {
+          status: "context_attachments_attached",
+          label: "Context attachments attached",
+          capturedAt: pageContext.metadata.capturedAt
+        };
+  }
+
+  if (pageContext.kind === "selected_text") {
+    return {
+      status: "selected_text_attached",
+      label: "Selected text attached",
+      capturedAt: pageContext.metadata.capturedAt
+    };
+  }
+
+  if (pageContext.kind === "area_snapshot") {
+    return {
+      status: "area_snapshot_attached",
+      label: "Area snapshot attached",
+      capturedAt: pageContext.metadata.capturedAt
+    };
+  }
+
   if (pageContext.kind === "metadata_only") {
     if (pageContext.reason === "full_dom_too_large") {
       return {
@@ -448,6 +619,15 @@ function contextStateForPageContext(pageContext: PageContext): ContextState {
       return {
         status: "content_too_large",
         label: "Content too large",
+        capturedAt: pageContext.metadata.capturedAt,
+        reason: pageContext.reason
+      };
+    }
+
+    if (pageContext.reason === "selection_too_large") {
+      return {
+        status: "selection_too_large",
+        label: "Selection too large",
         capturedAt: pageContext.metadata.capturedAt,
         reason: pageContext.reason
       };

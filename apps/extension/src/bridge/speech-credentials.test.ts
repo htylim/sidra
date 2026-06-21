@@ -11,7 +11,7 @@ describe("SpeechCredentialClient", () => {
     client.removeApiKey();
     transport.emit({
       type: "speech.credentials.removed",
-      version: 3,
+      version: 4,
       configured: true,
       source: "environment",
       redactedKey: "sk-...env1"
