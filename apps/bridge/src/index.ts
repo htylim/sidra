@@ -73,7 +73,8 @@ export function createBridge(
       case "session.send":
         await sessions.sendPrompt(message.clientSessionId, {
           prompt: message.prompt,
-          pageContext: message.pageContext
+          pageContext: message.pageContext,
+          promptEffort: message.promptEffort
         });
         return;
       case "session.cancel":

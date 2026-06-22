@@ -817,6 +817,44 @@ describe("BridgeSessionManager permission requests", () => {
 });
 
 describe("BridgeSessionManager page context prompt formatting", () => {
+  it("sends_prompt_effort_to_provider_input", async () => {
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", { prompt: "Summarize this", promptEffort: "high" } as Parameters<
+      typeof manager.sendPrompt
+    >[1] & { promptEffort: "high" });
+
+    expect(provider.createdSessions[0]?.sentInputs).toContainEqual(
+      expect.objectContaining({ promptEffort: "high" })
+    );
+  });
+
+  it("prompt_effort_does_not_change_display_title_source_or_formatted_prompt", async () => {
+    const provider = createFakeProvider();
+    const manager = new BridgeSessionManager({ provider, emit: () => {} });
+
+    await manager.startSession("page-1", "codex");
+    await manager.sendPrompt("page-1", {
+      prompt: "Summarize this",
+      pageContext: readablePageContext(),
+      promptEffort: "xhigh"
+    } as Parameters<typeof manager.sendPrompt>[1] & { promptEffort: "xhigh" });
+
+    const providerPrompt = provider.createdSessions[0]?.sentInputs[0]?.prompt ?? "";
+    expect(provider.createdSessions[0]?.sentInputs[0]?.displayTitleSource).toEqual({
+      prompt: "Summarize this",
+      pageMetadata: {
+        title: "Example article",
+        url: "https://example.com/article"
+      }
+    });
+    expect(providerPrompt).toContain("Untrusted page context JSON:");
+    expect(providerPrompt).toContain("User request:\nSummarize this");
+    expect(providerPrompt).not.toContain("xhigh");
+  });
+
   it("passes_formatted_untrusted_prompt_to_the_provider_session", async () => {
     const provider = createFakeProvider();
     const manager = new BridgeSessionManager({ provider, emit: () => {} });

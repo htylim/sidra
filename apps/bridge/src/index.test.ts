@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BridgeToExtension } from "@sidra/protocol";
-import { createBridge, type AgentProvider, type AgentSession } from "./index.js";
+import { createBridge, type AgentProvider, type AgentSendInput, type AgentSession } from "./index.js";
 
 describe("createBridge speech dispatch", () => {
   it("bridge_routes_speech_synthesize_to_speech_manager", async () => {
@@ -38,6 +38,24 @@ describe("createBridge speech dispatch", () => {
 });
 
 describe("createBridge connection heartbeat cleanup", () => {
+  it("routes_session_send_prompt_effort_to_session_manager", async () => {
+    const provider = createRecordingProvider();
+    const bridge = createBridge({ emit: () => {} }, provider);
+
+    await bridge.handleMessage({ type: "session.start", version: 4, clientSessionId: "page-1", providerId: "codex" });
+    await bridge.handleMessage({
+      type: "session.send",
+      version: 4,
+      clientSessionId: "page-1",
+      prompt: "Use effort",
+      promptEffort: "high"
+    });
+
+    expect(provider.createdSessions[0]?.sentInputs).toContainEqual(
+      expect.objectContaining({ promptEffort: "high" })
+    );
+  });
+
   it("default_provider_fails_closed_when_codex_provider_is_not_configured", async () => {
     const emitted: BridgeToExtension[] = [];
     const bridge = createBridge({ emit: (message) => emitted.push(message) });
@@ -214,9 +232,11 @@ function createRecordingProvider() {
 }
 
 class RecordingSession implements AgentSession {
+  readonly sentInputs: AgentSendInput[] = [];
   closeCount = 0;
 
-  async *send() {
+  async *send(input: AgentSendInput) {
+    this.sentInputs.push(input);
     yield { type: "assistant.done" } as const;
   }
 

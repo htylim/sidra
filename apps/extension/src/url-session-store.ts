@@ -1,4 +1,4 @@
-import type { PageContext, PermissionDecision } from "@sidra/protocol";
+import type { PageContext, PermissionDecision, PromptEffort } from "@sidra/protocol";
 import type { BridgeSessionCoordinatorSnapshot } from "./bridge/session-coordinator";
 import type { CaptureMode } from "./capture-mode";
 import {
@@ -97,7 +97,7 @@ type UrlSessionRecord = {
 export type UrlSessionCoordinator = {
   getSnapshot(): BridgeSessionCoordinatorSnapshot;
   subscribe(listener: () => void): () => void;
-  sendPrompt(input: string | { prompt: string; pageContext?: PageContext; userPromptDisplay?: UserPromptDisplay }): boolean;
+  sendPrompt(input: string | { prompt: string; pageContext?: PageContext; promptEffort?: PromptEffort; userPromptDisplay?: UserPromptDisplay }): boolean;
   cancelTurn?(): boolean;
   recordCaptureUnavailable?(message: string): void;
   respondToPermission?(requestId: string, decision: PermissionDecision): boolean;
@@ -118,6 +118,13 @@ export type UrlSessionStoreSnapshot = {
 };
 
 type Listener = () => void;
+type PromptInput = string | { prompt?: string; promptEffort?: PromptEffort };
+type ContextPromptInput = {
+  prompt: string;
+  pageContext: PageContext;
+  promptEffort?: PromptEffort;
+  userPromptDisplay?: UserPromptDisplay;
+};
 
 const EMPTY_PAGE_KEY = "" as PageKey;
 const INITIAL_CONTEXT_STATE: ContextState = { status: "none", label: "No context sent yet" };
@@ -210,11 +217,12 @@ export class UrlSessionStore {
     this.emit();
   }
 
-  sendPrompt(prompt?: string): boolean {
+  sendPrompt(input?: PromptInput): boolean {
     const activeRecord = this.getActiveRecord();
     if (!activeRecord) return false;
 
-    const promptToSend = prompt ?? activeRecord.draftPrompt;
+    const promptToSend = typeof input === "object" ? input.prompt ?? activeRecord.draftPrompt : input ?? activeRecord.draftPrompt;
+    const promptEffort = typeof input === "object" ? input.promptEffort : undefined;
     const createdAt = new Date().toISOString();
     const pageContext =
       activeRecord.contextAttachments.length > 0
@@ -225,8 +233,8 @@ export class UrlSessionStore {
           })
         : undefined;
     const accepted = pageContext
-      ? activeRecord.coordinator.sendPrompt({ prompt: promptToSend, pageContext })
-      : activeRecord.coordinator.sendPrompt(promptToSend);
+      ? activeRecord.coordinator.sendPrompt({ prompt: promptToSend, pageContext, ...(promptEffort ? { promptEffort } : {}) })
+      : activeRecord.coordinator.sendPrompt(promptEffort ? { prompt: promptToSend, promptEffort } : promptToSend);
     if (!accepted) return false;
 
     activeRecord.draftPrompt = "";
@@ -238,7 +246,7 @@ export class UrlSessionStore {
     return true;
   }
 
-  sendPromptWithContext(input: { prompt: string; pageContext: PageContext; userPromptDisplay?: UserPromptDisplay }): boolean {
+  sendPromptWithContext(input: ContextPromptInput): boolean {
     const activeRecord = this.getActiveRecord();
     if (!activeRecord) return false;
 
@@ -267,6 +275,7 @@ export class UrlSessionStore {
   sendPromptWithExternalContextAttachments(input: {
     prompt: string;
     pageContext: PageContext;
+    promptEffort?: PromptEffort;
     attachments: ComposerContextAttachment[];
     userPromptDisplay?: UserPromptDisplay;
   }): boolean {
@@ -286,6 +295,7 @@ export class UrlSessionStore {
     const accepted = activeRecord.coordinator.sendPrompt({
       prompt: input.prompt,
       pageContext,
+      ...(input.promptEffort ? { promptEffort: input.promptEffort } : {}),
       userPromptDisplay: input.userPromptDisplay
     });
     if (!accepted) return false;

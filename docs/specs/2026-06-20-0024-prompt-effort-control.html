@@ -1,0 +1,1055 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spec 0024: Prompt Effort Control</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f8f7;
+      --surface: #ffffff;
+      --ink: #17201f;
+      --muted: #62716d;
+      --line: #d8e1dd;
+      --line-strong: #cfd9d5;
+      --accent: #087c71;
+      --accent-soft: #e0f2ef;
+      --warning-bg: #fff7ed;
+      --warning-line: #efd2c3;
+      --warning-text: #9a3412;
+      --code-bg: #101816;
+      --code-text: #e9f0ed;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101816;
+        --surface: #17201f;
+        --ink: #e9f0ed;
+        --muted: #a5b4af;
+        --line: #36504a;
+        --line-strong: #4b6861;
+        --accent-soft: #123d38;
+        --warning-bg: #2c1d14;
+        --warning-line: #7c3b1d;
+        --warning-text: #fdba74;
+        --code-bg: #050806;
+        --code-text: #e9f0ed;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+    header, main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    header {
+      padding-top: 32px;
+    }
+    h1, h2, h3, h4 {
+      line-height: 1.2;
+      margin: 0 0 10px;
+    }
+    h1 { font-size: 30px; }
+    h2 { font-size: 22px; }
+    h3 { font-size: 17px; margin-top: 16px; }
+    h4 { font-size: 14px; margin-top: 14px; }
+    p, ul, ol { margin-block: 8px 12px; }
+    a { color: var(--accent); }
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+    }
+    nav a {
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      padding: 6px 10px;
+      background: var(--surface);
+      text-decoration: none;
+      font-size: 13px;
+    }
+    section, article {
+      border-top: 1px solid var(--line);
+      padding-block: 22px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-block: 12px;
+      background: var(--surface);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--accent-soft);
+    }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.95em;
+    }
+    pre {
+      overflow-x: auto;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--code-bg);
+      color: var(--code-text);
+    }
+    .meta, .muted, figcaption { color: var(--muted); }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .summary-card, .callout {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 12px;
+    }
+    .callout {
+      border-left: 4px solid var(--accent);
+    }
+    .warning {
+      border-color: var(--warning-line);
+      background: var(--warning-bg);
+      color: var(--warning-text);
+    }
+    .phase-status, .checklist label {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+    }
+    .checklist {
+      padding-left: 0;
+      list-style: none;
+    }
+    .checklist li {
+      margin: 10px 0;
+    }
+    .evidence {
+      display: block;
+      margin-left: 26px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .pill {
+      display: inline-block;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      background: var(--surface);
+    }
+    figure {
+      margin: 14px 0;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+    svg {
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
+    button.copy {
+      margin-left: 8px;
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      background: var(--surface);
+      color: var(--ink);
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      padding: 2px 8px;
+    }
+    @media print {
+      body { background: #fff; color: #000; }
+      nav, button.copy { display: none; }
+      table, pre, .summary-card, .callout, figure { break-inside: avoid; }
+    }
+  </style>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      document.querySelectorAll("[data-copy-target]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const target = document.querySelector(button.dataset.copyTarget);
+          if (!target || !navigator.clipboard) return;
+          try {
+            await navigator.clipboard.writeText(target.textContent.trim());
+          } catch {
+            // Clipboard access is optional. The command remains visible.
+          }
+        });
+      });
+    });
+  </script>
+</head>
+<body>
+  <header>
+    <p class="meta">Implementation Plan - Spec 0024 - 2026-06-20</p>
+    <h1>Prompt Effort Control</h1>
+    <p>
+      Add a Sidra control that lets the user choose the Codex reasoning effort used for prompts.
+      The selected effort must travel as structured data from the extension to the bridge and into Codex App Server <code>turn/start</code>.
+    </p>
+    <nav aria-label="Spec sections">
+      <a href="#overview">Overview</a>
+      <a href="#current-state">Current State</a>
+      <a href="#desired-state">Desired State</a>
+      <a href="#decisions">Decisions</a>
+      <a href="#flow">Flow</a>
+      <a href="#phase-1">Phase 1</a>
+      <a href="#phase-2">Phase 2</a>
+      <a href="#phase-3">Phase 3</a>
+      <a href="#phase-4">Phase 4</a>
+      <a href="#testing-strategy">Testing</a>
+      <a href="#references">References</a>
+    </nav>
+    <div class="summary-grid" aria-label="Plan summary">
+      <div class="summary-card">
+        <strong>Status</strong>
+        <p>Draft ready for implementation.</p>
+      </div>
+      <div class="summary-card">
+        <strong>Primary Owners</strong>
+        <p><code>packages/protocol</code>, <code>apps/extension</code>, <code>apps/bridge</code>.</p>
+      </div>
+      <div class="summary-card">
+        <strong>Effort Values</strong>
+        <p><code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>. Default <code>medium</code>.</p>
+      </div>
+      <div class="summary-card">
+        <strong>Out Of Scope</strong>
+        <p>Model picker, dynamic model catalog UI, prompt-string hacks, provider-independent effort translation.</p>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="overview">
+      <h2>Overview</h2>
+      <p>
+        Sidra currently sends only the prompt text and optional page context across the Native Messaging boundary.
+        Codex App Server supports a structured <code>effort</code> parameter on <code>turn/start</code>.
+        That parameter applies to the current turn and then becomes sticky for subsequent turns in the thread, so Sidra must send the selected effort on every production turn.
+        This plan adds a compact side-panel prompt effort control, persists the chosen value as a Sidra setting, and samples that value into each prompt submission.
+      </p>
+      <p>
+        The work is split so protocol validation comes first, extension UI/settings come second, bridge/provider propagation comes third, and durable docs/manual validation come last.
+      </p>
+    </section>
+
+    <section id="current-state">
+      <h2>Current State Analysis</h2>
+      <h3>Key Discoveries</h3>
+      <ul>
+        <li><code>packages/protocol</code> owns Native Messaging message types and runtime validation; new message shape must start there before UI or bridge code depends on it. See <code>docs/ARCHITECTURE.md:23-25</code> and <code>docs/ARCHITECTURE.md:107</code>.</li>
+        <li><code>session.send</code> currently allows only <code>type</code>, <code>version</code>, <code>clientSessionId</code>, <code>prompt</code>, and optional <code>pageContext</code>. Extra fields are rejected. See <code>packages/protocol/src/index.ts:87-100</code> and <code>packages/protocol/src/index.ts:263-265</code>.</li>
+        <li><code>BridgeSessionCoordinator</code> queues prompts before <code>session.started</code>, then builds <code>session.send</code> in one place. See <code>apps/extension/src/bridge/session-coordinator.ts:62-81</code>, <code>apps/extension/src/bridge/session-coordinator.ts:457-497</code>.</li>
+        <li><code>SettingsStore</code> owns persisted settings, live storage updates, and cloning/normalization. See <code>apps/extension/src/settings-store.ts:3-11</code>, <code>apps/extension/src/settings-store.ts:90</code>, and <code>apps/extension/src/settings-store.ts:202-235</code>.</li>
+        <li>The options page already uses draft state, dirty refs, validation, and one save flow. See <code>apps/extension/src/options-page-view.tsx:78-155</code> and <code>apps/extension/src/options-page-view.tsx:332-376</code>.</li>
+        <li>The side-panel controller already reads settings live and samples them during send/capture actions. See <code>apps/extension/src/side-panel-controller.ts:216-229</code> and <code>apps/extension/src/side-panel-controller.ts:235-305</code>.</li>
+        <li><code>captureAndSendCommand</code> awaits page capture before posting the prompt, so effort must be snapshotted before the first capture await. See <code>apps/extension/src/side-panel-controller.ts:235-261</code>.</li>
+        <li><code>UrlSessionStore</code> sits between the side-panel controller and <code>BridgeSessionCoordinator</code> for both plain and capture sends. It currently accepts only prompt text or prompt plus page context, so prompt effort must be added there too. See <code>apps/extension/src/url-session-store.ts:61-65</code>, <code>apps/extension/src/url-session-store.ts:154-177</code>.</li>
+        <li><code>BridgeSessionManager</code> converts validated bridge input to provider-neutral <code>AgentSendInput</code>. It currently carries only formatted prompt text and display-title source. See <code>apps/bridge/src/session-manager.ts:22-25</code> and <code>apps/bridge/src/session-manager.ts:147-154</code>.</li>
+        <li>The Codex provider currently omits effort from <code>turn/start</code>. See <code>apps/bridge/src/codex-app-server-provider.ts:147-154</code>.</li>
+        <li>The existing Codex App Server investigation already models <code>turn/start</code> with <code>model</code> and <code>effort</code>. See <code>docs/codex-sdk-investigation.md:422-434</code>.</li>
+        <li>Local Codex CLI <code>0.141.0</code> generated TypeScript bindings show <code>TurnStartParams.effort?: ReasoningEffort | null</code> and model metadata with <code>supportedReasoningEfforts</code>. Research command: <code>codex app-server generate-ts --out /private/tmp/codex-app-server-ts --experimental</code>.</li>
+      </ul>
+
+      <details>
+        <summary>Raw local Codex protocol findings</summary>
+        <p>
+          Generated file <code>/private/tmp/codex-app-server-ts/v2/TurnStartParams.ts</code> declares <code>effort?: ReasoningEffort | null</code> with comment "Override the reasoning effort for this turn and subsequent turns."
+          That stickiness means Sidra cannot rely on sending effort only when it changes. Every accepted production prompt must carry the selected effort, including <code>medium</code>.
+          Generated file <code>/private/tmp/codex-app-server-ts/v2/Model.ts</code> declares <code>supportedReasoningEfforts</code> and <code>defaultReasoningEffort</code>.
+          Generated <code>ReasoningEffort</code> is typed as <code>string</code>, so Sidra should constrain its own public protocol to the currently exposed Codex values rather than accepting arbitrary strings from the extension.
+        </p>
+      </details>
+    </section>
+
+    <section id="desired-state">
+      <h2>Desired End State</h2>
+      <ul>
+        <li>The side-panel composer exposes a compact <code>Prompt effort</code> select with <code>Low</code>, <code>Medium</code>, <code>High</code>, and <code>Extra high</code>.</li>
+        <li>The selected effort is stored in <code>SettingsStore</code>, defaults to <code>medium</code>, loads from <code>chrome.storage.local</code>, and applies live to the side panel.</li>
+        <li>Each accepted prompt submission snapshots the current effort and includes it in <code>session.send</code> as <code>promptEffort</code>.</li>
+        <li>The bridge validates <code>promptEffort</code>, passes it into <code>BridgeSessionManager</code>, includes it in <code>AgentSendInput</code>, and sends it to Codex App Server as <code>effort</code> on every production <code>turn/start</code>, including default <code>medium</code> turns.</li>
+        <li>Effort is never embedded in the user prompt string and never shown as assistant activity or reasoning text.</li>
+        <li>Existing payload-size preflight still includes the full structured <code>session.send</code> message, now including <code>promptEffort</code>.</li>
+      </ul>
+    </section>
+
+    <section id="out-of-scope">
+      <h2>What We're NOT Doing</h2>
+      <ul>
+        <li>No model selector. This spec only controls reasoning effort for the existing Codex model selection.</li>
+        <li>No dynamic <code>model/list</code> capability UI. Sidra will use the current Codex harness effort values: <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>.</li>
+        <li>No per-provider abstraction that pretends all providers support effort. V1 provider is Codex; the shared protocol field is provider-affecting but constrained.</li>
+        <li>No effort text inside <code>formatPromptForAgent</code>. Effort must stay structured to avoid prompt injection and transcript leakage.</li>
+        <li>No automatic transcript marker for effort changes. Prompt effort is a send control, not page context.</li>
+        <li>No keyboard shortcuts for increasing/decreasing effort in V1.</li>
+      </ul>
+    </section>
+
+    <section id="decisions">
+      <h2>Implementation Decisions</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Decision</th>
+            <th>Reason</th>
+            <th>Named tests covering it</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>D1</code></td>
+            <td>Use protocol field <code>promptEffort</code> with values <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>.</td>
+            <td>Keeps the extension-to-bridge contract explicit and avoids arbitrary strings.</td>
+            <td><code>accepts_session_send_with_prompt_effort</code>, <code>rejects_session_send_with_unknown_prompt_effort</code></td>
+          </tr>
+          <tr>
+            <td><code>D2</code></td>
+            <td>Persist the selected value in <code>SettingsStore</code> as <code>promptEffort</code>, default <code>medium</code>.</td>
+            <td>Effort is a user preference and should survive side-panel reloads.</td>
+            <td><code>settings_defaults_include_prompt_effort</code>, <code>settings_parse_invalid_prompt_effort_to_default</code>, <code>writes_prompt_effort_to_storage</code></td>
+          </tr>
+          <tr>
+            <td><code>D3</code></td>
+            <td>Render the primary control in the composer, not only in the options page.</td>
+            <td>The user changes effort immediately before sending a prompt, like Codex harnesses.</td>
+            <td><code>renders_prompt_effort_control_in_composer</code>, <code>changes_prompt_effort_from_composer</code></td>
+          </tr>
+          <tr>
+            <td><code>D4</code></td>
+            <td>Snapshot the current effort at user command time, before async capture, queuing, or payload-size preflight.</td>
+            <td>Queued startup prompts and slow capture sends must use the effort selected when the user sent them, even if settings change before <code>session.started</code> or capture completes.</td>
+            <td><code>queued_startup_prompt_uses_effort_selected_at_send_time</code>, <code>capture_send_snapshots_prompt_effort_before_async_capture</code>, <code>payload_preflight_includes_prompt_effort</code></td>
+          </tr>
+          <tr>
+            <td><code>D5</code></td>
+            <td>Map <code>promptEffort</code> to Codex App Server <code>turn/start</code> field <code>effort</code>.</td>
+            <td>Generated App Server bindings and Sidra's existing investigation identify <code>effort</code> as the per-turn field.</td>
+            <td><code>sends_prompt_effort_to_provider_input</code>, <code>passes_prompt_effort_as_turn_start_effort</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="flow" aria-labelledby="flow-title">
+      <h2 id="flow-title">Data Flow</h2>
+      <figure>
+        <svg role="img" aria-labelledby="diagram-title diagram-desc" viewBox="0 0 1060 240">
+          <title id="diagram-title">Prompt effort data flow</title>
+          <desc id="diagram-desc">Prompt effort starts in SettingsStore and composer UI, then flows through session.send to the bridge session manager and Codex turn/start effort parameter.</desc>
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+          <rect x="20" y="74" width="145" height="72" rx="7" fill="none" stroke="currentColor"></rect>
+          <text x="92" y="104" text-anchor="middle" font-size="14">SettingsStore</text>
+          <text x="92" y="126" text-anchor="middle" font-size="12">promptEffort</text>
+
+          <line x1="170" y1="110" x2="265" y2="110" stroke="currentColor" marker-end="url(#arrow)"></line>
+          <rect x="275" y="74" width="145" height="72" rx="7" fill="none" stroke="currentColor"></rect>
+          <text x="347" y="104" text-anchor="middle" font-size="14">Composer</text>
+          <text x="347" y="126" text-anchor="middle" font-size="12">select control</text>
+
+          <line x1="425" y1="110" x2="520" y2="110" stroke="currentColor" marker-end="url(#arrow)"></line>
+          <rect x="530" y="74" width="145" height="72" rx="7" fill="none" stroke="currentColor"></rect>
+          <text x="602" y="98" text-anchor="middle" font-size="14">Coordinator</text>
+          <text x="602" y="120" text-anchor="middle" font-size="12">prepared</text>
+          <text x="602" y="138" text-anchor="middle" font-size="12">submission</text>
+
+          <line x1="680" y1="110" x2="775" y2="110" stroke="currentColor" marker-end="url(#arrow)"></line>
+          <rect x="785" y="74" width="145" height="72" rx="7" fill="none" stroke="currentColor"></rect>
+          <text x="857" y="98" text-anchor="middle" font-size="14">Bridge</text>
+          <text x="857" y="120" text-anchor="middle" font-size="12">AgentSendInput</text>
+          <text x="857" y="138" text-anchor="middle" font-size="12">promptEffort</text>
+
+          <line x1="930" y1="110" x2="1005" y2="110" stroke="currentColor" marker-end="url(#arrow)"></line>
+          <rect x="900" y="170" width="140" height="48" rx="7" fill="none" stroke="currentColor"></rect>
+          <text x="970" y="199" text-anchor="middle" font-size="13">turn/start.effort</text>
+          <line x1="980" y1="112" x2="980" y2="168" stroke="currentColor" marker-end="url(#arrow)"></line>
+        </svg>
+        <figcaption>
+          The selected prompt effort remains structured across every boundary. It is not concatenated into the prompt text.
+        </figcaption>
+      </figure>
+    </section>
+
+    <article id="phase-1">
+      <h2>Phase 1: Protocol Contract</h2>
+      <label class="phase-status"><input type="checkbox" checked disabled> Phase complete</label>
+
+      <h3>Overview</h3>
+      <p>
+        Add a shared protocol type for prompt effort and allow <code>session.send</code> to carry <code>promptEffort</code>.
+        This phase does not change UI or bridge behavior yet.
+      </p>
+
+      <h3>Why This Phase Can Be Validated Independently</h3>
+      <p>
+        The protocol package can validate accepted and rejected messages without touching the extension or bridge.
+      </p>
+
+      <h3>Changes Required</h3>
+      <aside class="callout">
+        <p><strong>TDD ordering:</strong> Add the tests below first. Confirm they fail before changing the protocol implementation.</p>
+      </aside>
+
+      <h4>1. Tests (RED)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Test name</th>
+            <th>What it proves</th>
+            <th>Decision / behavior covered</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>packages/protocol/src/protocol.test.ts</code></td>
+            <td><code>accepts_session_send_with_prompt_effort</code></td>
+            <td><code>session.send</code> accepts each supported prompt effort value and preserves it.</td>
+            <td><code>D1</code>, effort value table rows <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code></td>
+          </tr>
+          <tr>
+            <td><code>packages/protocol/src/protocol.test.ts</code></td>
+            <td><code>defaults_session_send_prompt_effort_when_omitted</code></td>
+            <td>Omitted effort parses to <code>promptEffort: "medium"</code> so older extension senders get the safe default.</td>
+            <td><code>D1</code>, compatibility default</td>
+          </tr>
+          <tr>
+            <td><code>packages/protocol/src/protocol.test.ts</code></td>
+            <td><code>rejects_session_send_with_unknown_prompt_effort</code></td>
+            <td>Unknown strings, blank strings, null, and non-strings are rejected.</td>
+            <td><code>D1</code>, invalid input</td>
+          </tr>
+          <tr>
+            <td><code>packages/protocol/src/protocol.test.ts</code></td>
+            <td><code>rejects_session_send_with_private_fields_but_allows_prompt_effort</code></td>
+            <td>Existing private-field rejection remains intact after adding the allowed field.</td>
+            <td>Privacy regression guard</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>2. Implementation (GREEN)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Change</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>packages/protocol/src/index.ts</code></td>
+            <td>Add <code>PromptEffort</code>, <code>PROMPT_EFFORT_VALUES</code>, <code>DEFAULT_PROMPT_EFFORT</code>, and <code>isPromptEffort</code>. Extend <code>session.send</code> with <code>promptEffort: PromptEffort</code>.</td>
+            <td>The protocol package owns cross-process message shape.</td>
+          </tr>
+          <tr>
+            <td><code>packages/protocol/src/index.ts</code></td>
+            <td>Update <code>parseExtensionToBridge</code> to allow <code>promptEffort</code>, default omitted values to <code>medium</code>, and reject invalid values.</td>
+            <td>Runtime validation must happen at the Native Messaging boundary.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Success Criteria</h3>
+      <h4>Automated Verification</h4>
+      <ul class="checklist">
+        <li>
+          <label><input type="checkbox" checked disabled> Phase-1 tests fail before implementation: <code id="phase-1-red">pnpm --filter @sidra/protocol test -- src/protocol.test.ts -t "prompt_effort|session_send_with_prompt_effort"</code></label>
+          <button class="copy" type="button" data-copy-target="#phase-1-red">Copy</button>
+          <span class="evidence">Actual: failed as expected with 4 prompt effort tests failing before protocol support.</span>
+        </li>
+        <li>
+          <label><input type="checkbox" checked disabled> Phase-1 tests pass after implementation: <code id="phase-1-green">pnpm --filter @sidra/protocol test -- src/protocol.test.ts -t "prompt_effort|session_send_with_prompt_effort"</code></label>
+          <button class="copy" type="button" data-copy-target="#phase-1-green">Copy</button>
+          <span class="evidence">Actual: passed, 82 protocol tests selected by Vitest.</span>
+        </li>
+        <li><label><input type="checkbox" checked disabled> Protocol type checking passes: <code>pnpm --filter @sidra/protocol check</code></label><span class="evidence">Actual: passed.</span></li>
+      </ul>
+      <h4>Manual Verification</h4>
+      <ul class="checklist">
+        <li><label><input type="checkbox" disabled> Inspect parsed <code>session.send</code> objects and confirm no arbitrary effort strings can cross the boundary.</label></li>
+      </ul>
+    </article>
+
+    <article id="phase-2">
+      <h2>Phase 2: Extension Settings And Composer Control</h2>
+      <label class="phase-status"><input type="checkbox" checked disabled> Phase complete</label>
+
+      <h3>Overview</h3>
+      <p>
+        Add persisted prompt effort settings, expose them in side-panel snapshots, render a compact composer selector, and snapshot the chosen effort into each submitted prompt.
+      </p>
+
+      <h3>Why This Phase Can Be Validated Independently</h3>
+      <p>
+        Extension tests can prove settings persistence, UI behavior, queued prompt snapshotting, and <code>session.send</code> payloads using fake stores and fake Native Messaging ports.
+      </p>
+
+      <h3>Changes Required</h3>
+      <aside class="callout">
+        <p><strong>TDD ordering:</strong> Add settings tests first, then controller/coordinator tests, then UI tests. Only after those fail should implementation start.</p>
+      </aside>
+
+      <h4>1. Tests (RED)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Test name</th>
+            <th>What it proves</th>
+            <th>Decision / behavior covered</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>apps/extension/src/settings-store.test.ts</code></td>
+            <td><code>settings_defaults_include_prompt_effort</code></td>
+            <td>Default settings expose <code>promptEffort: "medium"</code>.</td>
+            <td><code>D2</code></td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/settings-store.test.ts</code></td>
+            <td><code>settings_parse_invalid_prompt_effort_to_default</code></td>
+            <td>Stored invalid values are normalized to <code>medium</code>.</td>
+            <td><code>D2</code>, invalid input</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/settings-store.test.ts</code></td>
+            <td><code>writes_prompt_effort_to_storage</code></td>
+            <td><code>savePromptEffort</code> writes the normalized value while preserving unrelated settings.</td>
+            <td><code>D2</code></td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/options-page.test.tsx</code></td>
+            <td><code>options_page_renders_prompt_effort_setting</code></td>
+            <td>The settings page exposes the same setting for users who prefer options-page configuration.</td>
+            <td><code>D2</code>, accessibility</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/options-page.test.tsx</code></td>
+            <td><code>options_page_changes_prompt_effort_marks_dirty</code></td>
+            <td>Changing the options-page selector updates the draft value and enables the existing save flow.</td>
+            <td><code>D2</code>, dirty state</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/options-page.test.tsx</code></td>
+            <td><code>options_page_saves_prompt_effort</code></td>
+            <td>Saving calls the settings-store prompt effort save path and persists the selected value.</td>
+            <td><code>D2</code>, save flow</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/options-page.test.tsx</code></td>
+            <td><code>options_page_syncs_live_prompt_effort_when_clean</code></td>
+            <td>External settings updates refresh the options-page effort draft when there are no unsaved edits.</td>
+            <td><code>D2</code>, live sync</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/options-page.test.tsx</code></td>
+            <td><code>options_page_keeps_dirty_prompt_effort_draft_on_external_update</code></td>
+            <td>External settings updates do not overwrite an unsaved prompt effort draft.</td>
+            <td><code>D2</code>, dirty state</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+            <td><code>renders_prompt_effort_control_in_composer</code></td>
+            <td>The side panel shows a compact accessible <code>Prompt effort</code> selector.</td>
+            <td><code>D3</code></td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-view.test.tsx</code></td>
+            <td><code>changes_prompt_effort_from_composer</code></td>
+            <td>Selecting a different effort calls <code>onPromptEffortChange</code> and keeps layout stable.</td>
+            <td><code>D3</code></td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.test.ts</code></td>
+            <td><code>side_panel_snapshot_exposes_live_prompt_effort</code></td>
+            <td>Side-panel snapshots reflect initial and live settings-store effort changes.</td>
+            <td><code>D2</code>, live settings</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.test.ts</code></td>
+            <td><code>plain_send_includes_current_prompt_effort</code></td>
+            <td>Plain <code>Send</code> posts <code>promptEffort</code> from the current settings snapshot.</td>
+            <td><code>D4</code></td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.test.ts</code></td>
+            <td><code>capture_and_send_includes_current_prompt_effort</code></td>
+            <td><code>Capture + Send</code> posts the same effort alongside page context.</td>
+            <td><code>D4</code></td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.test.ts</code></td>
+            <td><code>capture_send_snapshots_prompt_effort_before_async_capture</code></td>
+            <td>A paused capture send keeps the effort selected when the user clicked send, even if settings change before capture completes.</td>
+            <td><code>D4</code>, async capture race</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/url-session-store.test.ts</code></td>
+            <td><code>plain_send_forwards_prompt_effort_to_coordinator</code></td>
+            <td><code>UrlSessionStore.sendPrompt</code> passes prompt effort through to the coordinator.</td>
+            <td><code>D4</code>, plain send route</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/url-session-store.test.ts</code></td>
+            <td><code>capture_send_forwards_prompt_effort_to_coordinator</code></td>
+            <td><code>UrlSessionStore.sendPromptWithContext</code> passes prompt effort through with page context.</td>
+            <td><code>D4</code>, capture send route</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.test.ts</code></td>
+            <td><code>quick_action_includes_current_prompt_effort</code></td>
+            <td>Quick actions sample current settings and forward prompt effort into the capture send path.</td>
+            <td><code>D4</code>, quick action route</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/bridge/session-coordinator.test.ts</code></td>
+            <td><code>queued_startup_prompt_uses_effort_selected_at_send_time</code></td>
+            <td>A prompt queued before <code>session.started</code> sends with the effort captured at submission time.</td>
+            <td><code>D4</code>, queue edge case</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/bridge/session-coordinator.test.ts</code></td>
+            <td><code>payload_preflight_includes_prompt_effort</code></td>
+            <td>Payload-size checks run against the final structured <code>session.send</code> payload.</td>
+            <td><code>D4</code>, size preflight</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>2. Implementation (GREEN)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Change</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>apps/extension/src/settings-store.ts</code></td>
+            <td>Add <code>promptEffort</code> to <code>SidraSettings</code>, clone/parse/default logic, equality checks, and <code>savePromptEffort</code>.</td>
+            <td><code>SettingsStore</code> owns persisted extension settings and live settings updates.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/options-page-view.tsx</code></td>
+            <td>Add an <code>Agent</code> settings section or compact row with a <code>Prompt effort</code> select. Reuse existing dirty/save flow, including clean live-sync and dirty draft preservation.</td>
+            <td>Options page is the persistent settings surface.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-controller.ts</code></td>
+            <td>Expose <code>display.promptEffort</code>, add <code>updatePromptEffort</code>, and sample <code>settingsSnapshot.promptEffort</code> into a local value before plain send, quick action send, or the first async capture await.</td>
+            <td>The controller owns application commands and can keep React free of storage details.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/side-panel-view.tsx</code></td>
+            <td>Render a compact <code>&lt;select aria-label="Prompt effort"&gt;</code> near composer actions with labels <code>Low</code>, <code>Medium</code>, <code>High</code>, <code>Extra high</code>.</td>
+            <td>The user should change effort immediately before sending.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/url-session-store.ts</code></td>
+            <td>Accept <code>promptEffort</code> in both <code>sendPrompt</code> and <code>sendPromptWithContext</code>, then forward it to the active coordinator.</td>
+            <td>All side-panel prompt sends route through this store before reaching <code>BridgeSessionCoordinator</code>.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/bridge/session-coordinator.ts</code></td>
+            <td>Add <code>promptEffort</code> to <code>PromptSubmission</code> and <code>PreparedPromptSubmission</code>. Include it in <code>createSessionSendMessage</code>.</td>
+            <td>Queued prompts and payload preflight both depend on the prepared submission.</td>
+          </tr>
+          <tr>
+            <td><code>apps/extension/src/styles.css</code></td>
+            <td>Style the composer selector with stable sizing, focus-visible state, disabled state, and no layout shift.</td>
+            <td>Sidra UI controls must make interaction state visible without changing layout.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Success Criteria</h3>
+      <h4>Automated Verification</h4>
+      <ul class="checklist">
+        <li>
+          <label><input type="checkbox" checked disabled> Phase-2 tests fail before implementation: <code id="phase-2-red">pnpm --filter @sidra/extension test -- src/settings-store.test.ts src/options-page.test.tsx src/side-panel-view.test.tsx src/side-panel-controller.test.ts src/url-session-store.test.ts src/bridge/session-coordinator.test.ts -t "prompt_effort|Prompt effort"</code></label>
+          <button class="copy" type="button" data-copy-target="#phase-2-red">Copy</button>
+          <span class="evidence">Actual: failed as expected with 19 targeted prompt effort failures before extension support.</span>
+        </li>
+        <li>
+          <label><input type="checkbox" checked disabled> Phase-2 tests pass after implementation: <code id="phase-2-green">pnpm --filter @sidra/extension test -- src/settings-store.test.ts src/options-page.test.tsx src/side-panel-view.test.tsx src/side-panel-controller.test.ts src/url-session-store.test.ts src/bridge/session-coordinator.test.ts -t "prompt_effort|Prompt effort"</code></label>
+          <button class="copy" type="button" data-copy-target="#phase-2-green">Copy</button>
+          <span class="evidence">Actual: passed, 20 test files and 723 tests.</span>
+        </li>
+        <li><label><input type="checkbox" checked disabled> Extension type checking passes: <code>pnpm --filter @sidra/extension check</code></label><span class="evidence">Actual: passed.</span></li>
+      </ul>
+      <h4>Manual Verification</h4>
+      <ul class="checklist">
+        <li><label><input type="checkbox" disabled> The side-panel composer effort selector is keyboard reachable, visibly focusable, and disabled whenever prompt entry is disabled.</label></li>
+        <li><label><input type="checkbox" disabled> The control does not obscure or resize the prompt textarea, DOM checkbox, split send button, or cancel state in a narrow side panel.</label></li>
+      </ul>
+    </article>
+
+    <article id="phase-3">
+      <h2>Phase 3: Bridge And Codex Provider Propagation</h2>
+      <label class="phase-status"><input type="checkbox" checked disabled> Phase complete</label>
+
+      <h3>Overview</h3>
+      <p>
+        Carry <code>promptEffort</code> through validated bridge dispatch, provider-neutral input, and Codex App Server <code>turn/start</code>.
+      </p>
+
+      <h3>Why This Phase Can Be Validated Independently</h3>
+      <p>
+        Bridge tests can use fake Native Messaging messages and fake App Server clients to assert exact payloads without launching a real browser or Codex turn.
+      </p>
+
+      <h3>Changes Required</h3>
+      <aside class="callout">
+        <p><strong>TDD ordering:</strong> Add bridge tests before implementation. The provider test must assert the exact App Server key is <code>effort</code>.</p>
+      </aside>
+
+      <h4>1. Tests (RED)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Test name</th>
+            <th>What it proves</th>
+            <th>Decision / behavior covered</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>apps/bridge/src/index.test.ts</code></td>
+            <td><code>routes_session_send_prompt_effort_to_session_manager</code></td>
+            <td>Validated Native Messaging dispatch forwards <code>promptEffort</code> with prompt and page context.</td>
+            <td><code>D5</code></td>
+          </tr>
+          <tr>
+            <td><code>apps/bridge/src/session-manager.test.ts</code></td>
+            <td><code>sends_prompt_effort_to_provider_input</code></td>
+            <td><code>BridgeSessionManager</code> includes <code>promptEffort</code> in <code>AgentSendInput</code>.</td>
+            <td><code>D5</code></td>
+          </tr>
+          <tr>
+            <td><code>apps/bridge/src/session-manager.test.ts</code></td>
+            <td><code>prompt_effort_does_not_change_display_title_source_or_formatted_prompt</code></td>
+            <td>Effort does not leak into prompt text, page context wrapping, or thread title derivation.</td>
+            <td>Privacy and prompt-injection guard</td>
+          </tr>
+          <tr>
+            <td><code>apps/bridge/src/codex-app-server-provider.test.ts</code></td>
+            <td><code>passes_prompt_effort_as_turn_start_effort</code></td>
+            <td>Codex <code>turn/start</code> receives <code>effort: "high"</code> or another selected value.</td>
+            <td><code>D5</code>, exact App Server field</td>
+          </tr>
+          <tr>
+            <td><code>apps/bridge/src/codex-app-server-provider.test.ts</code></td>
+            <td><code>subsequent_turns_send_current_prompt_effort_after_app_server_sticky_override</code></td>
+            <td>Two turns in one thread, such as <code>high</code> then <code>low</code>, both carry the selected effort on <code>turn/start</code>.</td>
+            <td><code>D5</code>, App Server sticky effort invariant</td>
+          </tr>
+          <tr>
+            <td><code>apps/bridge/src/codex-app-server-provider.test.ts</code></td>
+            <td><code>omits_turn_start_effort_only_when_provider_input_has_no_effort</code></td>
+            <td>Bridge defaulting means production normally sends effort, but provider remains tolerant for tests or future callers.</td>
+            <td>Provider compatibility</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>2. Implementation (GREEN)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Change</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>apps/bridge/src/index.ts</code></td>
+            <td>Forward <code>message.promptEffort</code> into <code>sessions.sendPrompt</code>.</td>
+            <td>This is the protocol dispatch boundary after validation.</td>
+          </tr>
+          <tr>
+            <td><code>apps/bridge/src/context-prompt.ts</code></td>
+            <td>Extend <code>BridgeTurnInput</code> with <code>promptEffort</code>, but do not use it in <code>formatPromptForAgent</code>.</td>
+            <td>The type travels with turn input while prompt formatting remains about page context and user request only.</td>
+          </tr>
+          <tr>
+            <td><code>apps/bridge/src/session-manager.ts</code></td>
+            <td>Add <code>promptEffort?: PromptEffort</code> to <code>AgentSendInput</code> and set it from bridge turn input.</td>
+            <td><code>BridgeSessionManager</code> is the provider-session owner and provider-neutral input builder.</td>
+          </tr>
+          <tr>
+            <td><code>apps/bridge/src/codex-app-server-provider.ts</code></td>
+            <td>Add <code>effort: input.promptEffort</code> to <code>turn/start</code> when present. Production bridge input should always provide it, including <code>medium</code>.</td>
+            <td>Codex App Server owns the actual reasoning-effort behavior.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Success Criteria</h3>
+      <h4>Automated Verification</h4>
+      <ul class="checklist">
+        <li>
+          <label><input type="checkbox" checked disabled> Phase-3 tests fail before implementation: <code id="phase-3-red">pnpm --filter @sidra/bridge test -- src/index.test.ts src/session-manager.test.ts src/codex-app-server-provider.test.ts -t "prompt_effort|turn_start_effort"</code></label>
+          <button class="copy" type="button" data-copy-target="#phase-3-red">Copy</button>
+          <span class="evidence">Actual: failed as expected with 4 targeted prompt effort propagation failures.</span>
+        </li>
+        <li>
+          <label><input type="checkbox" checked disabled> Phase-3 tests pass after implementation: <code id="phase-3-green">pnpm --filter @sidra/bridge test -- src/index.test.ts src/session-manager.test.ts src/codex-app-server-provider.test.ts -t "prompt_effort|turn_start_effort"</code></label>
+          <button class="copy" type="button" data-copy-target="#phase-3-green">Copy</button>
+          <span class="evidence">Actual: passed, 12 test files and 249 tests.</span>
+        </li>
+        <li><label><input type="checkbox" checked disabled> Bridge type checking passes: <code>pnpm --filter @sidra/bridge check</code></label><span class="evidence">Actual: passed.</span></li>
+      </ul>
+      <h4>Manual Verification</h4>
+      <ul class="checklist">
+        <li><label><input type="checkbox" disabled> Inspect the fake App Server request log from the provider test and confirm it uses <code>effort</code>, not <code>reasoning_effort</code> or prompt text.</label></li>
+      </ul>
+    </article>
+
+    <article id="phase-4">
+      <h2>Phase 4: Durable Docs And Final Validation</h2>
+      <label class="phase-status"><input type="checkbox" checked disabled> Phase complete</label>
+
+      <h3>Overview</h3>
+      <p>
+        Update durable docs for the new user-facing behavior and run cross-package checks.
+      </p>
+
+      <h3>Why This Phase Can Be Validated Independently</h3>
+      <p>
+        Code behavior is already covered by earlier phases. This phase verifies documentation and full-repo health.
+      </p>
+
+      <h3>Changes Required</h3>
+      <aside class="callout">
+        <p><strong>TDD note:</strong> This is a documentation and final-validation phase. Red/green unit testing does not apply to documentation text, but smoke checks still apply.</p>
+      </aside>
+
+      <h4>1. Tests And Checks</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File / Command</th>
+            <th>Check name</th>
+            <th>What it proves</th>
+            <th>Behavior covered</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>docs/prd-v1.md</code></td>
+            <td><code>documentation_describes_prompt_effort_control</code></td>
+            <td>Product docs mention the composer prompt effort control and default value.</td>
+            <td>User-facing behavior</td>
+          </tr>
+          <tr>
+            <td><code>UBIQUITOUS_LANGUAGE.md</code></td>
+            <td><code>glossary_defines_prompt_effort</code></td>
+            <td>Project vocabulary distinguishes prompt effort from prompt text and reasoning summaries.</td>
+            <td>Terminology</td>
+          </tr>
+          <tr>
+            <td><code>pnpm test</code></td>
+            <td><code>full_test_suite</code></td>
+            <td>All package and tool tests pass together.</td>
+            <td>Regression guard</td>
+          </tr>
+          <tr>
+            <td><code>pnpm check</code></td>
+            <td><code>full_typecheck</code></td>
+            <td>All TypeScript projects type check.</td>
+            <td>Regression guard</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>2. Implementation</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Change</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>docs/prd-v1.md</code></td>
+            <td>Add a concise note under Extension UI or Chat Behavior describing <code>Prompt effort</code>, its values, and default.</td>
+            <td>Product behavior changed.</td>
+          </tr>
+          <tr>
+            <td><code>UBIQUITOUS_LANGUAGE.md</code></td>
+            <td>Add <code>Prompt Effort</code> as the user-selected reasoning depth for a prompt.</td>
+            <td>Keeps vocabulary consistent for future specs and code.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Success Criteria</h3>
+      <h4>Automated Verification</h4>
+      <ul class="checklist">
+        <li><label><input type="checkbox" checked disabled> Documentation search finds the new durable docs text: <code>rg -n "Prompt effort|prompt effort|promptEffort" docs/prd-v1.md UBIQUITOUS_LANGUAGE.md apps packages</code></label><span class="evidence">Actual: passed, including docs/prd-v1.md and UBIQUITOUS_LANGUAGE.md.</span></li>
+        <li><label><input type="checkbox" checked disabled> Full tests pass: <code>pnpm test</code></label><span class="evidence">Actual: passed. Protocol 82 tests, bridge 249 tests, extension 723 tests, native-host 31 tests, distributable 5 tests.</span></li>
+        <li><label><input type="checkbox" checked disabled> Full checks pass: <code>pnpm check</code></label><span class="evidence">Actual: passed.</span></li>
+      </ul>
+      <h4>Manual Verification</h4>
+      <ul class="checklist">
+        <li><label><input type="checkbox" disabled> Open the side panel, change prompt effort, send with <code>Send</code>, and verify the fake or logged App Server request includes matching <code>effort</code>.</label></li>
+        <li><label><input type="checkbox" disabled> Repeat with <code>Capture + Send</code> and confirm page context still sends normally and effort does not appear in transcript text.</label></li>
+        <li><label><input type="checkbox" disabled> Disable bridge or use an unsupported page and confirm the effort control follows the same disabled state as prompt entry.</label></li>
+      </ul>
+    </article>
+
+    <section id="testing-strategy">
+      <h2>Testing Strategy</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Layer</th>
+            <th>What to test</th>
+            <th>Key edge cases</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Protocol</td>
+            <td>Enum validation, defaulting, private-field rejection.</td>
+            <td>Unknown effort strings, omitted effort, null values, extra private fields.</td>
+          </tr>
+          <tr>
+            <td>Extension settings</td>
+            <td>Default storage, parse normalization, save flow, live updates.</td>
+            <td>Invalid stored values, save failures, unsaved options-page edits, live side-panel updates.</td>
+          </tr>
+          <tr>
+            <td>Extension send flow</td>
+            <td>Plain send, capture send, paused capture send, queued startup prompt, payload-size preflight.</td>
+            <td>Effort changes after prompt is queued, effort changes while capture is pending, capture page switch, quick action sends, bridge unavailable state.</td>
+          </tr>
+          <tr>
+            <td>Bridge/provider</td>
+            <td>Validated dispatch, provider input, exact Codex <code>turn/start.effort</code>.</td>
+            <td>Formatted prompt privacy, thread title source, App Server sticky effort, provider input without effort.</td>
+          </tr>
+          <tr>
+            <td>Manual UI</td>
+            <td>Composer layout, keyboard access, disabled states.</td>
+            <td>Narrow side panel, active turn cancel state, unsupported pages, bridge setup state.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="performance">
+      <h2>Performance Considerations</h2>
+      <p>
+        The new field is a short string and has no meaningful size or runtime cost. The only performance risk is accidental dynamic model discovery on every prompt; that is out of scope.
+      </p>
+    </section>
+
+    <section id="migration">
+      <h2>Migration Notes</h2>
+      <ul>
+        <li>Existing stored settings lack <code>promptEffort</code>; parsing must default to <code>medium</code>.</li>
+        <li>Existing extension builds that omit <code>promptEffort</code> should still parse as <code>medium</code> on the bridge side during development.</li>
+        <li>No persisted transcript or provider session migration is needed because Sidra V1 has no persistent chat history.</li>
+      </ul>
+    </section>
+
+    <section id="risks">
+      <h2>Risks And Mitigations</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Risk</th>
+            <th>Mitigation</th>
+            <th>Test / Check</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Protocol rejects new field if extension changes before protocol.</td>
+            <td>Implement Phase 1 first.</td>
+            <td><code>accepts_session_send_with_prompt_effort</code></td>
+          </tr>
+          <tr>
+            <td>Queued prompt uses a later effort value after settings change.</td>
+            <td>Snapshot effort into <code>PreparedPromptSubmission</code>.</td>
+            <td><code>queued_startup_prompt_uses_effort_selected_at_send_time</code></td>
+          </tr>
+          <tr>
+            <td>Capture send uses a later effort value after settings change during page capture.</td>
+            <td>Snapshot effort in the controller before awaiting capture and pass that value through the capture send path.</td>
+            <td><code>capture_send_snapshots_prompt_effort_before_async_capture</code></td>
+          </tr>
+          <tr>
+            <td>Effort leaks into prompt text or thread title.</td>
+            <td>Carry effort only as structured data and assert formatted prompt/title source are unchanged.</td>
+            <td><code>prompt_effort_does_not_change_display_title_source_or_formatted_prompt</code></td>
+          </tr>
+          <tr>
+            <td>Wrong App Server field name.</td>
+            <td>Provider fake asserts <code>effort</code> exactly; generated binding research documents the field.</td>
+            <td><code>passes_prompt_effort_as_turn_start_effort</code></td>
+          </tr>
+          <tr>
+            <td>Composer becomes crowded in the side panel.</td>
+            <td>Use compact select styling with stable dimensions and manual narrow-width validation.</td>
+            <td><code>renders_prompt_effort_control_in_composer</code>, manual UI check</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="references">
+      <h2>References</h2>
+      <ul>
+        <li><code>docs/ARCHITECTURE.md:9-25</code> - extension, bridge, and protocol ownership.</li>
+        <li><code>docs/ARCHITECTURE.md:95-107</code> - deep module responsibilities.</li>
+        <li><code>apps/extension/src/settings-store.ts:3-11</code> - current settings shape.</li>
+        <li><code>apps/extension/src/bridge/session-coordinator.ts:489-497</code> - current <code>session.send</code> creation point.</li>
+        <li><code>apps/bridge/src/session-manager.ts:147-154</code> - current provider input creation point.</li>
+        <li><code>apps/bridge/src/codex-app-server-provider.ts:147-154</code> - current Codex <code>turn/start</code> request.</li>
+        <li><code>docs/codex-sdk-investigation.md:422-434</code> - prior App Server research showing <code>effort</code>.</li>
+        <li>Local generated Codex App Server bindings from <code>codex app-server generate-ts --out /private/tmp/codex-app-server-ts --experimental</code>.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

@@ -10,6 +10,9 @@ export type SerializedJsonByteLengthResult =
   | { ok: false; error: "not_json_serializable" };
 
 export type ProviderId = "codex";
+export const PROMPT_EFFORT_VALUES = ["low", "medium", "high", "xhigh"] as const;
+export const DEFAULT_PROMPT_EFFORT: PromptEffort = "medium";
+export type PromptEffort = (typeof PROMPT_EFFORT_VALUES)[number];
 export type SpeechModel = "gpt-4o-mini-tts" | "tts-1" | "tts-1-hd";
 export type SpeechVoice =
   | "marin"
@@ -171,6 +174,7 @@ export type ExtensionToBridge =
       version: ProtocolVersion;
       clientSessionId: string;
       prompt: string;
+      promptEffort?: PromptEffort;
       pageContext?: PageContext;
     }
   | { type: "session.cancel"; version: ProtocolVersion; clientSessionId: string }
@@ -336,23 +340,29 @@ export function parseExtensionToBridge(input: unknown): ParseResult<ExtensionToB
         }
       };
     case "session.send":
-      if (!hasOnlyKeys(input, ["type", "version", "clientSessionId", "prompt", "pageContext"])) {
+      if (!hasOnlyKeys(input, ["type", "version", "clientSessionId", "prompt", "promptEffort", "pageContext"])) {
         return invalid("Message has invalid fields");
       }
       if (!isNonEmptyString(input.clientSessionId)) return invalid("clientSessionId is required");
       if (!isNonEmptyString(input.prompt)) return invalid("prompt is required");
-      if (input.pageContext === undefined) {
-        return {
-          ok: true,
-          value: {
-            type: "session.send",
-            version: PROTOCOL_VERSION,
-            clientSessionId: input.clientSessionId,
-            prompt: input.prompt
-          }
-        };
+      if (input.promptEffort !== undefined && !isPromptEffort(input.promptEffort)) {
+        return invalid("promptEffort is invalid");
       }
       {
+        const promptEffort = input.promptEffort ?? DEFAULT_PROMPT_EFFORT;
+
+        if (input.pageContext === undefined) {
+          return {
+            ok: true,
+            value: {
+              type: "session.send",
+              version: PROTOCOL_VERSION,
+              clientSessionId: input.clientSessionId,
+              prompt: input.prompt,
+              promptEffort
+            }
+          };
+        }
         const pageContext = parsePageContext(input.pageContext);
         if (!pageContext) return invalid("pageContext is invalid");
         return {
@@ -362,6 +372,7 @@ export function parseExtensionToBridge(input: unknown): ParseResult<ExtensionToB
             version: PROTOCOL_VERSION,
             clientSessionId: input.clientSessionId,
             prompt: input.prompt,
+            promptEffort,
             pageContext
           }
         };
@@ -1120,6 +1131,10 @@ function parsePermissionRequestMetadata(value: unknown): PermissionRequestMetada
 
 function isPermissionDecision(value: unknown): value is PermissionDecision {
   return value === "allow_once" || value === "allow_for_session" || value === "deny";
+}
+
+export function isPromptEffort(value: unknown): value is PromptEffort {
+  return typeof value === "string" && PROMPT_EFFORT_VALUES.includes(value as PromptEffort);
 }
 
 function parseSpeechSynthesisOptions(value: unknown): SpeechSynthesisOptions | null {

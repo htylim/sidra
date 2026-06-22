@@ -4,6 +4,7 @@ import type {
   PageContext,
   PermissionDecision,
   PermissionRequest,
+  PromptEffort,
   ProviderId,
   SessionErrorCode
 } from "@sidra/protocol";
@@ -63,6 +64,7 @@ type BridgeSessionCoordinatorOptions = {
 export type PromptSubmission = {
   prompt: string;
   pageContext?: PageContext;
+  promptEffort?: PromptEffort;
   contextMarker?: ContextAttachmentMarker;
   userPromptDisplay?: UserPromptDisplay;
   transcriptEntryIds?: {
@@ -493,6 +495,7 @@ export class BridgeSessionCoordinator {
       version: PROTOCOL_VERSION,
       clientSessionId: this.snapshot.clientSessionId,
       prompt: submission.prompt,
+      ...(submission.promptEffort ? { promptEffort: submission.promptEffort } : {}),
       ...(submission.pageContext ? { pageContext: submission.pageContext } : {})
     };
   }
@@ -691,11 +694,13 @@ export class BridgeSessionCoordinator {
     if (!normalizedPrompt) return null;
 
     const pageContext = typeof input === "string" ? undefined : input.pageContext;
+    const promptEffort = typeof input === "string" ? undefined : input.promptEffort;
     const contextMarker =
       typeof input === "string" ? undefined : input.contextMarker ?? markerForPageContext(pageContext);
     return {
       prompt: normalizedPrompt,
       pageContext,
+      promptEffort,
       contextMarker,
       userPromptDisplay: typeof input === "string" ? undefined : input.userPromptDisplay,
       transcriptEntriesVisible: false,

@@ -31,6 +31,7 @@ type SnapshotOptions = {
   promptFontSizePx?: number;
   responseFontSizePx?: number;
   accentColor?: string;
+  promptEffort?: string;
 };
 
 function assistantTurnWithToolActivity(
@@ -99,8 +100,9 @@ function snapshotForPage(options: SnapshotOptions = {}): SidePanelSnapshot {
     display: {
       accentColor: options.accentColor ?? "#087c71",
       promptFontSizePx: options.promptFontSizePx ?? 15,
-      responseFontSizePx: options.responseFontSizePx ?? 17
-    },
+      responseFontSizePx: options.responseFontSizePx ?? 17,
+      promptEffort: options.promptEffort ?? "medium"
+    } as SidePanelSnapshot["display"],
     speech: { enabled: true, status: "idle" },
     pageSelection: options.pageSelection ?? { status: "idle" },
     activePage: {
@@ -194,6 +196,7 @@ function renderSnapshot(bridge: SidePanelSnapshot["bridge"]): string {
       onDraftPromptChange={() => undefined}
       onCaptureModeChange={() => undefined}
       onSendModeChange={() => undefined}
+      onPromptEffortChange={() => undefined}
       onNewChat={() => undefined}
       onRetryBridge={() => undefined}
       onOpenSettings={() => undefined}
@@ -214,6 +217,7 @@ function renderPageSnapshot(snapshot: SidePanelSnapshot): string {
       onDraftPromptChange={() => undefined}
       onCaptureModeChange={() => undefined}
       onSendModeChange={() => undefined}
+      onPromptEffortChange={() => undefined}
       onNewChat={() => undefined}
       onRetryBridge={() => undefined}
       onOpenSettings={() => undefined}
@@ -239,6 +243,7 @@ function renderInteractiveSnapshot(
     onSendModeChange(sendMode: SidePanelSnapshot["activeSession"]["sendMode"]): void;
     onNewChat(): void;
     onOpenSettings(): void;
+    onPromptEffortChange(promptEffort: string): void;
     onToggleSpeechForTranscriptEntry(entryId: string, text: string): boolean;
     clipboard: { writeText(text: string): Promise<void> };
   }> = {}
@@ -286,6 +291,7 @@ function renderInteractiveSnapshot(
         onNewChat={overrides.onNewChat ?? (() => undefined)}
         onRetryBridge={() => undefined}
         onOpenSettings={overrides.onOpenSettings ?? (() => undefined)}
+        onPromptEffortChange={overrides.onPromptEffortChange ?? (() => undefined)}
         onToggleSpeechForTranscriptEntry={overrides.onToggleSpeechForTranscriptEntry ?? (() => false)}
         clipboard={overrides.clipboard}
       />
@@ -332,6 +338,7 @@ function renderInteractiveSnapshot(
         onNewChat={overrides.onNewChat ?? (() => undefined)}
         onRetryBridge={() => undefined}
         onOpenSettings={overrides.onOpenSettings ?? (() => undefined)}
+        onPromptEffortChange={overrides.onPromptEffortChange ?? (() => undefined)}
         onToggleSpeechForTranscriptEntry={overrides.onToggleSpeechForTranscriptEntry ?? (() => false)}
         clipboard={overrides.clipboard}
       />
@@ -725,6 +732,7 @@ describe("SidePanelView URL sessions", () => {
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onSendModeChange={() => undefined}
+        onPromptEffortChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
@@ -748,6 +756,7 @@ describe("SidePanelView URL sessions", () => {
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onSendModeChange={() => undefined}
+        onPromptEffortChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
@@ -1169,6 +1178,7 @@ describe("SidePanelView Capture + Send", () => {
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onSendModeChange={() => undefined}
+        onPromptEffortChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
@@ -2533,6 +2543,60 @@ describe("SidePanelView inline Include full page HTML option", () => {
     expect(screen.getByRole("checkbox", { name: "Include full page HTML" })).toHaveProperty("checked", false);
   });
 
+  it("orders_composer_controls_as_dom_effort_then_action", () => {
+    renderInteractiveSnapshot(snapshotForPage());
+
+    const actions = document.querySelector(".composer-actions");
+    const children = Array.from(actions?.children ?? []);
+
+    expect(children[0]?.classList.contains("composer-dom-toggle")).toBe(true);
+    expect(children[1]?.classList.contains("composer-effort-control")).toBe(true);
+    expect(children[2]?.classList.contains("send-split-button")).toBe(true);
+  });
+
+  it("renders_prompt_effort_control_in_composer", () => {
+    renderInteractiveSnapshot(snapshotForPage({ promptEffort: "high" }));
+
+    const promptEffort = screen.getByRole("button", { name: "Prompt effort: High" });
+
+    expect(promptEffort.textContent).toContain("High");
+    expect(promptEffort.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("changes_prompt_effort_from_composer", async () => {
+    const user = userEvent.setup();
+    const onPromptEffortChange = vi.fn();
+    renderInteractiveSnapshot(snapshotForPage({ promptEffort: "medium" }), { onPromptEffortChange });
+
+    await user.click(screen.getByRole("button", { name: "Prompt effort: Medium" }));
+    await user.click(screen.getByRole("option", { name: "Extra high" }));
+
+    expect(onPromptEffortChange).toHaveBeenCalledWith("xhigh");
+  });
+
+  it("opens_prompt_effort_dropdown_with_expanded_state", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(snapshotForPage({ promptEffort: "medium" }));
+
+    const promptEffort = screen.getByRole("button", { name: "Prompt effort: Medium" });
+    await user.click(promptEffort);
+
+    expect(promptEffort.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("listbox", { name: "Prompt effort options" })).not.toBeNull();
+    expect(screen.getByRole("option", { name: "Medium" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("supports_keyboard_selection_for_prompt_effort_dropdown", async () => {
+    const user = userEvent.setup();
+    const onPromptEffortChange = vi.fn();
+    renderInteractiveSnapshot(snapshotForPage({ promptEffort: "medium" }), { onPromptEffortChange });
+
+    await user.click(screen.getByRole("button", { name: "Prompt effort: Medium" }));
+    await user.keyboard("{ArrowDown}{Enter}");
+
+    expect(onPromptEffortChange).toHaveBeenCalledWith("high");
+  });
+
   it("renders_inline_send_dom_checkbox_on_for_full_dom_capture_mode", () => {
     renderInteractiveSnapshot(snapshotForPage({ captureMode: "full_dom" }));
 
@@ -2571,6 +2635,7 @@ describe("SidePanelView inline Include full page HTML option", () => {
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onSendModeChange={() => undefined}
+        onPromptEffortChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
@@ -2594,6 +2659,7 @@ describe("SidePanelView inline Include full page HTML option", () => {
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onSendModeChange={() => undefined}
+        onPromptEffortChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}
@@ -2615,6 +2681,7 @@ describe("SidePanelView inline Include full page HTML option", () => {
         onDraftPromptChange={() => undefined}
         onCaptureModeChange={() => undefined}
         onSendModeChange={() => undefined}
+        onPromptEffortChange={() => undefined}
         onNewChat={() => undefined}
         onRetryBridge={() => undefined}
         onOpenSettings={() => undefined}

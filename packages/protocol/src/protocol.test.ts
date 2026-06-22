@@ -210,6 +210,121 @@ describe("extension-to-bridge protocol validation", () => {
     ).toMatchObject({ ok: true });
   });
 
+  it("accepts_session_send_with_prompt_effort", () => {
+    for (const promptEffort of ["low", "medium", "high", "xhigh"]) {
+      expect(
+        parseExtensionToBridge({
+          type: "session.send",
+          version: 4,
+          clientSessionId: "page-1",
+          prompt: "What is this?",
+          promptEffort
+        })
+      ).toEqual({
+        ok: true,
+        value: {
+          type: "session.send",
+          version: 4,
+          clientSessionId: "page-1",
+          prompt: "What is this?",
+          promptEffort
+        }
+      });
+    }
+
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 4,
+        clientSessionId: "page-1",
+        prompt: "What is this?",
+        promptEffort: "high",
+        pageContext: {
+          kind: "metadata_only",
+          metadata: {
+            url: "https://example.com/article",
+            capturedAt: "2026-05-10T12:00:00.000Z"
+          },
+          reason: "no_usable_text"
+        }
+      })
+    ).toEqual({
+      ok: true,
+      value: {
+        type: "session.send",
+        version: 4,
+        clientSessionId: "page-1",
+        prompt: "What is this?",
+        promptEffort: "high",
+        pageContext: {
+          kind: "metadata_only",
+          metadata: {
+            url: "https://example.com/article",
+            capturedAt: "2026-05-10T12:00:00.000Z"
+          },
+          reason: "no_usable_text"
+        }
+      }
+    });
+  });
+
+  it("defaults_session_send_prompt_effort_when_omitted", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 4,
+        clientSessionId: "page-1",
+        prompt: "What is this?"
+      })
+    ).toEqual({
+      ok: true,
+      value: {
+        type: "session.send",
+        version: 4,
+        clientSessionId: "page-1",
+        prompt: "What is this?",
+        promptEffort: "medium"
+      }
+    });
+  });
+
+  it("rejects_session_send_with_unknown_prompt_effort", () => {
+    for (const promptEffort of ["minimal", "", " ", null, 1, true]) {
+      expect(
+        parseExtensionToBridge({
+          type: "session.send",
+          version: 4,
+          clientSessionId: "page-1",
+          prompt: "What is this?",
+          promptEffort
+        })
+      ).toEqual({ ok: false, error: "promptEffort is invalid" });
+    }
+  });
+
+  it("rejects_session_send_with_private_fields_but_allows_prompt_effort", () => {
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 4,
+        clientSessionId: "page-1",
+        prompt: "What is this?",
+        promptEffort: "high"
+      })
+    ).toMatchObject({ ok: true });
+
+    expect(
+      parseExtensionToBridge({
+        type: "session.send",
+        version: 4,
+        clientSessionId: "page-1",
+        prompt: "What is this?",
+        promptEffort: "high",
+        chainOfThought: "private"
+      })
+    ).toEqual({ ok: false, error: "Message has invalid fields" });
+  });
+
   it("rejects unknown commands and invalid payloads", () => {
     expect(parseExtensionToBridge({ type: "session.delete", version: 4 })).toEqual({
       ok: false,

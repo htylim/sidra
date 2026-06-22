@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
+  ChevronUp,
   Copy,
   FileText,
   Image,
@@ -19,6 +20,7 @@ export type IconName =
   | "alert"
   | "check"
   | "chevron-down"
+  | "chevron-up"
   | "copy"
   | "file-text"
   | "image"
@@ -35,6 +37,7 @@ export function SidraIcon(props: { name: IconName; className?: string }) {
     alert: AlertTriangle,
     check: Check,
     "chevron-down": ChevronDown,
+    "chevron-up": ChevronUp,
     copy: Copy,
     "file-text": FileText,
     image: Image,

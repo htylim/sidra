@@ -91,6 +91,7 @@ The side panel has:
 - Current page context card below the header.
 - Chat area showing quick actions when empty, or the transcript when active.
 - Prompt composer at the bottom.
+- Inline **Prompt effort** selector in the composer. Values are **Low**, **Medium**, **High**, and **Extra high**. The default is **Medium**.
 - Split send button with modes:
   - **Capture + Send**
   - **Send**
@@ -99,7 +100,7 @@ The side panel has:
 
 Settings live in a separate dedicated extension settings/options page, not inside the side panel. The gear icon opens that page.
 
-Settings include quick actions, prompt text size, and response text size. Prompt text size defaults to `15px`. Response text size defaults to `17px`. Settings changes apply live to the side panel via `chrome.storage.onChanged`.
+Settings include quick actions, prompt effort, prompt text size, and response text size. Prompt effort defaults to `medium`. Prompt text size defaults to `15px`. Response text size defaults to `17px`. Settings changes apply live to the side panel via `chrome.storage.onChanged`.
 
 Sidra side panel visibility is tab-scoped. Opening Sidra in one tab does not make Sidra visible in unrelated tabs. Navigating inside the same tab keeps that tab's Sidra visibility. This visibility state is browser tab state, not URL session state.
 
@@ -453,20 +454,22 @@ type PageContext =
 
 type PermissionDecision = "allow_once" | "allow_for_session" | "deny";
 
+type PromptEffort = "low" | "medium" | "high" | "xhigh";
+
 type ExtensionToBridge =
-  | { type: "session.start"; version: 2; clientSessionId: string; providerId: "codex" }
-  | { type: "session.send"; version: 2; clientSessionId: string; prompt: string; pageContext?: PageContext }
-  | { type: "session.cancel"; version: 2; clientSessionId: string }
-  | { type: "session.reset"; version: 2; clientSessionId: string }
-  | { type: "session.close"; version: 2; clientSessionId: string }
+  | { type: "session.start"; version: 4; clientSessionId: string; providerId: "codex" }
+  | { type: "session.send"; version: 4; clientSessionId: string; prompt: string; promptEffort?: PromptEffort; pageContext?: PageContext }
+  | { type: "session.cancel"; version: 4; clientSessionId: string }
+  | { type: "session.reset"; version: 4; clientSessionId: string }
+  | { type: "session.close"; version: 4; clientSessionId: string }
   | {
       type: "permission.respond";
-      version: 2;
+      version: 4;
       clientSessionId: string;
       requestId: string;
       decision: PermissionDecision;
     }
-  | { type: "heartbeat"; version: 2 };
+  | { type: "heartbeat"; version: 4 };
 ```
 
 Bridge to extension messages:
@@ -484,12 +487,12 @@ type PermissionRequest = {
 };
 
 type BridgeToExtension =
-  | { type: "session.started"; version: 2; clientSessionId: string; bridgeSessionId: string }
-  | { type: "agent.event"; version: 2; clientSessionId: string; event: AgentEvent }
-  | { type: "permission.request"; version: 2; clientSessionId: string; request: PermissionRequest }
-  | { type: "session.error"; version: 2; clientSessionId: string; message: string; code?: string }
-  | { type: "bridge.ready"; version: 2 }
-  | { type: "bridge.error"; version: 2; message: string; code?: string };
+  | { type: "session.started"; version: 4; clientSessionId: string; bridgeSessionId: string }
+  | { type: "agent.event"; version: 4; clientSessionId: string; event: AgentEvent }
+  | { type: "permission.request"; version: 4; clientSessionId: string; request: PermissionRequest }
+  | { type: "session.error"; version: 4; clientSessionId: string; message: string; code?: string }
+  | { type: "bridge.ready"; version: 4 }
+  | { type: "bridge.error"; version: 4; message: string; code?: string };
 ```
 
 The exact schemas should live in `packages/protocol`.

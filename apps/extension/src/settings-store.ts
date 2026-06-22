@@ -1,8 +1,9 @@
-import type { SpeechVoice } from "@sidra/protocol";
+import { DEFAULT_PROMPT_EFFORT, isPromptEffort, type PromptEffort, type SpeechVoice } from "@sidra/protocol";
 
 export type SidraSettings = {
   readableContentLimitCharacters: number;
   domContentLimitCharacters: number;
+  promptEffort: PromptEffort;
   accentColor: string;
   promptFontSizePx: number;
   responseFontSizePx: number;
@@ -190,6 +191,16 @@ export class SettingsStore {
     this.setSnapshot(nextSnapshot);
   }
 
+  async savePromptEffort(nextPromptEffort: PromptEffort): Promise<void> {
+    const currentSnapshot = this.getSnapshot();
+    const nextSnapshot = {
+      ...currentSnapshot,
+      promptEffort: isPromptEffort(nextPromptEffort) ? nextPromptEffort : currentSnapshot.promptEffort
+    };
+    await this.storage.set({ [SIDRA_SETTINGS_STORAGE_KEY]: cloneSettings(nextSnapshot) });
+    this.setSnapshot(nextSnapshot);
+  }
+
   async saveTranscriptSpeechSettings(nextTranscriptSpeech: TranscriptSpeechSettings): Promise<void> {
     const nextSnapshot = {
       ...this.getSnapshot(),
@@ -224,6 +235,7 @@ export class SettingsStore {
     if (
       nextSnapshot.readableContentLimitCharacters === this.snapshot.readableContentLimitCharacters &&
       nextSnapshot.domContentLimitCharacters === this.snapshot.domContentLimitCharacters &&
+      nextSnapshot.promptEffort === this.snapshot.promptEffort &&
       nextSnapshot.accentColor === this.snapshot.accentColor &&
       nextSnapshot.promptFontSizePx === this.snapshot.promptFontSizePx &&
       nextSnapshot.responseFontSizePx === this.snapshot.responseFontSizePx &&
@@ -262,6 +274,7 @@ function parseStoredSettings(value: unknown): SidraSettings {
 
   const readableContentLimitCharacters = value.readableContentLimitCharacters;
   const domContentLimitCharacters = value.domContentLimitCharacters;
+  const promptEffort = value.promptEffort;
   const accentColor = value.accentColor;
   const promptFontSizePx = value.promptFontSizePx;
   const responseFontSizePx = value.responseFontSizePx;
@@ -278,6 +291,7 @@ function parseStoredSettings(value: unknown): SidraSettings {
     domContentLimitCharacters: isValidDomContentLimit(domContentLimitCharacters)
       ? domContentLimitCharacters
       : defaults.domContentLimitCharacters,
+    promptEffort: isPromptEffort(promptEffort) ? promptEffort : defaults.promptEffort,
     accentColor: normalizeAccentColor(accentColor) ?? defaults.accentColor,
     promptFontSizePx: isValidTranscriptFontSize(promptFontSizePx)
       ? promptFontSizePx
@@ -294,6 +308,7 @@ function defaultSidraSettings(): SidraSettings {
   return {
     readableContentLimitCharacters: DEFAULT_READABLE_CONTENT_LIMIT_CHARACTERS,
     domContentLimitCharacters: DEFAULT_DOM_CONTENT_LIMIT_CHARACTERS,
+    promptEffort: DEFAULT_PROMPT_EFFORT,
     accentColor: DEFAULT_ACCENT_COLOR,
     promptFontSizePx: DEFAULT_PROMPT_FONT_SIZE_PX,
     responseFontSizePx: DEFAULT_RESPONSE_FONT_SIZE_PX,
@@ -306,6 +321,7 @@ function cloneSettings(settings: SidraSettings): SidraSettings {
   return {
     readableContentLimitCharacters: settings.readableContentLimitCharacters,
     domContentLimitCharacters: settings.domContentLimitCharacters,
+    promptEffort: settings.promptEffort,
     accentColor: settings.accentColor,
     promptFontSizePx: settings.promptFontSizePx,
     responseFontSizePx: settings.responseFontSizePx,

@@ -931,6 +931,7 @@ textarea:not(:disabled):focus-visible {
   padding: 6px 8px;
   background: #f6f8f7;
   color: #17201f;
+  cursor: pointer;
   font-size: 13px;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -1271,21 +1272,141 @@ textarea:not(:disabled):focus-visible {
 
 .composer-actions {
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
+  align-items: center;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 6px;
   min-width: 0;
+  width: 100%;
 }
 
 .send-split-button {
   position: relative;
   display: flex;
+  flex: 0 0 auto;
   min-width: 0;
+}
+
+.composer-effort-control {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-self: center;
+  min-width: 0;
+  min-height: 28px;
+  margin-left: auto;
+}
+
+.composer-effort-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 28px;
+  border: 0;
+  border-radius: 6px;
+  padding: 2px 4px;
+  background: transparent;
+  color: var(--sidra-accent-hover);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--sidra-accent) 42%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+
+.composer-effort-trigger span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.composer-effort-trigger:not(:disabled):hover {
+  background: var(--sidra-accent-soft);
+  color: var(--sidra-accent-hover);
+  text-decoration-color: currentColor;
+}
+
+.composer-effort-trigger:focus-visible {
+  outline: 3px solid var(--sidra-accent-focus);
+  outline-offset: 2px;
+}
+
+.composer-effort-trigger:disabled {
+  color: #8a9893;
+  text-decoration-color: #cfd9d5;
+}
+
+.composer-effort-chevron {
+  width: 14px;
+  height: 14px;
+}
+
+.composer-effort-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: min(144px, calc(100vw - 24px));
+  padding: 4px;
+  border: 1px solid #d8e2de;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow:
+    0 14px 34px rgb(23 32 31 / 0.16),
+    0 2px 8px rgb(23 32 31 / 0.08);
+  z-index: 3;
+}
+
+.composer-effort-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 34px;
+  justify-content: flex-start;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #17201f;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.composer-effort-option[aria-selected="true"] {
+  background: var(--sidra-accent-soft);
+  color: var(--sidra-accent-hover);
+  font-weight: 650;
+}
+
+.composer-effort-option:not(:disabled):hover,
+.composer-effort-option:focus-visible {
+  background: var(--sidra-accent-soft);
+  color: var(--sidra-accent-hover);
+  outline: none;
+}
+
+.composer-effort-option:not(:disabled):active {
+  box-shadow: none;
+}
+
+.composer-effort-check {
+  opacity: 0;
+  color: var(--sidra-accent);
+}
+
+.composer-effort-option[aria-selected="true"] .composer-effort-check {
+  opacity: 1;
 }
 
 .composer-dom-toggle {
   display: inline-flex;
   align-items: center;
   align-self: center;
+  flex: 0 0 auto;
   gap: 6px;
   min-width: 0;
   min-height: 28px;
@@ -1312,6 +1433,13 @@ textarea:not(:disabled):focus-visible {
   padding: 0 12px;
   overflow-wrap: anywhere;
   white-space: normal;
+}
+
+.composer-actions .send-button {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .send-button:not(:disabled):hover {
@@ -1341,6 +1469,12 @@ textarea:not(:disabled):focus-visible {
   border-bottom-left-radius: 0;
   border-left: 1px solid rgb(255 255 255 / 0.32);
   padding: 0 8px;
+}
+
+.composer-actions .send-mode-menu-button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 7px;
 }
 
 .send-mode-menu {
@@ -1672,7 +1806,7 @@ textarea[aria-invalid="true"]:not(:disabled):focus-visible {
 
   .options-nav {
     position: static;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
     padding: 0 0 6px;
   }
