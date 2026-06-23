@@ -1067,7 +1067,7 @@ describe("UrlSessionStore context state", () => {
 });
 
 describe("UrlSessionStore composer context attachments", () => {
-  it("appends_scopes_removes_and_clears_context_attachments_without_exposing_raw_payloads", () => {
+  it("appends_scopes_removes_and_clears_context_attachments_with_viewable_payloads", () => {
     const { store } = createStoreHarness({ clientSessionIds: ["client-a", "client-b"] });
     const rawText = "secret selected text ".repeat(20);
     const rawImageBase64 = pngBase64();
@@ -1076,13 +1076,20 @@ describe("UrlSessionStore composer context attachments", () => {
     expect(store.appendActiveContextAttachment(selectedTextAttachment({ id: "selected-1", text: rawText }))).toBe(true);
     expect(store.appendActiveContextAttachment(areaSnapshotAttachment({ id: "snapshot-1", dataBase64: rawImageBase64 }))).toBe(true);
 
-    const snapshotJson = JSON.stringify(store.getSnapshot().activeSession);
     expect(store.getSnapshot().activeSession.contextAttachments).toEqual([
-      expect.objectContaining({ id: "selected-1", source: "selected_text", preview: expect.any(String) }),
-      expect.objectContaining({ id: "snapshot-1", source: "area_snapshot", thumbnailDataUrl: "data:image/png;base64,thumbnail" })
+      expect.objectContaining({
+        id: "selected-1",
+        source: "selected_text",
+        preview: expect.any(String),
+        fullText: rawText
+      }),
+      expect.objectContaining({
+        id: "snapshot-1",
+        source: "area_snapshot",
+        thumbnailDataUrl: "data:image/png;base64,thumbnail",
+        imageDataUrl: `data:image/png;base64,${rawImageBase64}`
+      })
     ]);
-    expect(snapshotJson).not.toContain(rawText);
-    expect(snapshotJson).not.toContain(rawImageBase64);
 
     store.selectPage(pageIdentity("https://example.com/b"));
     expect(store.getSnapshot().activeSession.contextAttachments).toEqual([]);

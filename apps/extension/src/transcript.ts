@@ -1,4 +1,5 @@
 import type { PermissionDecision, PermissionRequest, SafeAgentActivity } from "@sidra/protocol";
+import type { ContextAttachmentDisplay } from "./context-attachment-display";
 
 export type SafeActivityEntry = SafeAgentActivity;
 
@@ -44,6 +45,7 @@ export type StatusEntry = {
   role: "status";
   tone: "neutral" | "error" | "cancelled";
   text: string;
+  contextAttachments?: ContextAttachmentDisplay[];
 };
 
 export type PermissionRequestStatus = "pending" | "unavailable";
@@ -70,17 +72,23 @@ type TranscriptEntryInput =
 
 let nextAssistantTurnId = 0;
 
-export type ContextAttachmentMarker =
-  | { kind: "page_context_attached"; text: "Page context attached" }
-  | { kind: "full_dom_attached"; text: "Full DOM attached" }
-  | { kind: "full_dom_too_large"; text: "Full DOM skipped; content too large" }
-  | { kind: "page_metadata_attached"; text: "Page metadata attached" }
-  | { kind: "page_metadata_content_too_large"; text: "Page metadata attached; content too large" }
-  | { kind: "selected_text_attached"; text: "Selected text attached" }
-  | { kind: "selected_text_too_large"; text: "Selected text skipped; content too large" }
-  | { kind: "area_snapshot_attached"; text: "Area snapshot attached" }
-  | { kind: "context_attachments_attached"; text: "Context attachments attached" }
-  | { kind: "page_capture_and_attachments_attached"; text: "Page capture and attachments attached" };
+type ContextAttachmentMarkerDetails = {
+  contextAttachments?: ContextAttachmentDisplay[];
+};
+
+export type ContextAttachmentMarker = ContextAttachmentMarkerDetails &
+  (
+    | { kind: "page_context_attached"; text: "Page context attached" }
+    | { kind: "full_dom_attached"; text: "Full DOM attached" }
+    | { kind: "full_dom_too_large"; text: "Full DOM skipped; content too large" }
+    | { kind: "page_metadata_attached"; text: "Page metadata attached" }
+    | { kind: "page_metadata_content_too_large"; text: "Page metadata attached; content too large" }
+    | { kind: "selected_text_attached"; text: "Selected text attached" }
+    | { kind: "selected_text_too_large"; text: "Selected text skipped; content too large" }
+    | { kind: "area_snapshot_attached"; text: "Area snapshot attached" }
+    | { kind: "context_attachments_attached"; text: "Context attachments attached" }
+    | { kind: "page_capture_and_attachments_attached"; text: "Page capture and attachments attached" }
+  );
 
 export function addUserPrompt(
   transcript: TranscriptEntry[],
@@ -137,9 +145,22 @@ export function failAssistantTurn(transcript: TranscriptEntry[]): TranscriptEntr
 export function addStatusEntry(
   transcript: TranscriptEntry[],
   text: string,
-  id?: string
+  id?: string,
+  contextAttachments?: ContextAttachmentDisplay[]
 ): TranscriptEntry[] {
-  return [...transcript, transcriptEntry({ kind: "status", role: "status", tone: "neutral", text }, id)];
+  return [
+    ...transcript,
+    transcriptEntry(
+      {
+        kind: "status",
+        role: "status",
+        tone: "neutral",
+        text,
+        ...(contextAttachments?.length ? { contextAttachments } : {})
+      },
+      id
+    )
+  ];
 }
 
 export function addErrorStatusEntry(
@@ -192,7 +213,7 @@ export function addContextMarker(
   marker: ContextAttachmentMarker,
   id: string
 ): TranscriptEntry[] {
-  return addStatusEntry(transcript, marker.text, id);
+  return addStatusEntry(transcript, marker.text, id, marker.contextAttachments);
 }
 
 export function removeTranscriptEntriesByIds(

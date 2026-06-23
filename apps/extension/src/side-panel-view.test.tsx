@@ -155,6 +155,7 @@ function textAttachmentSnapshot(
     pageTitle: "Example Article",
     url: "https://example.com/article",
     preview: "Pricing paragraph from Example article",
+    fullText: "Pricing paragraph from Example article with the full selected text.",
     capturedAt: "2026-05-10T12:00:00.000Z",
     ...overrides
   };
@@ -171,6 +172,7 @@ function snapshotAttachmentSnapshot(
     url: "https://example.com/article",
     preview: "Selected page area",
     thumbnailDataUrl: "data:image/png;base64,thumbnail",
+    imageDataUrl: "data:image/png;base64,fullimage",
     imageDimensions: { width: 612, height: 284 },
     capturedAt: "2026-05-10T12:00:00.000Z",
     ...overrides
@@ -555,7 +557,7 @@ describe("SidePanelView URL sessions", () => {
     );
 
     expect(screen.getByText("Ask anything about this page")).not.toBeNull();
-    expect(screen.getByText("Use the actions below or ask your own question.")).not.toBeNull();
+    expect(screen.getByText("Ask a question or summarize this page.")).not.toBeNull();
     expect(screen.getByRole("group", { name: "Quick actions" })).not.toBeNull();
   });
 
@@ -1202,6 +1204,34 @@ describe("SidePanelView Capture + Send", () => {
     expect(markup).toContain("Page context attached");
     expect(markup).toContain("summarize");
     expect(markup).not.toContain("Raw captured article text");
+  });
+
+  it("renders_sent_context_attachments_under_context_marker", async () => {
+    const user = userEvent.setup();
+    renderInteractiveSnapshot(
+      snapshotForPage({
+        transcript: [
+          {
+            kind: "status",
+            role: "status",
+            tone: "neutral",
+            text: "Page capture and attachments attached",
+            contextAttachments: [textAttachmentSnapshot(), snapshotAttachmentSnapshot()]
+          },
+          { kind: "user_message", role: "user", text: "who is in the photo?" }
+        ]
+      })
+    );
+
+    expect(screen.getByText("Page capture and attachments attached")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "View Selected text attachment" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "View Area snapshot attachment" })).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "View Area snapshot attachment" }));
+
+    expect(screen.getByRole("img", { name: "Area snapshot preview" }).getAttribute("src")).toBe(
+      "data:image/png;base64,fullimage"
+    );
   });
 
   it("keeps_ready_page_card_identity_only_after_context_send", () => {
@@ -2190,39 +2220,32 @@ describe("SidePanelView page selection attachments", () => {
   it("renders_select_page_context_toolbar_button_states", () => {
     renderInteractiveSnapshot(snapshotForPage());
 
-    const selectButton = screen.getByRole("button", { name: "Select page context", pressed: false });
-    expect(selectButton.getAttribute("title")).toBe("Select page context");
-    expect(selectButton.getAttribute("aria-expanded")).toBe("false");
-    expect(selectButton.getAttribute("aria-controls")).toBe("page-selection-mode-menu");
+    const selectTextButton = screen.getByRole("button", { name: "Select text", pressed: false });
+    const selectAreaButton = screen.getByRole("button", { name: "Select area", pressed: false });
+    expect(selectTextButton.getAttribute("title")).toBe("Select text");
+    expect(selectAreaButton.getAttribute("title")).toBe("Select area");
     expect(screen.getByRole("button", { name: "Settings" })).not.toBeNull();
-    expect(selectButton.compareDocumentPosition(screen.getByRole("button", { name: "Settings" }))).toBe(
+    expect(selectAreaButton.compareDocumentPosition(screen.getByRole("button", { name: "Settings" }))).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     );
   });
 
-  it("opens_page_selection_mode_controls_and_starts_text_selection", async () => {
+  it("starts_text_selection_from_the_toolbar", async () => {
     const user = userEvent.setup();
     const onStartPageSelection = vi.fn(() => true);
     renderInteractiveSnapshot(snapshotForPage(), { onStartPageSelection });
 
-    await user.click(screen.getByRole("button", { name: "Select page context" }));
-    const group = screen.getByRole("group", { name: "Page selection mode" });
-
-    expect(group.id).toBe("page-selection-mode-menu");
-    expect(screen.getByRole("button", { name: "Select page context" }).getAttribute("aria-expanded")).toBe("true");
-    expect(group).not.toBeNull();
-    await user.click(screen.getByRole("button", { name: "Text" }));
+    await user.click(screen.getByRole("button", { name: "Select text" }));
 
     expect(onStartPageSelection).toHaveBeenCalledWith("text");
   });
 
-  it("starts_snapshot_selection_from_mode_controls", async () => {
+  it("starts_snapshot_selection_from_the_toolbar", async () => {
     const user = userEvent.setup();
     const onStartPageSelection = vi.fn(() => true);
     renderInteractiveSnapshot(snapshotForPage(), { onStartPageSelection });
 
-    await user.click(screen.getByRole("button", { name: "Select page context" }));
-    await user.click(screen.getByRole("button", { name: "Snapshot" }));
+    await user.click(screen.getByRole("button", { name: "Select area" }));
 
     expect(onStartPageSelection).toHaveBeenCalledWith("snapshot");
   });
@@ -2235,8 +2258,10 @@ describe("SidePanelView page selection attachments", () => {
       { onCancelPageSelection }
     );
 
-    const selectButton = screen.getByRole("button", { name: "Select page context", pressed: true });
-    expect(screen.getByText("Selecting")).not.toBeNull();
+    const selectButton = screen.getByRole("button", { name: "Selecting text. Click to cancel.", pressed: true });
+    expect(screen.getByRole("button", { name: "Select area" })).toHaveProperty("disabled", true);
+    expect(screen.getByText("Selecting text")).not.toBeNull();
+    expect(screen.getByText("Select text on the page. Press Esc or click Selecting text to cancel.")).not.toBeNull();
 
     await user.click(selectButton);
 
@@ -2255,10 +2280,23 @@ describe("SidePanelView page selection attachments", () => {
       { onCancelPageSelection }
     );
 
-    const selectButton = screen.getByRole("button", { name: "Select page context", pressed: true });
+    const selectButton = screen.getByRole("button", { name: "Selecting area. Click to cancel.", pressed: true });
     expect(selectButton).toHaveProperty("disabled", false);
 
     await user.click(selectButton);
+
+    expect(onCancelPageSelection).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels_active_selection_with_escape", async () => {
+    const user = userEvent.setup();
+    const onCancelPageSelection = vi.fn(() => true);
+    renderInteractiveSnapshot(
+      snapshotForPage({ pageSelection: { status: "selecting", requestId: "selection-1", mode: "snapshot" } }),
+      { onCancelPageSelection }
+    );
+
+    await user.keyboard("{Escape}");
 
     expect(onCancelPageSelection).toHaveBeenCalledTimes(1);
   });
@@ -2290,13 +2328,15 @@ describe("SidePanelView page selection attachments", () => {
   it("disables_selection_toolbar_on_unsupported_pages", () => {
     renderInteractiveSnapshot(snapshotForUnsupportedPage());
 
-    expect(screen.getByRole("button", { name: "Select page context" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Select text" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Select area" })).toHaveProperty("disabled", true);
   });
 
   it("disables_selection_toolbar_while_the_active_session_is_busy", () => {
     renderInteractiveSnapshot(snapshotForPage({ turnInFlight: true, canCancelTurn: true }));
 
-    expect(screen.getByRole("button", { name: "Select page context" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Select text" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Select area" })).toHaveProperty("disabled", true);
   });
 
   it("renders_text_attachment_with_preview_and_remove", async () => {
@@ -2311,9 +2351,20 @@ describe("SidePanelView page selection attachments", () => {
 
     const tray = screen.getByRole("region", { name: "Context attachments" });
     expect(tray).not.toBeNull();
+    expect(tray.textContent).not.toContain("Context attachments");
+    expect(screen.getByText("Pricing paragraph from Example article with the full selected text.")).not.toBeNull();
     expect(screen.getByText("Selected text")).not.toBeNull();
-    expect(tray.querySelector(".attachment-source")?.textContent).toBe("Example Article");
-    expect(screen.getByText("Pricing paragraph from Example article")).not.toBeNull();
+    expect(tray.textContent).not.toContain("Example Article");
+
+    await user.click(screen.getByRole("button", { name: "View Selected text attachment" }));
+
+    expect(screen.getByRole("dialog", { name: "Selected text preview" })).not.toBeNull();
+    expect(screen.getAllByText("Pricing paragraph from Example article with the full selected text.")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Close" })).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(screen.queryByRole("dialog", { name: "Selected text preview" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Remove Selected text attachment" }));
 
@@ -2330,31 +2381,44 @@ describe("SidePanelView page selection attachments", () => {
       { onRemoveContextAttachment }
     );
 
-    expect(screen.getByText("Area snapshot")).not.toBeNull();
-    expect(screen.getByRole("region", { name: "Context attachments" }).querySelector(".attachment-source")?.textContent).toBe(
-      "Example Article"
+    const tray = screen.getByRole("region", { name: "Context attachments" });
+    expect(tray.textContent).not.toContain("Context attachments");
+    expect(tray.textContent).not.toContain("Area snapshot");
+    expect(tray.textContent).not.toContain("Example Article");
+    expect(screen.queryByText("Selected page area, 612 x 284")).toBeNull();
+    expect(screen.getByRole("img", { name: "Area snapshot thumbnail" }).getAttribute("src")).toBe(
+      "data:image/png;base64,fullimage"
     );
-    expect(screen.getByText("Selected page area, 612 x 284")).not.toBeNull();
-    expect(screen.getByRole("img", { name: "Area snapshot thumbnail" })).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "View Area snapshot attachment" }));
+
+    expect(screen.getByRole("dialog", { name: "Area snapshot preview" })).not.toBeNull();
+    expect(screen.getByRole("img", { name: "Area snapshot preview" }).getAttribute("src")).toBe(
+      "data:image/png;base64,fullimage"
+    );
 
     await user.click(screen.getByRole("button", { name: "Remove Area snapshot attachment" }));
 
     expect(onRemoveContextAttachment).toHaveBeenCalledWith("snapshot-1");
   });
 
-  it("renders_clear_all_for_multiple_attachments", async () => {
+  it("renders_multiple_attachment_chips_with_individual_remove_controls", async () => {
     const user = userEvent.setup();
-    const onClearContextAttachments = vi.fn(() => true);
+    const onRemoveContextAttachment = vi.fn(() => true);
     renderInteractiveSnapshot(
       snapshotForPage({
         contextAttachments: [textAttachmentSnapshot(), snapshotAttachmentSnapshot()]
       }),
-      { onClearContextAttachments }
+      { onRemoveContextAttachment }
     );
 
-    await user.click(screen.getByRole("button", { name: "Clear all" }));
+    expect(screen.queryByRole("button", { name: "Clear all" })).toBeNull();
 
-    expect(onClearContextAttachments).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Remove Selected text attachment" }));
+    await user.click(screen.getByRole("button", { name: "Remove Area snapshot attachment" }));
+
+    expect(onRemoveContextAttachment).toHaveBeenNthCalledWith(1, "selected-1");
+    expect(onRemoveContextAttachment).toHaveBeenNthCalledWith(2, "snapshot-1");
   });
 
   it("renders_too_large_text_attachment_as_warning_state", () => {
@@ -2365,13 +2429,14 @@ describe("SidePanelView page selection attachments", () => {
             id: "selected-too-large",
             label: "Selected text too large",
             tone: "warning",
+            fullText: undefined,
             preview: "Selection is too large to attach."
           })
         ]
       })
     );
 
-    expect(screen.getByText("Selected text too large").closest(".attachment-row")?.className).toContain("warning");
+    expect(screen.getByText("Selection is too large to attach.").closest(".attachment-chip-item")?.className).toContain("warning");
     expect(screen.getByText("Selection is too large to attach.")).not.toBeNull();
   });
 
@@ -2384,7 +2449,7 @@ describe("SidePanelView page selection attachments", () => {
     );
 
     expect(screen.getByRole("alert").textContent).toBe("The page changed before the snapshot was captured.");
-    expect(screen.getByText("Area snapshot")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "View Area snapshot attachment" })).not.toBeNull();
   });
 
   it.each([
@@ -2400,7 +2465,7 @@ describe("SidePanelView page selection attachments", () => {
     );
 
     expect(screen.getByRole("alert").textContent).toBe(message);
-    expect(screen.getByText("Selected text")).not.toBeNull();
+    expect(screen.getByText("Pricing paragraph from Example article with the full selected text.")).not.toBeNull();
   });
 
   it("updates_composer_hint_when_attachments_exist", () => {
@@ -2410,8 +2475,10 @@ describe("SidePanelView page selection attachments", () => {
       })
     );
 
-    expect(screen.getAllByText("Context attachments").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("2 attachments will be sent with the page capture.")).not.toBeNull();
+    expect(screen.queryByText("Context attachments")).toBeNull();
+    expect(screen.getByText("Page capture")).not.toBeNull();
+    expect(screen.queryByText("Ready to send")).toBeNull();
+    expect(screen.queryByText("Page capture + 2 attachments ready.")).toBeNull();
   });
 });
 
@@ -2559,7 +2626,7 @@ describe("SidePanelView inline Include full page HTML option", () => {
 
     const promptEffort = screen.getByRole("button", { name: "Prompt effort: High" });
 
-    expect(promptEffort.textContent).toContain("High");
+    expect(promptEffort.textContent).toContain("Effort: High");
     expect(promptEffort.getAttribute("aria-expanded")).toBe("false");
   });
 

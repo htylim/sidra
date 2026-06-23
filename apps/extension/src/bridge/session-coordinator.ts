@@ -2,6 +2,8 @@ import type {
   BridgeToExtension,
   ExtensionToBridge,
   PageContext,
+  PageContextBase,
+  PageContextBundleItem,
   PermissionDecision,
   PermissionRequest,
   PromptEffort,
@@ -33,6 +35,7 @@ import {
   type TranscriptEntry,
   type UserPromptDisplay
 } from "../transcript";
+import { pageContextImageDataUrl, type ContextAttachmentDisplay } from "../context-attachment-display";
 
 export type ProtocolTransportPostResult = { ok: true } | { ok: false; error: string };
 
@@ -786,20 +789,36 @@ export class BridgeSessionCoordinator {
 }
 
 let nextTranscriptEntryId = 0;
+const TRANSCRIPT_ATTACHMENT_PREVIEW_CHARACTER_LIMIT = 160;
 
 function markerForPageContext(pageContext: PageContext | undefined): ContextAttachmentMarker | undefined {
   if (!pageContext) return undefined;
   if (pageContext.kind === "selected_text") {
-    return { kind: "selected_text_attached", text: "Selected text attached" };
+    return {
+      kind: "selected_text_attached",
+      text: "Selected text attached",
+      contextAttachments: [displayForContext("selected-text", "Selected text", "selected_text", pageContext)]
+    };
   }
   if (pageContext.kind === "area_snapshot") {
-    return { kind: "area_snapshot_attached", text: "Area snapshot attached" };
+    return {
+      kind: "area_snapshot_attached",
+      text: "Area snapshot attached",
+      contextAttachments: [displayForContext("area-snapshot", "Area snapshot", "area_snapshot", pageContext)]
+    };
   }
   if (pageContext.kind === "context_bundle") {
     const includesPageCapture = pageContext.items.some((item) => item.source === "page_capture");
+    const contextAttachments = pageContext.items
+      .map(displayForContextBundleItem)
+      .filter((attachment): attachment is ContextAttachmentDisplay => Boolean(attachment));
     return includesPageCapture
-      ? { kind: "page_capture_and_attachments_attached", text: "Page capture and attachments attached" }
-      : { kind: "context_attachments_attached", text: "Context attachments attached" };
+      ? {
+          kind: "page_capture_and_attachments_attached",
+          text: "Page capture and attachments attached",
+          contextAttachments
+        }
+      : { kind: "context_attachments_attached", text: "Context attachments attached", contextAttachments };
   }
   if (pageContext.kind === "metadata_only") {
     if (pageContext.reason === "selection_too_large") {
@@ -820,6 +839,64 @@ function markerForPageContext(pageContext: PageContext | undefined): ContextAtta
     return { kind: "full_dom_attached", text: "Full DOM attached" };
   }
   return { kind: "page_context_attached", text: "Page context attached" };
+}
+
+function displayForContextBundleItem(item: PageContextBundleItem): ContextAttachmentDisplay | undefined {
+  if (item.source !== "selected_text" && item.source !== "area_snapshot") return undefined;
+  return displayForContext(item.id, item.label, item.source, item.context);
+}
+
+function displayForContext(
+  id: string,
+  label: string,
+  source: "selected_text" | "area_snapshot",
+  context: PageContextBase
+): ContextAttachmentDisplay {
+  if (source === "area_snapshot" && context.kind === "area_snapshot") {
+    const imageDataUrl = pageContextImageDataUrl(context.image);
+    return {
+      id,
+      source,
+      label,
+      pageTitle: context.metadata.title,
+      url: context.metadata.url,
+      preview: "Selected page area",
+      thumbnailDataUrl: imageDataUrl,
+      imageDataUrl,
+      imageDimensions: { width: context.image.width, height: context.image.height },
+      capturedAt: context.metadata.capturedAt
+    };
+  }
+
+  if (context.kind === "selected_text") {
+    return {
+      id,
+      source: "selected_text",
+      label,
+      pageTitle: context.metadata.title,
+      url: context.metadata.url,
+      preview: previewText(context.text),
+      fullText: context.text,
+      capturedAt: context.metadata.capturedAt
+    };
+  }
+
+  return {
+    id,
+    source: "selected_text",
+    label,
+    pageTitle: context.metadata.title,
+    url: context.metadata.url,
+    preview: "Selected text was too large to attach.",
+    tone: "warning",
+    capturedAt: context.metadata.capturedAt
+  };
+}
+
+function previewText(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= TRANSCRIPT_ATTACHMENT_PREVIEW_CHARACTER_LIMIT) return normalized;
+  return `${normalized.slice(0, TRANSCRIPT_ATTACHMENT_PREVIEW_CHARACTER_LIMIT - 3)}...`;
 }
 
 function appendCancelledStatus(transcript: TranscriptEntry[]): TranscriptEntry[] {

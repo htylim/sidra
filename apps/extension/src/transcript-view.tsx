@@ -1,6 +1,7 @@
 import { memo, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { PermissionDecision } from "@sidra/protocol";
 import { AssistantMarkdown } from "./assistant-markdown";
+import { ContextAttachmentList } from "./context-attachment-list";
 import { SidraIcon } from "./sidra-icon";
 import type { TranscriptSpeechSnapshot } from "./transcript-speech-controller";
 import type {
@@ -126,6 +127,7 @@ export function TranscriptView(props: {
           key={entry.id ?? `${entry.kind}-${index}`}
           speech={props.speech}
           copyStatusByEntryId={copyStatuses}
+          clipboard={clipboard}
           onRespondToPermission={props.onRespondToPermission}
           onCopyTranscriptText={(entryId, text) => void copyTranscriptText(entryId, text)}
           onToggleSpeechForTranscriptEntry={props.onToggleSpeechForTranscriptEntry}
@@ -163,6 +165,7 @@ function TranscriptEntryView(props: {
   entry: TranscriptEntry;
   speech: TranscriptSpeechSnapshot;
   copyStatusByEntryId: Record<string, TranscriptCopyStatus>;
+  clipboard: TranscriptClipboardGateway;
   onRespondToPermission(requestId: string, decision: PermissionDecision): void;
   onCopyTranscriptText(entryId: string, text: string): void;
   onToggleSpeechForTranscriptEntry(entryId: string, text: string): void;
@@ -192,7 +195,7 @@ function TranscriptEntryView(props: {
   if (props.entry.kind === "permission_request") {
     return <PermissionRequestCard entry={props.entry} onRespondToPermission={props.onRespondToPermission} />;
   }
-  return <StatusCard entry={props.entry} />;
+  return <StatusCard entry={props.entry} clipboard={props.clipboard} />;
 }
 
 const MemoizedTranscriptEntryView = memo(TranscriptEntryView);
@@ -501,11 +504,16 @@ function toolGroupTitle(tool: ToolActivityEntry, count: number): string {
   return count === 1 ? title : `${title} ${count} times`;
 }
 
-function StatusCard(props: { entry: StatusEntry }) {
+function StatusCard(props: { entry: StatusEntry; clipboard: TranscriptClipboardGateway }) {
   const role = props.entry.tone === "error" ? "alert" : "status";
+  const contextAttachments = props.entry.contextAttachments ?? [];
+  const hasAttachments = contextAttachments.length > 0;
   return (
-    <div className={`status-card ${props.entry.tone}`} role={role}>
-      {props.entry.text}
+    <div className={`status-card ${props.entry.tone}${hasAttachments ? " has-attachments" : ""}`} role={role}>
+      <span>{props.entry.text}</span>
+      {hasAttachments ? (
+        <ContextAttachmentList attachments={contextAttachments} clipboard={props.clipboard} readOnly />
+      ) : null}
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
   ScanText,
   Settings,
   Sparkles,
+  Trash2,
   X
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -30,6 +31,7 @@ export type IconName =
   | "scan-text"
   | "settings"
   | "sparkle"
+  | "trash"
   | "x";
 
 export function SidraIcon(props: { name: IconName; className?: string }) {
@@ -47,6 +49,7 @@ export function SidraIcon(props: { name: IconName; className?: string }) {
     "scan-text": ScanText,
     settings: Settings,
     sparkle: Sparkles,
+    trash: Trash2,
     x: X
   };
   const Icon = IconByName[props.name];

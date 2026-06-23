@@ -8,6 +8,7 @@ import {
   type ComposerAttachmentSnapshot,
   type ComposerContextAttachment
 } from "./capture-service";
+import { pageContextImageDataUrl } from "./context-attachment-display";
 import type { PageIdentity, PageKey } from "./page-key";
 import type { TranscriptEntry, UserPromptDisplay } from "./transcript";
 
@@ -577,9 +578,12 @@ function createEmptySessionSnapshot(): UrlSessionSnapshot {
 }
 
 function snapshotFromAttachment(attachment: ComposerContextAttachment): ComposerAttachmentSnapshot {
+  const context = attachment.pageContext;
   return {
     id: attachment.id,
-    ...attachment.display
+    ...attachment.display,
+    ...(context.kind === "selected_text" ? { fullText: context.text } : {}),
+    ...(context.kind === "area_snapshot" ? { imageDataUrl: pageContextImageDataUrl(context.image) } : {})
   };
 }
 

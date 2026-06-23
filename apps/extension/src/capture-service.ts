@@ -15,6 +15,7 @@ import {
 import { type ActivePageTab } from "./active-page";
 import type { CaptureMode } from "./capture-mode";
 import { captureCurrentDocumentSnapshot, type CapturedTabDocument } from "./capture-script";
+import type { ContextAttachmentDisplay } from "./context-attachment-display";
 import { normalizeFavIconUrl, resolvePageIdentity, type PageIdentity } from "./page-key";
 import type { PageSelectionCaptureResult } from "./page-selection-service";
 import { createDefaultSettingsSource, type SidraSettings } from "./settings-store";
@@ -79,9 +80,7 @@ export type ComposerContextAttachment = {
   };
 };
 
-export type ComposerAttachmentSnapshot = ComposerContextAttachment["display"] & {
-  id: string;
-};
+export type ComposerAttachmentSnapshot = ContextAttachmentDisplay;
 
 export type BuildComposerAttachmentResult =
   | { status: "attached"; attachment: ComposerContextAttachment }

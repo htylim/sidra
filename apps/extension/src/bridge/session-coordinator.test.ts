@@ -1526,7 +1526,18 @@ describe("BridgeSessionCoordinator page context", () => {
     transport.emitMessage(sessionStarted());
 
     expect(coordinator.getSnapshot().transcript).toEqual([
-      expect.objectContaining({ role: "status", text: "Selected text attached" }),
+      expect.objectContaining({
+        role: "status",
+        text: "Selected text attached",
+        contextAttachments: [
+          expect.objectContaining({
+            id: "selected-text",
+            source: "selected_text",
+            preview: "Secret selected text that should stay out.",
+            fullText: "Secret selected text that should stay out."
+          })
+        ]
+      }),
       expect.objectContaining({ role: "user", text: "summarize" }),
       expect.objectContaining({ role: "status", text: "Session started" })
     ]);
@@ -1545,7 +1556,18 @@ describe("BridgeSessionCoordinator page context", () => {
     transport.emitMessage(sessionStarted());
 
     expect(coordinator.getSnapshot().transcript).toEqual([
-      expect.objectContaining({ role: "status", text: "Area snapshot attached" }),
+      expect.objectContaining({
+        role: "status",
+        text: "Area snapshot attached",
+        contextAttachments: [
+          expect.objectContaining({
+            id: "area-snapshot",
+            source: "area_snapshot",
+            imageDataUrl: "data:image/png;base64,snapshot-image-base64",
+            imageDimensions: { width: 320, height: 84 }
+          })
+        ]
+      }),
       expect.objectContaining({ role: "user", text: "summarize" }),
       expect.objectContaining({ role: "status", text: "Session started" })
     ]);
@@ -1564,7 +1586,14 @@ describe("BridgeSessionCoordinator page context", () => {
     transport.emitMessage(sessionStarted());
 
     expect(coordinator.getSnapshot().transcript).toEqual([
-      expect.objectContaining({ role: "status", text: "Context attachments attached" }),
+      expect.objectContaining({
+        role: "status",
+        text: "Context attachments attached",
+        contextAttachments: [
+          expect.objectContaining({ id: "selected-1", source: "selected_text" }),
+          expect.objectContaining({ id: "snapshot-1", source: "area_snapshot" })
+        ]
+      }),
       expect.objectContaining({ role: "user", text: "summarize" }),
       expect.objectContaining({ role: "status", text: "Session started" })
     ]);
@@ -1580,7 +1609,14 @@ describe("BridgeSessionCoordinator page context", () => {
     transport.emitMessage(sessionStarted());
 
     expect(coordinator.getSnapshot().transcript).toEqual([
-      expect.objectContaining({ role: "status", text: "Page capture and attachments attached" }),
+      expect.objectContaining({
+        role: "status",
+        text: "Page capture and attachments attached",
+        contextAttachments: [
+          expect.objectContaining({ id: "selected-1", source: "selected_text" }),
+          expect.objectContaining({ id: "snapshot-1", source: "area_snapshot" })
+        ]
+      }),
       expect.objectContaining({ role: "user", text: "summarize" }),
       expect.objectContaining({ role: "status", text: "Session started" })
     ]);

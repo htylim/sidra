@@ -1,6 +1,7 @@
 import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
 import { PROMPT_EFFORT_VALUES, type PermissionDecision, type PromptEffort } from "@sidra/protocol";
 import type { CaptureMode } from "./capture-mode";
+import { ContextAttachmentList } from "./context-attachment-list";
 import { CurrentPageCard } from "./current-page-card";
 import type { PageSelectionMode } from "./page-selection-service";
 import { SidraIcon } from "./sidra-icon";
@@ -33,7 +34,6 @@ export function SidePanelView(props: {
   clipboard?: TranscriptClipboardGateway;
 }) {
   const [sendModeMenuOpen, setSendModeMenuOpen] = useState(false);
-  const [selectionMenuOpen, setSelectionMenuOpen] = useState(false);
   const [effortMenuOpen, setEffortMenuOpen] = useState(false);
   const [focusedPromptEffort, setFocusedPromptEffort] = useState<PromptEffort>(props.snapshot.display.promptEffort);
   const effortControlRef = useRef<HTMLDivElement>(null);
@@ -57,6 +57,12 @@ export function SidePanelView(props: {
   const sendMode = props.snapshot.activeSession.sendMode;
   const promptEffort = props.snapshot.display.promptEffort;
   const promptEffortLabelText = promptEffortLabel(promptEffort);
+  const promptEffortControlLabel = `Effort: ${promptEffortLabelText}`;
+  const activeSelectionMode = props.snapshot.pageSelection.status === "selecting" ? props.snapshot.pageSelection.mode : undefined;
+  const selectionGuidance =
+    props.snapshot.pageSelection.status === "selecting"
+      ? selectionGuidanceText(props.snapshot.pageSelection.mode)
+      : undefined;
   const promptEffortMenuId = "prompt-effort-menu";
   const sendActionLabel = sendMode === "capture" ? "Capture + Send" : "Send";
   const composerContextHint = getComposerContextHint(props.snapshot.activeSession);
@@ -67,12 +73,6 @@ export function SidePanelView(props: {
       setEffortMenuOpen(false);
     }
   }, [promptEntryDisabled]);
-
-  useEffect(() => {
-    if (selectionToolbarDisabled || selectionActive) {
-      setSelectionMenuOpen(false);
-    }
-  }, [selectionToolbarDisabled, selectionActive]);
 
   useEffect(() => {
     if (!effortMenuOpen) {
@@ -123,13 +123,18 @@ export function SidePanelView(props: {
         setSendModeMenuOpen(false);
         return;
       }
+      if (selectionActive) {
+        event.preventDefault();
+        props.onCancelPageSelection?.();
+        return;
+      }
       if (cancelDisabled) return;
       props.onCancelTurn();
     };
 
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [cancelDisabled, effortMenuOpen, props.onCancelTurn, sendModeMenuOpen]);
+  }, [cancelDisabled, effortMenuOpen, props.onCancelPageSelection, props.onCancelTurn, selectionActive, sendModeMenuOpen]);
 
   function submitPrompt() {
     if (promptEntryDisabled) return;
@@ -151,25 +156,29 @@ export function SidePanelView(props: {
   }
 
   function startPageSelection(mode: PageSelectionMode) {
-    setSelectionMenuOpen(false);
     void props.onStartPageSelection?.(mode);
   }
 
-  function toggleSelectionMenu() {
-    if (selectionToolbarDisabled) return;
-    if (selectionActive) {
+  function handleSelectionToolClick(mode: PageSelectionMode) {
+    if (activeSelectionMode === mode) {
       props.onCancelPageSelection?.();
       return;
     }
+    if (selectionButtonDisabled(mode)) return;
     setEffortMenuOpen(false);
-    setSelectionMenuOpen((open) => !open);
+    startPageSelection(mode);
+  }
+
+  function selectionButtonDisabled(mode: PageSelectionMode): boolean {
+    if (activeSelectionMode === mode) return false;
+    if (selectionActive) return true;
+    return selectionToolbarDisabled;
   }
 
   function openPromptEffortMenu(nextFocusedPromptEffort: PromptEffort = promptEffort) {
     if (promptEntryDisabled) return;
     setFocusedPromptEffort(nextFocusedPromptEffort);
     setSendModeMenuOpen(false);
-    setSelectionMenuOpen(false);
     setEffortMenuOpen(true);
   }
 
@@ -245,33 +254,31 @@ export function SidePanelView(props: {
       <header className="header">
         <div className="brand-mark">S</div>
         <h1>Sidra</h1>
-        <div className="selection-toolbar">
+        <div className="selection-toolbar" role="group" aria-label="Page attachment tools">
           <button
             type="button"
-            className={`toolbar-button selection-toolbar-button${selectionActive ? " active" : ""}`}
-            aria-label="Select page context"
-            aria-pressed={selectionActive}
-            aria-expanded={selectionMenuOpen}
-            aria-controls="page-selection-mode-menu"
-            title="Select page context"
-            disabled={selectionToolbarDisabled}
-            onClick={toggleSelectionMenu}
+            className={`toolbar-button selection-tool-button${activeSelectionMode === "text" ? " active" : ""}`}
+            aria-label={activeSelectionMode === "text" ? "Selecting text. Click to cancel." : "Select text"}
+            aria-pressed={activeSelectionMode === "text"}
+            title={activeSelectionMode === "text" ? "Cancel text selection" : "Select text"}
+            disabled={selectionButtonDisabled("text")}
+            onClick={() => handleSelectionToolClick("text")}
           >
-            <SidraIcon name="scan-text" />
-            {selectionActive ? <span>Selecting</span> : null}
+            <SidraIcon name="file-text" />
+            <span>{activeSelectionMode === "text" ? "Selecting text" : "Select text"}</span>
           </button>
-          {selectionMenuOpen ? (
-            <div className="selection-mode-menu" id="page-selection-mode-menu" role="group" aria-label="Page selection mode">
-              <button type="button" onClick={() => startPageSelection("text")}>
-                <SidraIcon name="file-text" />
-                <span>Text</span>
-              </button>
-              <button type="button" onClick={() => startPageSelection("snapshot")}>
-                <SidraIcon name="image" />
-                <span>Snapshot</span>
-              </button>
-            </div>
-          ) : null}
+          <button
+            type="button"
+            className={`toolbar-button selection-tool-button${activeSelectionMode === "snapshot" ? " active" : ""}`}
+            aria-label={activeSelectionMode === "snapshot" ? "Selecting area. Click to cancel." : "Select area"}
+            aria-pressed={activeSelectionMode === "snapshot"}
+            title={activeSelectionMode === "snapshot" ? "Cancel area selection" : "Select area"}
+            disabled={selectionButtonDisabled("snapshot")}
+            onClick={() => handleSelectionToolClick("snapshot")}
+          >
+            <SidraIcon name="image" />
+            <span>{activeSelectionMode === "snapshot" ? "Selecting area" : "Select area"}</span>
+          </button>
         </div>
         <button
           type="button"
@@ -303,7 +310,7 @@ export function SidePanelView(props: {
               <SidraIcon name="sparkle" />
             </div>
             <h2>Ask anything about this page</h2>
-            <p>Use the actions below or ask your own question.</p>
+            <p>Ask a question or summarize this page.</p>
             {props.snapshot.activeSession.quickActions.length > 0 ? (
               <div className="quick-action-grid" role="group" aria-label="Quick actions">
                 {props.snapshot.activeSession.quickActions.map((action) => (
@@ -339,27 +346,34 @@ export function SidePanelView(props: {
       </section>
 
       <footer className="composer">
-        <ComposerAttachmentTray
-          attachments={props.snapshot.activeSession.contextAttachments}
-          selectionState={props.snapshot.pageSelection}
-          onRemoveContextAttachment={props.onRemoveContextAttachment}
-          onClearContextAttachments={props.onClearContextAttachments}
-        />
-        <textarea
-          value={draftPrompt}
-          placeholder="Ask about this page"
-          disabled={promptEntryDisabled}
-          onChange={(event) => props.onDraftPromptChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              submitPrompt();
-            }
-          }}
-        />
+        <div className="composer-input-shell">
+          <ComposerAttachmentTray
+            attachments={props.snapshot.activeSession.contextAttachments}
+            selectionState={props.snapshot.pageSelection}
+            clipboard={props.clipboard}
+            onRemoveContextAttachment={props.onRemoveContextAttachment}
+          />
+          {selectionGuidance ? (
+            <div className="selection-guidance" role="status">
+              {selectionGuidance}
+            </div>
+          ) : null}
+          <textarea
+            value={draftPrompt}
+            placeholder="Ask about this page"
+            disabled={promptEntryDisabled}
+            onChange={(event) => props.onDraftPromptChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                submitPrompt();
+              }
+            }}
+          />
+        </div>
         <div className="composer-context-hint" role="note">
           <span>{composerContextHint.label}</span>
-          <span>{composerContextHint.detail}</span>
+          {composerContextHint.detail ? <span>{composerContextHint.detail}</span> : null}
         </div>
         <div className="composer-actions">
           <label className="composer-dom-toggle">
@@ -396,7 +410,7 @@ export function SidePanelView(props: {
               }}
               onKeyDown={handlePromptEffortTriggerKeyDown}
             >
-              <span>{promptEffortLabelText}</span>
+              <span>{promptEffortControlLabel}</span>
               <SidraIcon name={effortMenuOpen ? "chevron-up" : "chevron-down"} className="composer-effort-chevron" />
             </button>
             {effortMenuOpen && !promptEntryDisabled ? (
@@ -490,8 +504,8 @@ export function SidePanelView(props: {
 function ComposerAttachmentTray(props: {
   attachments: SidePanelSnapshot["activeSession"]["contextAttachments"];
   selectionState: SidePanelSnapshot["pageSelection"];
+  clipboard?: TranscriptClipboardGateway;
   onRemoveContextAttachment?: (attachmentId: string) => boolean;
-  onClearContextAttachments?: () => boolean;
 }) {
   const hasAttachments = props.attachments.length > 0;
   const hasSelectionError = props.selectionState.status === "failed";
@@ -500,51 +514,17 @@ function ComposerAttachmentTray(props: {
 
   return (
     <section className="composer-attachment-tray" aria-label="Context attachments">
-      <div className="attachment-tray-header">
-        <span>Context attachments</span>
-        {hasAttachments ? (
-          <button type="button" className="attachment-clear-button" onClick={() => props.onClearContextAttachments?.()}>
-            Clear all
-          </button>
-        ) : null}
-      </div>
       {hasSelectionError ? (
         <div className="selection-error" role="alert">
           {selectionErrorMessage}
         </div>
       ) : null}
       {hasAttachments ? (
-        <div className="attachment-list">
-          {props.attachments.map((attachment) => (
-            <div
-              className={`attachment-row${attachment.tone === "warning" ? " warning" : ""}`}
-              key={attachment.id}
-            >
-              <div className="attachment-icon">
-                {attachment.source === "area_snapshot" && attachment.thumbnailDataUrl ? (
-                  <img src={attachment.thumbnailDataUrl} alt="Area snapshot thumbnail" />
-                ) : (
-                  <SidraIcon name={attachment.source === "area_snapshot" ? "image" : "file-text"} />
-                )}
-              </div>
-              <div className="attachment-copy">
-                <div className="attachment-title-row">
-                  <span className="attachment-title">{attachment.label}</span>
-                  <span className="attachment-source">{attachmentSourceText(attachment)}</span>
-                </div>
-                <div className="attachment-preview">{attachmentPreviewText(attachment)}</div>
-              </div>
-              <button
-                type="button"
-                className="attachment-remove-button"
-                aria-label={`Remove ${attachment.label} attachment`}
-                onClick={() => props.onRemoveContextAttachment?.(attachment.id)}
-              >
-                <SidraIcon name="x" />
-              </button>
-            </div>
-          ))}
-        </div>
+        <ContextAttachmentList
+          attachments={props.attachments}
+          clipboard={props.clipboard}
+          onRemoveAttachment={props.onRemoveContextAttachment}
+        />
       ) : null}
     </section>
   );
@@ -561,6 +541,11 @@ function promptEffortLabel(promptEffort: PromptEffort): string {
     case "xhigh":
       return "Extra high";
   }
+}
+
+function selectionGuidanceText(mode: PageSelectionMode): string {
+  if (mode === "text") return "Select text on the page. Press Esc or click Selecting text to cancel.";
+  return "Drag over the page area. Press Esc or click Selecting area to cancel.";
 }
 
 function getAdjacentPromptEffort(promptEffort: PromptEffort, offset: number): PromptEffort {
@@ -592,15 +577,10 @@ function hasPendingPermissionRequest(sessionTranscript: SidePanelSnapshot["activ
   return sessionTranscript.some((entry) => entry.kind === "permission_request" && entry.status === "pending");
 }
 
-function getComposerContextHint(activeSession: SidePanelSnapshot["activeSession"]): { label: string; detail: string } {
+function getComposerContextHint(activeSession: SidePanelSnapshot["activeSession"]): { label: string; detail?: string } {
   if (activeSession.contextAttachments.length > 0) {
-    const count = activeSession.contextAttachments.length;
     return {
-      label: "Context attachments",
-      detail:
-        activeSession.sendMode === "capture"
-          ? `${count} ${count === 1 ? "attachment" : "attachments"} will be sent with the page capture.`
-          : `${count} ${count === 1 ? "attachment" : "attachments"} will be sent.`
+      label: activeSession.sendMode === "capture" ? "Page capture" : "Attachments only"
     };
   }
 
@@ -622,27 +602,6 @@ function getComposerContextHint(activeSession: SidePanelSnapshot["activeSession"
     label: activeSession.contextState.label,
     detail: "Capture + Send will include readable page text."
   };
-}
-
-function attachmentSourceText(
-  attachment: SidePanelSnapshot["activeSession"]["contextAttachments"][number]
-): string {
-  const pageTitle = attachment.pageTitle?.trim();
-  if (pageTitle) return pageTitle;
-  try {
-    return new URL(attachment.url).hostname;
-  } catch {
-    return attachment.url;
-  }
-}
-
-function attachmentPreviewText(
-  attachment: SidePanelSnapshot["activeSession"]["contextAttachments"][number]
-): string {
-  if (attachment.source === "area_snapshot" && attachment.imageDimensions) {
-    return `${attachment.preview}, ${attachment.imageDimensions.width} x ${attachment.imageDimensions.height}`;
-  }
-  return attachment.preview;
 }
 
 function getPageCardDisplay(snapshot: SidePanelSnapshot): { title: string; statusLabel?: string; favIconUrl?: string } {

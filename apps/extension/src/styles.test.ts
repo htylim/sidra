@@ -110,18 +110,34 @@ describe("extension UI interaction state CSS", () => {
   });
 
   it("keeps_attachment_rows_within_mobile_width", () => {
-    expectRule(".selection-toolbar-button.active", ["width: min(116px, 34vw)"]);
-    expectRule(".selection-toolbar-button span", ["overflow: hidden", "text-overflow: ellipsis", "white-space: nowrap"]);
-    expectRule(".composer-attachment-tray", ["display: grid", "min-width: 0"]);
-    expectRule(".attachment-row", ["grid-template-columns: 30px minmax(0, 1fr) 28px", "min-width: 0"]);
-    expectRule(".attachment-icon", ["width: 30px", "height: 30px", "overflow: hidden"]);
-    expectRule(".attachment-copy", ["min-width: 0"]);
-    expectRule(".attachment-title,\n.attachment-source,\n.attachment-preview", [
+    expectRule(".selection-toolbar", ["display: flex", "gap: 6px"]);
+    expectRule(".selection-tool-button", ["width: auto", "max-width: min(116px, 28vw)"]);
+    expectRule(".selection-tool-button.active", ["max-width: min(132px, 32vw)"]);
+    expectRule(".selection-tool-button span", ["overflow: hidden", "text-overflow: ellipsis", "white-space: nowrap"]);
+    expectRule(".composer-input-shell", ["display: grid", "min-width: 0", "border: 1px solid #cfd9d5"]);
+    expectRule(".composer-input-shell:focus-within", [
+      "border-color: var(--sidra-accent-border)",
+      "box-shadow: none"
+    ]);
+    expectRule(".composer textarea:not(:disabled):focus-visible", ["outline: 0", "box-shadow: none"]);
+    expectRule(".composer-attachment-tray", ["display: grid", "min-width: 0", "padding: 8px 8px 0"]);
+    expectRule(".attachment-chip-list", ["position: relative", "display: flex", "flex-wrap: wrap", "min-width: 0"]);
+    expectRule(".attachment-chip-item", ["position: relative", "max-width: min(260px, 100%)", "min-width: 0"]);
+    expectRule(".attachment-chip-button", ["grid-template-columns: 34px minmax(0, 1fr)", "min-width: 0"]);
+    expectRule(".attachment-chip-item.text-only .attachment-chip-button", ["grid-template-columns: minmax(0, 1fr)"]);
+    expectRule(".attachment-chip-item.image-only .attachment-chip-button", ["width: 42px", "height: 42px"]);
+    expectRule(".attachment-icon", ["width: 34px", "height: 34px", "overflow: hidden"]);
+    expectRule(".attachment-chip-copy", ["min-width: 0"]);
+    expectRule(".attachment-chip-title", [
       "overflow: hidden",
       "text-overflow: ellipsis",
       "white-space: nowrap"
     ]);
-    expectRule(".attachment-remove-button", ["width: 28px", "height: 28px"]);
+    expectRule(".attachment-preview-popover", ["position: absolute", "display: grid", "min-width: 0"]);
+    expectRule(".attachment-preview-close-button", ["min-height: 24px"]);
+    expectRule(".attachment-chip-remove-button", ["width: 18px", "height: 18px"]);
+    expectRule(".composer-effort-trigger", ["background: transparent", "white-space: nowrap"]);
+    expect(stylesheet).not.toContain("text-decoration: underline");
   });
 
   it("keeps_transcript_actions_quietly_discoverable_without_hover", () => {
@@ -192,7 +208,7 @@ describe("extension UI interaction state CSS", () => {
       "border: 1px solid var(--sidra-accent)",
       "background: var(--sidra-accent)"
     ]);
-    expectRule(".composer textarea:not(:disabled):hover", ["border-color: var(--sidra-accent-border)"]);
+    expectRule(".composer-input-shell:has(textarea:not(:disabled):hover)", ["border-color: #b8c8c4"]);
     expectRule(".send-mode-menu-item[aria-pressed=\"true\"]", [
       "background: var(--sidra-accent-soft)",
       "color: var(--sidra-accent-hover)"

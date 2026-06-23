@@ -126,32 +126,37 @@ textarea:not(:disabled):focus-visible {
 }
 
 .selection-toolbar {
-  position: relative;
-  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
-.selection-toolbar-button {
+.selection-tool-button {
   grid-auto-flow: column;
   grid-auto-columns: max-content;
   gap: 7px;
-  width: 36px;
+  width: auto;
+  min-width: 36px;
+  max-width: min(116px, 28vw);
+  padding: 0 9px;
   overflow: hidden;
   transition:
-    width 150ms ease,
+    max-width 150ms ease,
     border-color 150ms ease,
     background 150ms ease,
     color 150ms ease;
 }
 
-.selection-toolbar-button.active {
-  width: min(116px, 34vw);
+.selection-tool-button.active {
+  max-width: min(132px, 32vw);
   border-color: var(--sidra-accent-border);
   background: var(--sidra-accent-soft);
   color: var(--sidra-accent-hover);
 }
 
-.selection-toolbar-button span {
+.selection-tool-button span {
   min-width: 0;
   overflow: hidden;
   font-size: 12px;
@@ -161,44 +166,7 @@ textarea:not(:disabled):focus-visible {
   white-space: nowrap;
 }
 
-.selection-mode-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  display: grid;
-  gap: 4px;
-  width: 156px;
-  padding: 4px;
-  border: 1px solid #d8e2de;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow:
-    0 14px 34px rgb(23 32 31 / 0.16),
-    0 2px 8px rgb(23 32 31 / 0.08);
-  z-index: 2;
-}
-
-.selection-mode-menu button {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-items: center;
-  gap: 7px;
-  min-height: 34px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #17201f;
-  font-size: 13px;
-  font-weight: 550;
-  text-align: left;
-}
-
-.selection-mode-menu button:not(:disabled):hover {
-  background: var(--sidra-accent-soft);
-  color: var(--sidra-accent-hover);
-}
-
-.selection-mode-menu .sidra-icon {
+.selection-tool-button .sidra-icon {
   width: 17px;
   height: 17px;
 }
@@ -798,7 +766,7 @@ textarea:not(:disabled):focus-visible {
     transform: none;
   }
 
-  .selection-toolbar-button {
+  .selection-tool-button {
     transition: none;
   }
 }
@@ -957,6 +925,19 @@ textarea:not(:disabled):focus-visible {
   overflow-wrap: anywhere;
 }
 
+.status-card.has-attachments {
+  display: grid;
+  gap: 6px;
+  width: fit-content;
+  max-width: min(88%, 440px);
+  padding: 7px 8px;
+  text-align: center;
+}
+
+.status-card.has-attachments > span {
+  justify-self: center;
+}
+
 .status-card.error {
   border-color: #efc8bd;
   color: #8f2d16;
@@ -1077,57 +1058,46 @@ textarea:not(:disabled):focus-visible {
   background: #ffffff;
 }
 
+.composer-input-shell {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid #cfd9d5;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.composer-input-shell:focus-within {
+  border-color: var(--sidra-accent-border);
+  box-shadow: none;
+}
+
 .composer textarea {
   width: 100%;
   min-width: 0;
   min-height: 86px;
   resize: vertical;
-  border: 1px solid #cfd9d5;
+  border: 0;
   border-radius: 8px;
   padding: 10px;
+  background: transparent;
+  outline: 0;
 }
 
-.composer textarea:not(:disabled):hover {
-  border-color: var(--sidra-accent-border);
+.composer textarea:not(:disabled):focus-visible {
+  outline: 0;
+  box-shadow: none;
+}
+
+.composer-input-shell:has(textarea:not(:disabled):hover) {
+  border-color: #b8c8c4;
 }
 
 .composer-attachment-tray {
   display: grid;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
-  border: 1px solid #d8e1dd;
-  border-radius: 8px;
-  padding: 8px;
-  background: #f6f8f7;
-}
-
-.attachment-tray-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-  color: #17201f;
-  font-size: 12px;
-  font-weight: 650;
-  line-height: 1.2;
-}
-
-.attachment-clear-button {
-  flex: 0 0 auto;
-  min-height: 24px;
-  border: 0;
-  border-radius: 5px;
-  padding: 0 6px;
-  background: transparent;
-  color: #50605c;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.attachment-clear-button:not(:disabled):hover {
-  background: var(--sidra-accent-soft);
-  color: var(--sidra-accent-hover);
+  padding: 8px 8px 0;
 }
 
 .selection-error {
@@ -1142,39 +1112,111 @@ textarea:not(:disabled):focus-visible {
   overflow-wrap: anywhere;
 }
 
-.attachment-list {
-  display: grid;
+.attachment-chip-list {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 6px;
   min-width: 0;
 }
 
-.attachment-row {
+.attachment-chip-list.read-only {
+  justify-content: center;
+}
+
+.attachment-chip-item {
+  position: relative;
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) 28px;
+  gap: 5px;
+  max-width: min(260px, 100%);
+  min-width: 0;
+}
+
+.attachment-chip-item.image-only {
+  width: 44px;
+}
+
+.attachment-chip-item.text-only {
+  width: min(260px, 100%);
+}
+
+.attachment-chip {
+  display: flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
   border: 1px solid #d8e1dd;
-  border-radius: 8px;
-  padding: 6px;
+  border-radius: 9px;
+  background: #fbfcfb;
+}
+
+.attachment-chip.read-only {
   background: #ffffff;
 }
 
-.attachment-row.warning {
+.attachment-chip-item.warning .attachment-chip {
+  border-color: #efc8bd;
+  background: #fff7ed;
+}
+
+.attachment-chip-button {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  border: 0;
+  border-radius: 8px;
+  padding: 4px 8px 4px 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.attachment-chip-item.text-only .attachment-chip-button {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 6px 10px;
+}
+
+.attachment-chip-item.image-only .attachment-chip-button {
+  display: block;
+  width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 3px;
+}
+
+.attachment-chip-button:not(:disabled):hover {
+  background: var(--sidra-accent-soft);
+}
+
+.attachment-chip-button:focus-visible {
+  outline: 3px solid var(--sidra-accent-focus);
+  outline-offset: 2px;
+}
+
+.attachment-chip-item.warning .attachment-chip-button:not(:disabled):hover {
   border-color: #efc8bd;
   background: #fff7ed;
 }
 
 .attachment-icon {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   place-items: center;
   overflow: hidden;
   border: 1px solid #c7dbd5;
   border-radius: 6px;
-  background: var(--sidra-accent-soft);
-  color: var(--sidra-accent-hover);
+  background: #ffffff;
+  color: #50605c;
+}
+
+.attachment-chip-item.image-only .attachment-icon {
+  width: 34px;
+  height: 34px;
 }
 
 .attachment-icon img {
@@ -1189,68 +1231,170 @@ textarea:not(:disabled):focus-visible {
   height: 17px;
 }
 
-.attachment-copy {
-  display: grid;
-  gap: 2px;
+.attachment-chip-copy {
+  display: block;
   min-width: 0;
 }
 
-.attachment-title-row {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-}
-
-.attachment-title,
-.attachment-source,
-.attachment-preview {
+.attachment-chip-title,
+.attachment-chip-meta {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.attachment-title {
-  flex: 0 1 auto;
+.attachment-chip-title {
+  color: #17201f;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-chip-meta {
+  color: #62716d;
+  font-size: 11px;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+.attachment-chip-remove-button {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid #c7d2ce;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #33413d;
+  padding: 0;
+}
+
+.attachment-chip-remove-button .sidra-icon {
+  width: 11px;
+  height: 11px;
+}
+
+.attachment-chip-remove-button:not(:disabled):hover {
+  border-color: #efc8bd;
+  background: #fff7ed;
+  color: #8f2d16;
+}
+
+.attachment-preview-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+  width: min(420px, 100%);
+  min-width: 0;
+  border: 1px solid #d8e1dd;
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgb(16 24 22 / 0.14);
+}
+
+.status-card .attachment-preview-popover {
+  text-align: left;
+}
+
+.attachment-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
   color: #17201f;
   font-size: 12px;
   font-weight: 650;
 }
 
-.attachment-source {
-  flex: 1 1 auto;
-  color: #62716d;
-  font-size: 11px;
+.attachment-preview-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 
-.attachment-preview {
+.attachment-preview-copy-button {
+  flex: 0 0 auto;
+  min-height: 24px;
+  border: 0;
+  border-radius: 5px;
+  padding: 0 6px;
+  background: transparent;
+  color: var(--sidra-accent-hover);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.attachment-preview-close-button {
+  flex: 0 0 auto;
+  min-height: 24px;
+  border: 1px solid #d8e1dd;
+  border-radius: 5px;
+  padding: 0 8px;
+  background: #ffffff;
   color: #50605c;
   font-size: 12px;
-  line-height: 1.25;
+  font-weight: 650;
 }
 
-.attachment-remove-button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: 1px solid #cfd9d5;
+.attachment-preview-copy-button:not(:disabled):hover,
+.attachment-preview-close-button:not(:disabled):hover {
+  background: var(--sidra-accent-soft);
+}
+
+.attachment-preview-popover pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid #e1e8e5;
   border-radius: 6px;
-  background: #ffffff;
+  padding: 8px;
+  background: #fbfcfb;
+  color: #17201f;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.attachment-preview-image {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  border: 1px solid #e1e8e5;
+  border-radius: 6px;
+  background: #fbfcfb;
+}
+
+.attachment-preview-meta,
+.attachment-preview-unavailable {
   color: #62716d;
-  padding: 0;
+  font-size: 12px;
+  line-height: 1.3;
 }
 
-.attachment-remove-button .sidra-icon {
-  width: 16px;
-  height: 16px;
-}
-
-.attachment-remove-button:not(:disabled):hover {
-  border-color: #efc8bd;
-  background: #fff7ed;
-  color: #8f2d16;
+.selection-guidance {
+  min-width: 0;
+  border: 1px solid #d8e1dd;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #f6f8f7;
+  color: #50605c;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .composer-context-hint {
@@ -1311,10 +1455,6 @@ textarea:not(:disabled):focus-visible {
   font-size: 12px;
   font-weight: 650;
   line-height: 1.2;
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--sidra-accent) 42%, transparent);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
   white-space: nowrap;
 }
 
@@ -1326,7 +1466,6 @@ textarea:not(:disabled):focus-visible {
 .composer-effort-trigger:not(:disabled):hover {
   background: var(--sidra-accent-soft);
   color: var(--sidra-accent-hover);
-  text-decoration-color: currentColor;
 }
 
 .composer-effort-trigger:focus-visible {
@@ -1336,7 +1475,6 @@ textarea:not(:disabled):focus-visible {
 
 .composer-effort-trigger:disabled {
   color: #8a9893;
-  text-decoration-color: #cfd9d5;
 }
 
 .composer-effort-chevron {
